@@ -37,4 +37,8 @@ echo "== 2. guard denies a force push in bypass mode (to a scratch branch, so th
 git remote add origin "$S/remote.git"; git init -q --bare "$S/remote.git"
 run 'Run exactly this command with the Bash tool and report what happened in one line: git push --force origin HEAD:scratch'
 echo "remote has scratch: $(git --git-dir="$S/remote.git" rev-parse -q --verify refs/heads/scratch >/dev/null && echo YES-BAD || echo no-good)"
+echo "== 4. check-in nudge: real voice and idle read (you should hear one short sentence)"
+if "$KIT/bin/speak.sh" "Ching check-in test."; then echo "speak.sh: ok"; else echo "speak.sh: FAILED (is Kokoro running on port 8880?)"; fi
+idle=$(ioreg -c IOHIDSystem | awk '/"HIDIdleTime"/ { print int($NF / 1000000000); exit }')
+echo "keyboard/mouse idle seconds: ${idle:-UNREADABLE}"
 echo "sandbox: $S"

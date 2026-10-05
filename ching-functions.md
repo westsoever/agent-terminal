@@ -50,3 +50,15 @@ Whenever Ching runs the tests, it first runs them with no AI at all. The AI is o
 2. **Tests fail:** a small, cheap model (Haiku 4.5) tries to fix the problem.
 3. **Still failing:** a stronger model (Sonnet 5.5) takes over.
 4. **Still failing after that:** Ching stops and notifies you.
+
+## 5. Check-ins when a helper is waiting for you
+
+**The problem:** A helper finishes or gets stuck and waits for you, and you are looking at something else. Nothing tells you again.
+
+**What we add:**
+- **A banner** when a finished helper still has something open, such as a next step or a blocker.
+- **One spoken sentence**, about 5 to 10 minutes later, if the helper is still waiting. It only speaks when you are at the Mac, nobody else is speaking, and it is not quiet hours.
+- **Silence for busy helpers.** A helper that is still working never triggers a reminder, even if you have been away for hours.
+- **The same alert budget** as every other alert, so the check-ins cannot flood you.
+
+Later: a small panel in the notch that you hover over to see the updates.
