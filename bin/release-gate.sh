@@ -11,6 +11,9 @@
 # Checks, in order: clean tree, up to date with origin/<base>, evidence file parses clean for this exact
 # HEAD (including a "## not examined" section), review file for this HEAD (unless GOAL.md says
 # review: off), test_command passes. The model's own verdict is ignored.
+# Limit of the review check: the gate checks the FORM of the review file (commit, count against the
+# [blocking] bullets, resolved: lines, "## not examined", mtime), not who wrote it. The session itself can
+# write that file, so the user must watch the first real release in each repo.
 # Tokens are HMAC-signed with a per-machine secret so a file written by hand is rejected.
 # Env: AGENT_HOME  RELEASE_GATE_TIMEOUT (1800 s)  RELEASE_GATE_REMOTE (origin)
 set -euo pipefail
@@ -25,7 +28,7 @@ VSHA=""
 case "${1:-}" in
   --verify) MODE=verify; VSHA=${2:-} ;;
   --approve) MODE=approve ;;
-  -h|--help) sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
   '') ;;
   *) echo "release-gate: unknown argument $1" >&2; exit 64 ;;
 esac
@@ -115,9 +118,10 @@ bullets() { # file section -> bullet lines under "## section"
   ' "$1"
 }
 kv() { sed -n "s/^$2:[[:space:]]*//p" "$1" | head -1 | sed 's/[[:space:]]*$//'; }
-compact_section() { # file section -> the section's text without whitespace or HTML comments
+compact_section() { # file section -> the section's text without HTML comments (also multi-line) or whitespace
+  # Callers use `|| var=""`: if any stage fails (perl missing or broken) the section counts as empty and is rejected.
   awk -v n="$2" '{ low = tolower($0) } low ~ "^## *" n "[[:space:]]*$" { insec = 1; next } /^## / { insec = 0 } insec' "$1" \
-    | sed 's/<!--.*-->//g' | tr -d '[:space:]'
+    | perl -0777 -pe 's/<!--.*?-->//gs' | tr -d '[:space:]'
 }
 
 PROBLEMS=""
@@ -187,7 +191,7 @@ while IFS= read -r line; do
   esac
 done <<<"$NETWORK"
 
-ne=$(compact_section "$EVIDENCE" "not examined")
+ne=$(compact_section "$EVIDENCE" "not examined") || ne=""
 [ "${#ne}" -ge 10 ] || problem "## not examined needs at least 10 characters: what this verification did not check"
 
 [ -z "$PROBLEMS" ] || fail "evidence file .agent/verify/$HEAD_SHA.md rejected:$PROBLEMS"
@@ -201,7 +205,7 @@ else
   RP=""
   [ "$(kv "$REVIEW" commit)" = "$HEAD_SHA" ] || RP="$RP"$'\n'"  - commit: must be exactly $HEAD_SHA"
   if [ "$(file_mtime "$REVIEW")" -lt "$(git log -1 --format=%ct HEAD)" ]; then RP="$RP"$'\n'"  - the review is older than the commit; review again"; fi
-  rne=$(compact_section "$REVIEW" "not examined")
+  rne=$(compact_section "$REVIEW" "not examined") || rne=""
   [ "${#rne}" -ge 10 ] || RP="$RP"$'\n'"  - ## not examined needs at least 10 characters"
   nb=$(kv "$REVIEW" blocking)
   # more than 6 characters is never a real count; also keeps the numeric tests below from erroring

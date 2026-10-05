@@ -11,7 +11,7 @@ Items that need your decision are in section 7. Two things first:
   `guard.sh`: `mcp__plugin_telegram_telegram__reply` and `mcp__plugin_discord_discord__reply` are denied;
   `mcp__plugin_telegram_telegram__react` is allowed. Your settings enable the telegram and discord plugins, so a session
   can no longer answer you through those channels once the matcher is widened. This is the rule as designed (D18), but
-  decide before running `install.sh`.
+  decide before running `install.sh` (options in 7(c)).
 - `/tmp/ching-recursion-guard.patch` is NOT applied to the live hooks yet (`main` has no `CHING_ESCALATING` in `bin/`,
   main working tree is clean, `git apply --check` of the patch on main succeeds). See 7(a).
 
@@ -233,7 +233,7 @@ parse error is not identified.
 ### Task 5
 
 - A synthetic zero-usage "last message" (API error/interrupt record, unverified) could reset `ctx_level` from handoff to healthy and re-trigger a handoff notice.
-- `TOKEN_BUDGET_DAILY=08` (leading zero) is an octal arithmetic error that kills the script after the session loop and skips rotation; `=0` fires both alerts daily; a quoted or `export`-prefixed value in `ching.env` silently disables alerts.
+- `TOKEN_BUDGET_DAILY=08` (leading zero) is an octal arithmetic error ("value too great for base") but it does not kill the script: bash abandons the failed budget block and carries on, so rotation still runs and the script exits 0. What is lost is the alerts: the 80% and 100% token alerts never fire, and an error line lands in `watch.log` on every run (every 5 minutes). Reproduced in a scratch script under `/bin/bash` 3.2. A value such as `010` is read as octal 8, silently. `=0` fires both alerts daily; a quoted or `export`-prefixed value in `ching.env` silently disables alerts.
 - `t_watch` gaps: ended-session assertion is vacuous, fresh-lock survival, 80%/60% boundaries, tokens alert text, idle+stale transcript not stalled.
 - Lock takeover is not atomic; the trap is installed after the lock (a `mktemp` failure leaks the lock for 10 minutes).
 - `ctx_level` stays empty when no usage was seen (dash renders `?`).
@@ -256,9 +256,10 @@ parse error is not identified.
 
 ### Task 8
 
-- `templates/REVIEW.md` and `VERIFY.md` ship a 40+ char placeholder bullet under `## not examined`, so an untouched copy satisfies the 10-char check (put the placeholder in a one-line HTML comment); a multi-line HTML comment counts toward the 10 chars.
+- FIXED in the fix wave (FC2): `templates/REVIEW.md` and `VERIFY.md` shipped a 40+ char placeholder bullet under `## not examined`, so an untouched copy satisfied the 10-char check, and a multi-line HTML comment counted toward the 10 chars. The examples and placeholders are now one-line HTML comments and `compact_section` strips multi-line comments (a failed strip counts as empty); tests copy both templates untouched and expect a rejection.
+- The review check is a FORM check: the gate verifies commit, the count against the `[blocking]` bullets, `resolved:` lines, `## not examined` and mtime, not who wrote the file. The session itself can write `.agent/review/<sha>.md` (guard.sh does not protect it), so the "fresh reviewer" is a policy, not something the gate can prove. The spec says the first real release must be watched by you; see 7(f).
 - A future committer date makes every review "older" (fail-safe); `file_mtime` on GNU stat could be fail-open (macOS only).
-- Event assertions not scoped to the new repo; no `gate-pass-confirm` assertion; no tests for non-numeric `blocking`, evidence-failure before review-failure, `review: off ` with a trailing space, lens files free of skill_view/.hermes.
+- Event assertions not scoped to the new repo; no `gate-pass-confirm` assertion; no tests for non-numeric `blocking`, evidence-failure before review-failure, lens files free of skill_view/.hermes (the `review: off ` trailing-space test was added in FC2).
 - `review: off` passes are indistinguishable in events (add `review:"skipped"`); the code comment "only the user can write that" is true only because guard rule 11 now exists.
 - MIT notice carries the copyright but not the permission text (consider a THIRD_PARTY file); the error-resilience lens asks for a pipe table while the appended Output asks for bullets.
 - Other markup around the tag is still unrecognised (`> - [blocking]`, `__[blocking]__`, `- [ ] [blocking]`, `- **Blocking:** x`), covered in practice by the count cross-check; message grammar "only 1 [blocking] bullets"; `kv` takes the first `blocking:` line anywhere in the file.
@@ -275,14 +276,13 @@ parse error is not identified.
 
 - New-file decoy (`  review: required` then `review: off`; `head -1` after sort checks one line).
 - `seg_writes` glob `-[pnlasE0-9]*i*` misses `sed -ri` and `perl -wpi` (suggested `-[!-]*i*`); the `2>/dev/null` strip should move into `seg_writes` (settings.json reads with it are still denied).
-- Symlink alias to GOAL.md; `migrate_test_command`/`migrate_pending_cmd` not gated; inert `Review: off`/`review : off` (add a lock-in test); `is_tamper_path` has the same case-insensitivity weakness.
+- Symlink alias to GOAL.md; `migrate_test_command`/`migrate_pending_cmd` not gated; inert `Review: off`/`review : off` (the `Review: off` lock-in test was added in FC2 in `t_release`; `review : off` has none); `is_tamper_path` has the same case-insensitivity weakness.
 - Accepted false positives: `cp .agent/GOAL.md /tmp/x`, `cat GOAL.md > out`; python/node/awk writers, variable indirection and globs not caught (same class as hooks/settings).
 
 ### Task 11
 
 - `t_templates` needles are loose (`drafts`, `review:`): no check of rule numbers 8/9/11, `release_mode:`/`test_command:`, the six keys inside the block, or that `templates/review-lenses` and `REVIEW.md` exist.
-- Step 4 of the autonomy block says `templates/...` without "in the ching kit" (it is pasted into other repos) and hardcodes `origin/main` while the gate uses GOAL.md `base_branch`.
-- The autonomy text does not say that fixing a `[blocking]` finding creates a new HEAD, which invalidates the sha-named evidence and review files, so steps 3 and 4 must be redone.
+- FIXED in the fix wave (FC2): step 4 of the autonomy block said `templates/...` without "in the ching kit" and hardcoded `origin/main` while the gate uses GOAL.md `base_branch`; it now says "in the ching kit" and `origin/<base_branch>`. It also did not say that fixing a `[blocking]` finding creates a new HEAD, which invalidates the sha-named evidence and review files, so steps 3 and 4 must be redone; it does now. The Stop cap is worded "3 retries in a row (the count resets after a green run)", not "per session". `t_templates` has needles for all of it.
 
 ### Not done by design
 
@@ -306,13 +306,28 @@ checkpoint in repos with a GOAL.md (and logs events to `~/.agent/events.jsonl`);
 Discord replies, see the top of this file; rule 11 blocks edits to `review`/`release_mode`/`test_command` in GOAL.md from a session). The nudge plan on
 main edits `bin/ching-watch.sh`, `bin/notify.sh` and `tests/live-smoke.sh`, which this branch creates or changes, so implement the nudge after this merge.
 
-(c) Then run `./install.sh` yourself from the main checkout (it widens the guard matcher and loads the watcher plist with `launchctl bootstrap`;
-the dry-run above is what it will show). If you do not want the Telegram/Discord reply denial, decide first (for example narrow rule 10 or the matcher).
+(c) DECISION, before (d): Telegram/Discord replies. Rule 10 (D18) names both channels, so once `install.sh` widens the matcher a session can no longer
+answer you on Telegram or Discord (`reply` is denied; `react` is not). Options, recommendation first:
+1. Owner-chat allowlist: a file `~/.agent/defaults/owner-chats` listing chat ids; `reply` passes only for listed ids (about 10 lines in `guard.sh`; the file is a
+   protected path like the other defaults, so a session cannot edit it; an empty or missing list behaves as today, every reply denied).
+2. Reuse the channel plugin's own access list instead of a ching file (less to maintain, but ties the guard to a plugin's file format).
+3. Allow `reply` entirely (a session can then message anyone the plugin can reach, which weakens rule 10 to email and Slack).
+4. Drop Telegram and Discord from the matcher, so rule 10 covers email and Slack only (no guard on those channels at all).
+5. Return an `ask` decision for `reply` (unverified: it is not known that the channel forwards permission prompts to you, so a remote session could stall).
+Also record: with `done` routed to the inbox, a session you drive remotely sends nothing when it finishes unless `NOTIFY_PUSH_DONE=1` is set (the switch is
+added in the fix wave; it is not in the tree this report was verified on). `input`, `blocked` and `ready` still push.
 
-(d) Optionally set `TOKEN_BUDGET_DAILY` in `~/.agent/defaults/ching.env` as a plain number without a leading zero, quotes or `export`
+(d) Then run `./install.sh` yourself from the main checkout (it widens the guard matcher and loads the watcher plist with `launchctl bootstrap`;
+the dry-run above is what it will show). If you do not want the Telegram/Discord reply denial, decide (c) first.
+
+(e) Optionally set `TOKEN_BUDGET_DAILY` in `~/.agent/defaults/ching.env` as a plain number without a leading zero, quotes or `export`
 (see the Task 5 gaps).
 
-(e) Start the Phase 2 pilot.
+(f) Watch the first real release in each repo yourself. The release gate checks the FORM of the review file (commit, count against the `[blocking]` bullets,
+`resolved:` lines, `## not examined`, mtime), not who wrote it, and the session itself can write `.agent/review/<sha>.md`; the spec says the first real
+release is watched by you.
+
+(g) Start the Phase 2 pilot.
 
 Design notes for tuning (Phase 2.6):
 
@@ -320,6 +335,6 @@ Design notes for tuning (Phase 2.6):
   "context almost full" alert. Consider exempting `handoff` or capping `idle` separately.
 - `done` no longer pushes (stop-check finish and post-release) until you use `dash.sh --inbox`; the smoke run shows `routed-to-inbox` for every finish.
 - A session blocked for 15 hours or more ranks low in `--next` (it scores below a fresh working session); see the Task 7 gaps.
-- Fixing a `[blocking]` finding creates a new HEAD, which invalidates the sha-named evidence and review files; the review step must be redone.
+- Fixing a `[blocking]` finding creates a new HEAD, which invalidates the sha-named evidence and review files; the review step must be redone (now stated in the autonomy block, FC2).
 - The checkpoint gate asks once per prompt and accepts any `STATE.md` write (F7); judge from the event log (`stop_blocked` reason=checkpoint followed by
   `checkpoint`) whether to tighten it.

@@ -218,6 +218,39 @@ assert_contains "review without not-examined is rejected" "$(gate "$RV")" "not e
 mk_review "$RV" "$sha" 0 ""; touch -t 202001010000 "$RV/.agent/review/$sha.md"
 assert_contains "review older than the commit is rejected" "$(gate "$RV")" "older than the commit"
 rm "$RV/.agent/review/$sha.md"
+
+# placeholder text must not satisfy the "not examined" check (FC2-1)
+problem_count() { printf '%s\n' "$1" | grep -c '^  - ' || true; }
+reset_ev; mk_evidence "$RV"
+sed "s/^commit: .*/commit: $sha/" "$KIT/templates/REVIEW.md" >"$RV/.agent/review/$sha.md"
+out=$(gate "$RV")
+assert_contains "untouched REVIEW.md template (only commit: set): review rejected" "$out" "review file .agent/review/$sha.md rejected"
+assert_contains "untouched REVIEW.md template: not examined is empty" "$out" "## not examined needs at least 10 characters"
+assert_eq "untouched REVIEW.md template: not examined is the only problem" "1" "$(problem_count "$out")"
+reset_ev; mk_evidence "$RV"
+sed "s/^commit: .*/commit: $sha/; s#<full sha>#$sha#" "$KIT/templates/VERIFY.md" >"$RV/.agent/verify/$sha.md"
+out=$(gate "$RV")
+assert_contains "untouched VERIFY.md template (commit and screenshot only): evidence rejected" "$out" "evidence file .agent/verify/$sha.md rejected"
+assert_contains "untouched VERIFY.md template: not examined is empty" "$out" "## not examined needs at least 10 characters"
+assert_eq "untouched VERIFY.md template: not examined is the only problem" "1" "$(problem_count "$out")"
+reset_ev; EV_NOTEX=$'<!--\nnothing was checked\nat all here\n-->' mk_evidence "$RV"
+assert_contains "evidence: not examined holding only a 3-line comment is rejected" "$(gate "$RV")" "## not examined needs at least 10 characters"
+reset_ev; mk_evidence "$RV"; mk_review "$RV" "$sha" 0 "" $'<!--\nnothing was checked\nat all here\n-->'
+out=$(gate "$RV")
+assert_contains "review: not examined holding only a 3-line comment is rejected" "$out" "review file .agent/review/$sha.md rejected"
+assert_contains "review: the 3-line comment gives the not-examined reason" "$out" "## not examined needs at least 10 characters"
+reset_ev; EV_NOTEX=$'<!-- note for later\nspanning two lines -->\ndid not test the mobile layout' mk_evidence "$RV"
+assert_contains "evidence: a real sentence plus a multi-line comment is accepted" "$(gate "$RV")" "PASS"
+reset_ev; mk_evidence "$RV"; mk_review "$RV" "$sha" 0 "" $'<!--\nspanning lines\n-->\ndid not load-test the endpoint'
+assert_contains "review: a real sentence plus a multi-line comment is accepted" "$(gate "$RV")" "PASS"
+# if the comment-stripping step itself fails the section counts as empty: rejected, not an abort
+mkdir -p "$WORK/noperl"; printf '#!/bin/sh\nexit 2\n' >"$WORK/noperl/perl"; chmod +x "$WORK/noperl/perl"
+reset_ev; mk_evidence "$RV"
+out=$(cd "$RV" && PATH="$WORK/noperl:$PATH" "$GATE" 2>&1); rc=$?
+assert_eq "comment stripping fails: the gate rejects (exit 1)" "1" "$rc"
+assert_contains "comment stripping fails: not examined counts as empty" "$out" "## not examined needs at least 10 characters"
+rm "$RV/.agent/review/$sha.md"
+
 # Review Focus 3: only exactly "off" disables review
 for v in "Off" "no" "required" ""; do
   write_goal "$RV" "true" auto "review: $v"
@@ -227,6 +260,13 @@ write_goal "$RV" "true" auto "review: off"
 out=$(gate "$RV")
 assert_contains "review: off skips the review" "$out" "review skipped"
 assert_contains "review: off still passes the rest" "$out" "PASS"
+write_goal "$RV" "true" auto "review: off "
+assert_contains "review: off with a trailing space still skips the review" "$(gate "$RV")" "review skipped"
+write_goal "$RV" "true" auto "Review: off"
+out=$(gate "$RV")
+assert_contains "'Review: off' (capital R) does not disable the review" "$out" "no review file"
+assert_not_contains "'Review: off' (capital R): the review is not reported as skipped" "$out" "review skipped"
+write_goal "$RV" "true" auto "review: off"
 assert_contains "events: gate outcome logged" "$(jq -r 'select(.kind=="release" and .name=="revrepo") | .data.outcome' "$AGENT_HOME/events.jsonl")" "gate-pass-auto"
 assert_contains "events: gate failure logged" "$(jq -r 'select(.kind=="release" and .name=="revrepo") | .data.outcome' "$AGENT_HOME/events.jsonl")" "gate-fail"
 for l in error-resilience identity simulation; do
