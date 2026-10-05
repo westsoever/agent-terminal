@@ -15,9 +15,20 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 NOW=${WATCH_NOW:-$(date +%s)}
 STALL_SECS=$(( ${WATCH_STALL_MINS:-20} * 60 ))
 if [ -z "${TOKEN_BUDGET_DAILY:-}" ] && [ -f "$AGENT_HOME/defaults/ching.env" ]; then
-  TOKEN_BUDGET_DAILY=$(sed -n 's/^TOKEN_BUDGET_DAILY=//p' "$AGENT_HOME/defaults/ching.env" | head -1)
+  # `TOKEN_BUDGET_DAILY=N` or `export TOKEN_BUDGET_DAILY=N`, N optionally in single or double quotes
+  TOKEN_BUDGET_DAILY=$(sed -n '/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}TOKEN_BUDGET_DAILY=/{s/^[^=]*=[[:space:]]*//;s/[[:space:]]*$//;p;q;}' "$AGENT_HOME/defaults/ching.env")
+  case "$TOKEN_BUDGET_DAILY" in
+    \"*\") TOKEN_BUDGET_DAILY=${TOKEN_BUDGET_DAILY#\"}; TOKEN_BUDGET_DAILY=${TOKEN_BUDGET_DAILY%\"} ;;
+    \'*\') TOKEN_BUDGET_DAILY=${TOKEN_BUDGET_DAILY#\'}; TOKEN_BUDGET_DAILY=${TOKEN_BUDGET_DAILY%\'} ;;
+  esac
 fi
-case "${TOKEN_BUDGET_DAILY:-}" in *[!0-9]*) TOKEN_BUDGET_DAILY="" ;; esac
+# A usable budget is 1 to 9 digits and not zero; leading zeros are decimal ($((08)) would be an octal error).
+# Anything else (empty, 0, garbage, too long) means no budget: no alerts and no error output.
+case "${TOKEN_BUDGET_DAILY:-}" in
+  ''|*[!0-9]*) TOKEN_BUDGET_DAILY="" ;;
+  *) if [ "${#TOKEN_BUDGET_DAILY}" -le 9 ]; then TOKEN_BUDGET_DAILY=$((10#$TOKEN_BUDGET_DAILY)); else TOKEN_BUDGET_DAILY=""; fi
+     [ "$TOKEN_BUDGET_DAILY" != 0 ] || TOKEN_BUDGET_DAILY="" ;;
+esac
 DAY=$(date -u -r "$NOW" +%Y-%m-%d)
 mkdir -p "$AGENT_HOME/tokens"
 
@@ -28,6 +39,10 @@ if ! mkdir "$LOCK" 2>/dev/null; then
 fi
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/ching-watch.XXXXXX")
 trap 'rm -rf "$LOCK" "$TMP"' EXIT
+# Sessions whose meta file has not been written for 48 h are dead (ended ones pile up by the thousand).
+# They are skipped on the file's mtime alone, with the builtin -nt: no meta_get, so no fork, per file.
+REF="$TMP/ref48h"
+touch -t "$(date -r $((NOW - 172800)) +%Y%m%d%H%M.%S)" "$REF"
 
 wnotify() { NOTIFY_CWD="$CWD" NOTIFY_SESSION="$SID" NOTIFY_NOW="$NOW" "$SELF_DIR/notify.sh" "$1" "$2" </dev/null >/dev/null 2>&1 || true; }
 
@@ -40,6 +55,7 @@ tok_add() { # sid n -> add n to today's total for sid
 
 for m in "$AGENT_HOME"/sessions/*/meta; do
   [ -f "$m" ] || continue
+  [ "$m" -nt "$REF" ] || continue
   SESS_DIR=$(dirname "$m"); SID=$(basename "$SESS_DIR")
   state=$(meta_get "$m" state)
   [ "$state" != ended ] || continue
