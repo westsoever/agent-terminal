@@ -117,6 +117,19 @@ assert_eq "uninstall: empty events removed" "false" "$(printf '%s' "$S" | jq 'ha
 assert_no_file "uninstall removes the watcher plist" "$HOME/Library/LaunchAgents/org.ching.watch.plist"
 assert_contains "uninstall boots the watcher out (last launchctl call)" "$(tail -1 "$WORK/launchctl.log")" "bootout gui/"
 
+# a failed launchctl bootstrap must not leave a plist that makes the next run say "nothing to do"
+n=$(wc -l <"$WORK/launchctl.log")
+out=$(LAUNCHCTL_FAIL_BOOTSTRAP=1 inst --yes); rc=$?
+assert_eq "failed bootstrap: install exits non-zero" "nonzero" "$([ "$rc" -ne 0 ] && echo nonzero || echo "$rc")"
+assert_contains "failed bootstrap: says so and that the next run retries" "$out" "launchctl bootstrap failed"
+assert_no_file "failed bootstrap: plist removed" "$LA"
+assert_contains "failed bootstrap: bootstrap was attempted" "$(tail -n +$((n + 1)) "$WORK/launchctl.log")" "bootstrap gui/"
+n=$(wc -l <"$WORK/launchctl.log")
+out=$(inst --yes); assert_eq "retry after a failed bootstrap exits 0" "0" "$?"
+assert_file "retry after a failed bootstrap: plist installed" "$LA"
+assert_contains "retry after a failed bootstrap: bootstrap called again" "$(tail -n +$((n + 1)) "$WORK/launchctl.log")" "bootstrap gui/"
+assert_eq "failure flag was scoped to the one call" "" "${LAUNCHCTL_FAIL_BOOTSTRAP:-}"
+
 # a fresh machine: settings.json absent
 rm -rf "$D" "$WORK/fixture-agent-repos"; mkdir -p "$D"; rm -f "$SETTINGS_FILE"
 out=$(inst --yes); assert_eq "no settings.json yet: created" "0" "$?"

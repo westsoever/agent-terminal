@@ -28,6 +28,8 @@ mkdir -p "$AGENT_HOME" "$CLAUDE_DIR"
 cat >"$WORK/fake-launchctl" <<'EOS'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$(dirname "$0")/launchctl.log"
+# a test sets LAUNCHCTL_FAIL_BOOTSTRAP to make only the bootstrap subcommand fail
+if [ -n "${LAUNCHCTL_FAIL_BOOTSTRAP:-}" ] && [ "${1:-}" = bootstrap ]; then exit 5; fi
 EOS
 chmod +x "$WORK/fake-launchctl"
 export LAUNCHCTL="$WORK/fake-launchctl"

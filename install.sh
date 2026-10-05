@@ -219,9 +219,16 @@ if [ "$NEED_PLIST" -eq 1 ]; then
     rm -f "$PLIST"; act "removed $PLIST"
   else
     mkdir -p "$LAUNCH_AGENTS_DIR" "$AH"
-    printf '%s\n' "$PLIST_BODY" >"$PLIST.tmp" && mv "$PLIST.tmp" "$PLIST"
+    printf '%s\n' "$PLIST_BODY" >"$PLIST.tmp"
+    mv "$PLIST.tmp" "$PLIST"
     "$LAUNCHCTL" bootout "gui/$(id -u)/org.ching.watch" >/dev/null 2>&1 || true
-    "$LAUNCHCTL" bootstrap "gui/$(id -u)" "$PLIST"; act "loaded $PLIST (ching-watch every 5 minutes)"
+    if ! "$LAUNCHCTL" bootstrap "gui/$(id -u)" "$PLIST"; then
+      # launchd needs the plist at its final path, so remove it on failure: the next run sees it missing and retries
+      rm -f "$PLIST"
+      echo "install: launchctl bootstrap failed; removed $PLIST so the next run retries" >&2
+      exit 1
+    fi
+    act "loaded $PLIST (ching-watch every 5 minutes)"
   fi
 fi
 if [ "$UNINSTALL" -eq 1 ]; then say "note: --uninstall removes hook entries and the watcher; symlinks and a removed popup are left as they are."; fi
