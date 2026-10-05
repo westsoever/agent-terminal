@@ -5,6 +5,9 @@
 for f in "$KIT"/bin/*.sh "$KIT"/install.sh "$KIT"/tests/*.sh "$KIT"/templates/pre-push; do
   assert_ok "bash -n $(basename "$f")" bash -n "$f"
 done
+for f in "$KIT"/bin/*.pl; do
+  assert_ok "perl -c $(basename "$f")" perl -c "$f"
+done
 for f in "$KIT"/bin/*.sh "$KIT"/install.sh "$KIT"/templates/pre-push; do
   [ "$(basename "$f")" = lib.sh ] && continue
   head=$(sed -n 1,40p "$f")

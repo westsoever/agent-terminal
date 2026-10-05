@@ -355,4 +355,57 @@ gallow "rule 11: reading GOAL.md with stderr discarded" "$G11" "cat .agent/GOAL.
 gallow "rule 11: reading GOAL.md with stderr merged" "$G11" "cat .agent/GOAL.md 2>&1 | head -5"
 gallow "rule 11: reading the defaults GOAL.md with all output discarded" "$G11" "grep -q review $AGENT_HOME/defaults/GOAL.md >/dev/null 2>&1"
 gdeny "rule 11: a write still counts next to a discarded stream" "$G11" "echo 'release_mode: auto' 2>/dev/null >> .agent/GOAL.md"
+
+# fix round 1: the edit is simulated against the file, so a partial-line edit cannot flip a setting
+tdeny "rule 11: partial-line Edit confirm -> auto" Edit "$G11" "$(jq -n --arg f "$GF" '{file_path:$f,old_string:"confirm",new_string:"auto"}')"
+tdeny "rule 11: partial-line Edit 'mode: confirm' -> 'mode: auto'" Edit "$G11" "$(jq -n --arg f "$GF" '{file_path:$f,old_string:"mode: confirm",new_string:"mode: auto"}')"
+tdeny "rule 11: partial-line Edit 'bun test' -> true" Edit "$G11" "$(jq -n --arg f "$GF" '{file_path:$f,old_string:"bun test",new_string:"true"}')"
+tdeny "rule 11: partial-line MultiEdit confirm -> auto" MultiEdit "$G11" "$(jq -n --arg f "$GF" '{file_path:$f,edits:[{old_string:"# Goal",new_string:"# Goal\nShip it."},{old_string:"confirm",new_string:"auto"}]}')"
+tdeny "rule 11: partial-line edit that spans two lines" Edit "$G11" "$(jq -n --arg f "$GF" '{file_path:$f,old_string:"confirm\nbase_branch",new_string:"auto\nbase_branch"}')"
+R11=$(mk_repo r11); mkdir -p "$R11/.agent"; printf '# Goal\nWe confirm before we ship.\nrelease_mode: confirm\n' >"$R11/.agent/GOAL.md"
+tdeny "rule 11: replace_all flips every occurrence, including the setting" Edit "$R11" "$(jq -n --arg f "$R11/.agent/GOAL.md" '{file_path:$f,old_string:"confirm",new_string:"auto",replace_all:true}')"
+tallow "rule 11: without replace_all only the first (prose) occurrence changes" Edit "$R11" "$(jq -n --arg f "$R11/.agent/GOAL.md" '{file_path:$f,old_string:"confirm",new_string:"auto"}')"
+tallow "rule 11: Edit of prose near a setting" Edit "$G11" "$(jq -n --arg f "$GF" '{file_path:$f,old_string:"base_branch",new_string:"base"}')"
+tallow "rule 11: Edit whose old_string is not in the file" Edit "$G11" "$(jq -n --arg f "$GF" '{file_path:$f,old_string:"no such text",new_string:"still prose"}')"
+tallow "rule 11: MultiEdit that edits only prose (partial lines)" MultiEdit "$G11" "$(jq -n --arg f "$GF" '{file_path:$f,edits:[{old_string:"# Goal",new_string:"# Objective"},{old_string:"main",new_string:"trunk"}]}')"
+tallow "rule 11: Edit that moves a setting line without changing it" Edit "$G11" "$(jq -n --arg f "$GF" '{file_path:$f,old_string:"release_mode: confirm\nbase_branch: main",new_string:"base_branch: main\nrelease_mode: confirm"}')"
+E11=$(mk_repo e11)
+tallow "rule 11: Edit that creates a new GOAL.md with safe settings" Edit "$E11" "$(jq -n --arg f "$E11/.agent/GOAL.md" '{file_path:$f,old_string:"",new_string:"# Goal\nreview: required\nrelease_mode: confirm\n"}')"
+tdeny "rule 11: Edit that creates a new GOAL.md with review: off" Edit "$E11" "$(jq -n --arg f "$E11/.agent/GOAL.md" '{file_path:$f,old_string:"",new_string:"# Goal\nreview: off\n"}')"
+# fail closed: a file that is too large, unreadable, or a simulation that errors is a deny, never an allow
+B11=$(mk_repo b11); write_goal "$B11" "bun test" confirm
+head -c 300000 /dev/zero | tr '\0' 'a' >>"$B11/.agent/GOAL.md"
+tdeny "rule 11: a GOAL.md over 256 KiB cannot be checked, so a prose Edit is denied" Edit "$B11" "$(jq -n --arg f "$B11/.agent/GOAL.md" '{file_path:$f,old_string:"# Goal",new_string:"# Goal\nShip it."}')"
+U11=$(mk_repo u11); write_goal "$U11" "bun test" confirm; chmod 000 "$U11/.agent/GOAL.md"
+tdeny "rule 11: an unreadable GOAL.md is denied" Edit "$U11" "$(jq -n --arg f "$U11/.agent/GOAL.md" '{file_path:$f,old_string:"# Goal",new_string:"# Goal\nShip it."}')"
+chmod 600 "$U11/.agent/GOAL.md"
+mkdir -p "$WORK/perlfail"; printf '#!/bin/sh\nexit 1\n' >"$WORK/perlfail/perl"; chmod +x "$WORK/perlfail/perl"
+out=$(printf '%s' "$(guard_json Edit "$G11" "$(jq -n --arg f "$GF" '{file_path:$f,old_string:"# Goal",new_string:"# Goal\nShip it."}')")" | PATH="$WORK/perlfail:$PATH" "$BIN/guard.sh" 2>&1)
+if is_deny "$out"; then pass "deny: rule 11: a failing simulation fails closed"; else fail "deny: rule 11: a failing simulation fails closed" "  guard said: ${out:-<allowed>}"; fi
+
+# fix round 1: redirect operators and name= prefixes attached to the path
+gdeny "rule 11: attached >> redirect" "$G11" "echo x >>.agent/GOAL.md"
+gdeny "rule 11: attached > redirect" "$G11" "echo x >.agent/GOAL.md"
+gdeny "rule 11: attached 2> redirect" "$G11" "echo x 2>.agent/GOAL.md"
+gdeny "rule 11: attached &> redirect" "$G11" "echo x &>.agent/GOAL.md"
+gdeny "rule 11: attached >& redirect" "$G11" "echo x >&.agent/GOAL.md"
+gdeny "rule 11: spaced >& redirect" "$G11" "echo x >& .agent/GOAL.md"
+gdeny "rule 11: attached >> into the defaults GOAL.md" "$G11" "echo x >>$AGENT_HOME/defaults/GOAL.md"
+gdeny "rule 11: dd of=" "$G11" "dd if=/tmp/x of=.agent/GOAL.md"
+gallow "rule 11: plain read still allowed" "$G11" "cat .agent/GOAL.md"
+gallow "rule 11: 2>/dev/null read still allowed" "$G11" "cat .agent/GOAL.md 2>/dev/null"
+gallow "rule 11: 2>&1 read still allowed" "$G11" "cat .agent/GOAL.md 2>&1 | head -5"
+
+# fix round 1: macOS is case-insensitive, so .agent/goal.md and .AGENT/GOAL.md are the same file
+tdeny "rule 11: Edit on .agent/goal.md" Edit "$G11" "$(jq -n --arg f "$G11/.agent/goal.md" '{file_path:$f,old_string:"release_mode: confirm",new_string:"release_mode: auto"}')"
+tdeny "rule 11: Edit on .AGENT/GOAL.md" Edit "$G11" "$(jq -n --arg f "$G11/.AGENT/GOAL.md" '{file_path:$f,old_string:"release_mode: confirm",new_string:"release_mode: auto"}')"
+tdeny "rule 11: Edit on the defaults goal.md in lower case" Edit "$G11" "$(jq -n --arg f "$AGENT_HOME/defaults/goal.md" '{file_path:$f,old_string:"x",new_string:"review: off"}')"
+K11=$(mk_repo k11); mkdir -p "$K11/.agent"; printf '# Goal\ntest_command: bun test\nrelease_mode: confirm\n' >"$K11/.agent/Goal.md"
+tdeny "rule 11: Write over an existing .agent/Goal.md that changes a setting" Write "$K11" "$(jq -n --arg f "$K11/.agent/Goal.md" '{file_path:$f,content:"# Goal\ntest_command: true\nrelease_mode: confirm\n"}')"
+tallow "rule 11: Write over an existing .agent/Goal.md that keeps its settings" Write "$K11" "$(jq -n --arg f "$K11/.agent/Goal.md" '{file_path:$f,content:"# Goal\ntest_command: bun test\nrelease_mode: confirm\nMore prose.\n"}')"
+gdeny "rule 11: redirect into .agent/goal.md" "$G11" "echo x >> .agent/goal.md"
+gdeny "rule 11: redirect into .AGENT/GOAL.md" "$G11" "echo x >> .AGENT/GOAL.md"
+gdeny "rule 11: attached redirect into .agent/Goal.md" "$G11" "echo x >.agent/Goal.md"
+gdeny "rule 11: sed -i on .agent/goal.md" "$G11" "sed -i '' 's/confirm/auto/' .agent/goal.md"
+gallow "rule 11: reading .agent/goal.md" "$G11" "cat .agent/goal.md"
 exit 0

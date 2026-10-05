@@ -516,8 +516,10 @@ is_tamper_path() {
 }
 
 # ---------- rule 11: gate settings in GOAL.md ----------
-is_goal_path() {
-  case "$1" in */.agent/GOAL.md|*/defaults/GOAL.md) return 0 ;; esac   # */defaults/ also covers AGENT_HOME overrides
+is_goal_path() { # macOS volumes are case-insensitive by default, so .agent/goal.md is the same file: match on the lower-cased path
+  local l
+  l=$(printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z')
+  case "$l" in */.agent/goal.md|*/defaults/goal.md) return 0 ;; esac   # */defaults/ also covers AGENT_HOME overrides
   return 1
 }
 gated_lines() { grep -E '^[[:space:]]*(review|release_mode|test_command):' | sed 's/[[:space:]]*$//' | sort || true; }
@@ -529,43 +531,68 @@ goal_seg_writes() { # seg_writes, except that discarding or merging a stream (2>
   SEG_RAW=$keep
   return "$rc"
 }
+check_new_goal() { # $1 = the gated lines of a GOAL.md that does not exist yet
+  local rv relm
+  rv=$(printf '%s\n' "$1" | sed -n 's/^[[:space:]]*review:[[:space:]]*//p' | head -1)
+  relm=$(printf '%s\n' "$1" | sed -n 's/^[[:space:]]*release_mode:[[:space:]]*//p' | head -1)
+  if { [ -n "$rv" ] && [ "$rv" != required ]; } || { [ -n "$relm" ] && [ "$relm" != confirm ]; }; then
+    emit_deny "rule 11: a new GOAL.md may only start with review: required and release_mode: confirm. The user switches them."
+  fi
+}
 check_goal_write() { # $1 = absolute path of a GOAL.md being written by Edit/MultiEdit/Write
-  local old new rv relm
+  local old new before after size
   case "$TOOL" in
-    Edit)
-      old=$(jq -r '.tool_input.old_string // ""' <<<"$INPUT" | gated_lines)
-      new=$(jq -r '.tool_input.new_string // ""' <<<"$INPUT" | gated_lines)
-      [ "$old" = "$new" ] || deny_goal ;;
-    MultiEdit)
-      old=$(jq -r '[.tool_input.edits[]?.old_string // ""] | join("\n")' <<<"$INPUT" | gated_lines)
-      new=$(jq -r '[.tool_input.edits[]?.new_string // ""] | join("\n")' <<<"$INPUT" | gated_lines)
-      [ "$old" = "$new" ] || deny_goal ;;
+    Edit|MultiEdit)
+      if [ "$TOOL" = Edit ]; then
+        old=$(jq -r '.tool_input.old_string // ""' <<<"$INPUT" | gated_lines)
+        new=$(jq -r '.tool_input.new_string // ""' <<<"$INPUT")
+      else
+        old=$(jq -r '[.tool_input.edits[]?.old_string // ""] | join("\n")' <<<"$INPUT" | gated_lines)
+        new=$(jq -r '[.tool_input.edits[]?.new_string // ""] | join("\n")' <<<"$INPUT")
+      fi
+      if [ ! -f "$1" ]; then   # nothing on disk to edit: an edit can only create the file (empty old_string)
+        new=$(printf '%s\n' "$new" | gated_lines)
+        check_new_goal "$new"
+        return 0
+      fi
+      new=$(printf '%s\n' "$new" | gated_lines)
+      [ "$old" = "$new" ] || deny_goal   # cheap first pass: the edit text itself names a changed setting
+      # second pass: a partial-line edit ("confirm" -> "auto") names no setting, so apply the edit(s) to the
+      # file as it is on disk and compare its gated lines before and after. Anything we cannot check is a deny.
+      size=$(wc -c <"$1" | tr -d ' ') || deny_goal
+      [ "$size" -le 262144 ] || deny_goal
+      before=$(gated_lines <"$1") || deny_goal
+      after=$(printf '%s' "$INPUT" | perl "$SELF_DIR/goal-sim-edit.pl" "$TOOL" "$1" | gated_lines) || deny_goal
+      [ "$before" = "$after" ] || deny_goal ;;
     Write)
       new=$(jq -r '.tool_input.content // ""' <<<"$INPUT" | gated_lines)
       if [ -f "$1" ]; then
         old=$(gated_lines <"$1")
         [ "$old" = "$new" ] || deny_goal
       else
-        rv=$(printf '%s\n' "$new" | sed -n 's/^[[:space:]]*review:[[:space:]]*//p' | head -1)
-        relm=$(printf '%s\n' "$new" | sed -n 's/^[[:space:]]*release_mode:[[:space:]]*//p' | head -1)
-        if { [ -n "$rv" ] && [ "$rv" != required ]; } || { [ -n "$relm" ] && [ "$relm" != confirm ]; }; then
-          emit_deny "rule 11: a new GOAL.md may only start with review: required and release_mode: confirm. The user switches them."
-        fi
+        check_new_goal "$new"
       fi ;;
   esac
 }
 
 tamper_bash() {
-  local k=0 t abs
+  local k=0 t abs u gabs
   while [ "$k" -lt "$NT" ]; do
     t=${TOKS[$k]}
     case "$t" in -*) k=$((k + 1)); continue ;; esac
     abs=""
-    case "$t" in *hooks*|*settings*|*ching*|*.sql|*GOAL.md*) abs=$(resolve_path "$t" "$SIM_CWD") ;; esac
+    case "$t" in *hooks*|*settings*|*ching*|*.sql) abs=$(resolve_path "$t" "$SIM_CWD") ;; esac
     if [ -n "$abs" ] && is_tamper_path "$abs" && seg_writes; then
       emit_deny "editing hooks, settings or the guard itself ($t) would disable the guardrails. Ask the user."
     fi
-    if [ -n "$abs" ] && is_goal_path "$abs" && goal_seg_writes; then
+    gabs=""
+    case "$t" in
+      *[Gg][Oo][Aa][Ll].[Mm][Dd]*)   # any case; drop an attached redirect operator (>>f, 2>f, &>f) and a name= prefix (of=f)
+        u=${t##*[<>]}; u=${u#*=}
+        gabs=$(resolve_path "$u" "$SIM_CWD") ;;
+    esac
+    # '>&f' is split at the '&', so the target is the first token of a segment whose predecessor ended in '>'
+    if [ -n "$gabs" ] && is_goal_path "$gabs" && { goal_seg_writes || { [ "$k" -eq 0 ] && [ "$SEG_AFTER_REDIR" -eq 1 ]; }; }; then
       emit_deny "rule 11: write GOAL.md with the Edit or Write tool so the guard can check its gate settings."
     fi
     if [ -n "$abs" ] && is_migration_path "$abs" && seg_writes && [ "$SIM_UNKNOWN" -eq 0 ]; then
@@ -579,10 +606,16 @@ tamper_bash() {
 
 # ---------- Bash driver ----------
 SEG_RAW=""
+SEG_AFTER_REDIR=0   # the previous segment ended in '>' (the split at '&' of '>&file' puts the file in this one)
+NEXT_AFTER_REDIR=0
 scan_segment() {
+  local trimmed
   SEG_RAW=$1
   tokenize "$1"
   [ "$NT" -gt 0 ] || return 0
+  SEG_AFTER_REDIR=$NEXT_AFTER_REDIR
+  trimmed=${1%"${1##*[![:space:]]}"}
+  case "$trimmed" in *'>') NEXT_AFTER_REDIR=1 ;; *) NEXT_AFTER_REDIR=0 ;; esac
   # track cd so later relative paths resolve like the shell would
   if [ "${TOKS[0]##*/}" = cd ] || [ "${TOKS[0]##*/}" = pushd ]; then
     local tgt=${TOKS[1]:-$HOME}
