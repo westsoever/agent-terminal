@@ -5,7 +5,14 @@
 link_kit
 GATE="$BIN/release-gate.sh"
 
-mk_evidence() { # repo ; env: EV_COMMIT EV_SURFACE EV_NONE EV_SHOT EV_CONSOLE EV_NETWORK EV_ALLOWED EV_EXERCISED EV_VERDICT EV_NOSHOT
+mk_review() { # repo commit blocking findings [not_examined]; the file is named after the repo's HEAD
+  local d="$1/.agent/review"; mkdir -p "$d"
+  { echo "commit: $2"; echo "reviewer: subagent"; echo "lenses: error-resilience, identity, simulation"; echo "blocking: $3"
+    echo; echo "## findings"; if [ -n "$4" ]; then printf '%s\n' "$4"; fi
+    echo; echo "## not examined"; printf '%s\n' "${5-did not load-test the endpoint}"; } >"$d/$(head_of "$1").md"
+}
+
+mk_evidence() { # repo ; env: EV_COMMIT EV_SURFACE EV_NONE EV_SHOT EV_CONSOLE EV_NETWORK EV_ALLOWED EV_EXERCISED EV_VERDICT EV_NOSHOT EV_NOTEX EV_NOREVIEW
   local repo=$1 sha dir
   sha=$(head_of "$repo"); dir="$repo/.agent/verify"; mkdir -p "$dir"
   if [ -z "${EV_NOSHOT:-}" ]; then printf 'png' >"$dir/$sha.png"; else rm -f "$dir/$sha.png"; fi
@@ -20,12 +27,14 @@ mk_evidence() { # repo ; env: EV_COMMIT EV_SURFACE EV_NONE EV_SHOT EV_CONSOLE EV
     echo "## console"; echo '```console'; printf '%s\n' "${EV_CONSOLE:-none}"; echo '```'
     echo "## network"; echo '```network'; printf '%s\n' "${EV_NETWORK:-GET http://localhost:3000/view 200}"; echo '```'
     echo "## allowed"; if [ -n "${EV_ALLOWED:-}" ]; then printf '%s\n' "$EV_ALLOWED"; fi
+    echo "## not examined"; printf '%s\n' "${EV_NOTEX-did not test the mobile layout}"
     echo "## exercised"; printf '%s\n' "${EV_EXERCISED-- clicked the button, saw the count change}"
   } >"$dir/$sha.md"
+  if [ -z "${EV_NOREVIEW:-}" ]; then mk_review "$repo" "$sha" 0 ""; else rm -f "$repo/.agent/review/$sha.md"; fi
 }
 gate() { (cd "$1" && "$GATE" 2>&1); }
 verify() { (cd "$1" && "$GATE" --verify "${2:-}" 2>&1); }
-reset_ev() { unset EV_COMMIT EV_SURFACE EV_NONE EV_SHOT EV_CONSOLE EV_NETWORK EV_ALLOWED EV_EXERCISED EV_VERDICT EV_NOSHOT; }
+reset_ev() { unset EV_COMMIT EV_SURFACE EV_NONE EV_SHOT EV_CONSOLE EV_NETWORK EV_ALLOWED EV_EXERCISED EV_VERDICT EV_NOSHOT EV_NOTEX EV_NOREVIEW; }
 
 # ---------- opt-in: no GOAL.md means no gate ----------
 R0=$(mk_repo nogoal)
@@ -189,4 +198,66 @@ out=$(cd "$RC" && "$GATE" --approve 2>&1); assert_eq "approve for a new commit w
 # a hand-written ready marker is not accepted
 printf 'kind=release-ready\nsha=%s\ntime=1\nsig=bad\n' "$(head_of "$RC")" >"$RC/.agent/release-ready"
 out=$(cd "$RC" && "$GATE" --approve 2>&1); assert_eq "forged ready marker rejected" "1" "$?"
+
+# ---------- Phase 1.5: not examined + required review ----------
+RV=$(mk_repo revrepo); write_goal "$RV" "true" auto
+commit_file "$RV" a.txt one
+reset_ev; EV_NOTEX="" mk_evidence "$RV"
+assert_contains "evidence without not-examined is rejected" "$(gate "$RV")" "not examined"
+reset_ev; EV_NOREVIEW=1 mk_evidence "$RV"
+assert_contains "missing review is rejected with how-to" "$(gate "$RV")" "no review file"
+reset_ev; mk_evidence "$RV"; sha=$(head_of "$RV")
+mk_review "$RV" "$sha" 1 "- [blocking] a.txt:1 wrong value"
+assert_contains "blocking finding without resolved: is rejected" "$(gate "$RV")" "without a resolved: line"
+mk_review "$RV" "$sha" 1 "- [blocking] a.txt:1 wrong value"$'\n'"  resolved: kept on purpose, see STATE.md decision"
+assert_contains "resolved blocking finding passes" "$(gate "$RV")" "PASS"
+mk_review "$RV" "0000000000000000000000000000000000000000" 0 ""
+assert_contains "review for another commit is rejected" "$(gate "$RV")" "commit: must be exactly"
+mk_review "$RV" "$sha" 0 "" ""
+assert_contains "review without not-examined is rejected" "$(gate "$RV")" "not examined"
+mk_review "$RV" "$sha" 0 ""; touch -t 202001010000 "$RV/.agent/review/$sha.md"
+assert_contains "review older than the commit is rejected" "$(gate "$RV")" "older than the commit"
+rm "$RV/.agent/review/$sha.md"
+# Review Focus 3: only exactly "off" disables review
+for v in "Off" "no" "required" ""; do
+  write_goal "$RV" "true" auto "review: $v"
+  assert_contains "review: '$v' still requires a review" "$(gate "$RV")" "no review file"
+done
+write_goal "$RV" "true" auto "review: off"
+out=$(gate "$RV")
+assert_contains "review: off skips the review" "$out" "review skipped"
+assert_contains "review: off still passes the rest" "$out" "PASS"
+assert_contains "events: gate outcome logged" "$(jq -r 'select(.kind=="release" and .name=="revrepo") | .data.outcome' "$AGENT_HOME/events.jsonl")" "gate-pass-auto"
+assert_contains "events: gate failure logged" "$(jq -r 'select(.kind=="release" and .name=="revrepo") | .data.outcome' "$AGENT_HOME/events.jsonl")" "gate-fail"
+for l in error-resilience identity simulation; do
+  assert_file "lens $l exists" "$KIT/templates/review-lenses/$l.md"
+  assert_contains "lens $l asks for not examined" "$(cat "$KIT/templates/review-lenses/$l.md")" "## not examined"
+done
+assert_contains "REVIEW.md template has blocking:" "$(cat "$KIT/templates/REVIEW.md")" "blocking:"
+assert_contains "VERIFY.md template has not examined" "$(cat "$KIT/templates/VERIFY.md")" "## not examined"
+
+# the [blocking] scan always runs; the stated count must not exceed the findings listed
+write_goal "$RV" "true" auto
+mk_review "$RV" "$sha" 0 "- [blocking] a.txt:1 wrong value"
+assert_contains "blocking: 0 with an unresolved bullet is rejected" "$(gate "$RV")" "without a resolved: line"
+mk_review "$RV" "$sha" 1 "- [Blocking] a.txt:1 wrong value"
+assert_contains "unresolved '- [Blocking]' (mixed case) is rejected" "$(gate "$RV")" "without a resolved: line"
+mk_review "$RV" "$sha" 1 "- **[blocking]** a.txt:1 wrong value"
+assert_contains "unresolved '- **[blocking]**' (bold) is rejected" "$(gate "$RV")" "without a resolved: line"
+mk_review "$RV" "$sha" 1 "1. [blocking] a.txt:1 wrong value"
+assert_contains "unresolved '1. [blocking]' (numbered) is rejected" "$(gate "$RV")" "without a resolved: line"
+mk_review "$RV" "$sha" 2 "- [blocking] a.txt:1 wrong value"$'\n'"  resolved: kept on purpose, see STATE.md decision"
+assert_contains "blocking: 2 with one bullet is rejected" "$(gate "$RV")" "blocking: 2 but only 1 [blocking] bullets found"
+mk_review "$RV" "$sha" 2 ""
+assert_contains "blocking: 2 with no bullets is rejected" "$(gate "$RV")" "blocking: 2 but only 0 [blocking] bullets found"
+mk_review "$RV" "$sha" 99999999999 ""
+assert_contains "blocking: 99999999999 is rejected as not a number" "$(gate "$RV")" "blocking: must be a number"
+mk_review "$RV" "$sha" many "- [blocking] a.txt:1 wrong value"
+out=$(gate "$RV")
+assert_contains "blocking: many is rejected as not a number" "$out" "blocking: must be a number"
+assert_contains "blocking: many still scans the bullets" "$out" "without a resolved: line"
+mk_review "$RV" "$sha" 1 "- **[BLOCKING]** a.txt:1 wrong value"$'\n'"  resolved: fixed in abc1234"
+assert_contains "resolved '- **[BLOCKING]**' with blocking: 1 passes" "$(gate "$RV")" "PASS"
+mk_review "$RV" "$sha" 1 "- [blocking] a.txt:1 wrong value"$'\n'"  resolved: fixed in abc1234"$'\n'"1) [Blocking] b.txt:2 other value"$'\n'"   resolved: kept on purpose"
+assert_contains "more bullets than stated, all resolved, passes" "$(gate "$RV")" "PASS"
 exit 0

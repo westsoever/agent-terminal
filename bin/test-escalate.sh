@@ -21,6 +21,9 @@ elif [ -x "$DIR/tests/run.sh" ]; then TEST_CMD=(tests/run.sh)
 else echo "test-escalate: no test command given and no tests/run.sh in $DIR" >&2; exit 2; fi
 
 MODELS=${CHING_TEST_MODELS-claude-haiku-4-5-20251001 claude-sonnet-5-5}   # set but empty = no model
+# Recursion guard: a model started below loads the same Stop hook, which would run this script again and
+# start more models without end. Children carry CHING_ESCALATING=1 and never start models of their own.
+[ -z "${CHING_ESCALATING:-}" ] || MODELS=""
 BUDGET=${CHING_TEST_BUDGET_USD:-0.50}
 CLAUDE=${CHING_CLAUDE_BIN:-claude}
 LOG=${CHING_TEST_LOG:-$AGENT_HOME/test-escalation.log}
@@ -39,7 +42,7 @@ for m in $MODELS; do
   prompt="The test command \`${TEST_CMD[*]}\` fails in $DIR. Fix the cause with the smallest correct change. Do not edit or delete tests to make them pass. Do not commit. Output of the failing run (last 200 lines):
 
 $(tail -n 200 "$OUT")"
-  (cd "$DIR" && "$CLAUDE" -p --model "$m" --max-budget-usd "$BUDGET" --no-session-persistence "$prompt" </dev/null >/dev/null 2>&1) || true
+  (cd "$DIR" && CHING_ESCALATING=1 "$CLAUDE" -p --model "$m" --max-budget-usd "$BUDGET" --no-session-persistence "$prompt" </dev/null >/dev/null 2>&1) || true
   if run_tests; then log "pass model=$m"; echo "tests pass after fix by $m"; exit 0; fi
   log "fail model=$m"
 done

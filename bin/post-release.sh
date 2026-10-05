@@ -7,6 +7,8 @@
 set -euo pipefail
 
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=lib.sh
+. "$SELF_DIR/lib.sh"
 GH=${GH_BIN:-gh}
 SHA=""
 WATCH=1
@@ -84,6 +86,8 @@ record() {
   mv "$tmp" "$STATE"
 }
 record
+CWD=$ROOT; NAME=$(basename "$ROOT")
+ev release "$(jq -nc --arg s "$SHA" --arg o "$RESULT" '{sha:$s,outcome:("deploy-" + $o)}')"
 
 case "$RESULT" in
   SUCCESS)

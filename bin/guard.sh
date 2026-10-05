@@ -13,8 +13,11 @@
 # Rules: 1 rm -rf outside the repo//tmp | 2 force push | 3 push to main/default without release token for
 # the pushed commit | 4 vercel deploy, gh workflow run | 5 reading .env*, printing secrets | 6 Supabase
 # apply_migration / non-read-only execute_sql / Management API / CLI db push | 7 editing a committed
-# migration, db-migrate --record-only, --apply without a migrate token. Extras: --no-verify, hook/settings/
-# token tampering, gh pr merge, piping into a shell.
+# migration, db-migrate --record-only, --apply without a migrate token | 8 publishing (npm/bun/pnpm/yarn
+# publish, gh release, gh repo delete/visibility/public) | 9 closing PRs/issues | 10 sending email/chat
+# (drafts only) | 11 gate settings in GOAL.md (review, release_mode, test_command). Extras: --no-verify,
+# hook/settings/token tampering, gh pr merge, piping into a shell.
+# Every deny is also logged as a `deny` event, after the decision has been printed.
 # Env: GUARD_PROTECTED_BRANCHES (default "main master" plus the remote default branch)
 set -euo pipefail
 
@@ -29,6 +32,10 @@ DECIDED=0
 emit_deny() {
   DECIDED=1
   jq -n --arg r "GUARD: $1" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
+  # The decision is printed first; logging it can never change it.
+  ( SID=$(jq -r '.session_id // ""' <<<"$INPUT" 2>/dev/null || true); CWD=${CWD:-$PWD}; NAME=$(basename "$CWD")
+    # shellcheck source=lib.sh
+    . "$SELF_DIR/lib.sh" && ev deny "$(jq -nc --arg r "$1" --arg t "${TOOL:-}" '{rule:$r,tool:$t}')" ) >/dev/null 2>&1 || true
   exit 0
 }
 allow() { DECIDED=1; exit 0; }
@@ -146,7 +153,7 @@ seg_writes() { # does the current segment write/modify files?
     t=${TOKS[$k]}; b=${t##*/}
     case "$b" in
       rm|mv|cp|tee|truncate|ln|chmod|chown|dd|install|rsync|ed|unlink|shred) return 0 ;;
-      sed|perl) seg_matches '-i*' && return 0 ;;
+      sed|perl) { seg_matches '-i*' || seg_matches '-[pnlasE0-9]*i*'; } && return 0 ;;   # -i, -i.bak, and clustered forms such as perl -pi -e
     esac
     case "$t" in --in-place*) return 0 ;; esac
     k=$((k + 1))
@@ -317,6 +324,7 @@ check_gh() { # $1 = index of gh
     a=${TOKS[$k]}
     case "$a" in
       -X|--method) method=${TOKS[$((k + 1))]:-}; k=$((k + 1)) ;;
+      -R|--repo) k=$((k + 1)) ;;   # the repo is a value, not a subcommand (gh pr -R o/r close 5)
       -f|-F|--field|--raw-field|--input) mut=1 ;;
       -*) ;;
       *) if [ "$n" -lt 2 ]; then subs="$subs $a"; n=$((n + 1)); fi
@@ -341,11 +349,25 @@ check_gh() { # $1 = index of gh
       done
       require_token "$msha" "$SIM_CWD" "gh pr merge"
       [ "$pin" = "$msha" ] || emit_deny "gh pr merge must be pinned to the released commit: add --match-head-commit $msha." ;;
+    " pr close"*|" issue close"*|" issue delete"*)
+      emit_deny "rule 9: closing or deleting PRs and issues is the user's call. Comment with your reasoning (gh pr comment / gh issue comment) and notify instead." ;;
+    " release create"*|" release delete"*|" release edit"*|" release upload"*)
+      emit_deny "rule 8: publishing a release is the user's call. Prepare it, then notify that it is ready." ;;
+    " repo delete"*) emit_deny "rule 8: deleting a repository is the user's call." ;;
+    " repo edit"*) if seg_matches '--visibility*'; then emit_deny "rule 8: changing repository visibility is the user's call."; fi ;;
+    " repo create"*) if seg_matches '--public'; then emit_deny "rule 8: a public repository publishes code. Create it with --private, or ask the user."; fi ;;
     " workflow run"*|" workflow dispatch"*|" run rerun"*) emit_deny "starting or re-running workflows by hand is not allowed; deploys come from CI on a push. To roll back, push a revert commit through the release gate." ;;
     " api"*)
       case "$method" in ''|GET|get) ;; *) mut=1 ;; esac
+      if [ "$mut" -eq 1 ] && seg_matches '*state=closed*'; then emit_deny "rule 9: closing an issue or PR through the API is the user's call. Comment and notify instead."; fi
       if [ "$mut" -eq 1 ] && [ "$hit" -eq 1 ]; then emit_deny "gh api call that merges, dispatches workflows, or writes refs/contents bypasses the release gate."; fi ;;
   esac
+}
+
+check_publish() { # $1 = index of npm/pnpm/bun/yarn: any `publish` word in the command is denied
+  if seg_matches publish; then
+    emit_deny "rule 8: publishing a package is the user's call. Run '${TOKS[$1]##*/} pack' to check the tarball, then notify that it is ready."
+  fi
 }
 
 check_vercel() { # $1 = index of vercel token
@@ -428,6 +450,7 @@ check_misc() { # one segment, tokens in TOKS
         find) [ "$k" -ne 0 ] || check_find_delete ;;
         git) check_git "$k" ;;
         gh) check_gh "$k" ;;
+        npm|pnpm|bun|yarn) check_publish "$k" ;;
         vercel|vercel@*) check_vercel "$k" ;;
         supabase) check_supabase_cli "$k" ;;
         eval) case "$SEG_RAW" in *'$'*|*'`'*) emit_deny "eval with a variable or substitution hides what will run." ;; esac ;;
@@ -492,8 +515,68 @@ is_tamper_path() {
   return 1
 }
 
+# ---------- rule 11: gate settings in GOAL.md ----------
+is_goal_path() { # macOS volumes are case-insensitive by default, so .agent/goal.md is the same file: match on the lower-cased path
+  local l
+  l=$(printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z')
+  case "$l" in */.agent/goal.md|*/defaults/goal.md) return 0 ;; esac   # */defaults/ also covers AGENT_HOME overrides
+  return 1
+}
+gated_lines() { grep -E '^[[:space:]]*(review|release_mode|test_command):' | sed 's/[[:space:]]*$//' | sort || true; }
+deny_goal() { emit_deny "rule 11: review, release_mode and test_command in GOAL.md are the user's settings. Put the proposed change in STATE.md and notify the user."; }
+goal_seg_writes() { # seg_writes, except that discarding or merging a stream (2>/dev/null, 2>&1 split at '&') is not a write
+  local keep=$SEG_RAW rc=0
+  SEG_RAW=$(printf '%s\n' "$keep" | sed -E 's#[0-9]*>>?[[:space:]]*/dev/null([[:space:]]|$)# #g; s#[0-9]*>[[:space:]]*$##')
+  seg_writes || rc=$?
+  SEG_RAW=$keep
+  return "$rc"
+}
+check_new_goal() { # $1 = the gated lines of a GOAL.md that does not exist yet
+  local rv relm
+  rv=$(printf '%s\n' "$1" | sed -n 's/^[[:space:]]*review:[[:space:]]*//p' | head -1)
+  relm=$(printf '%s\n' "$1" | sed -n 's/^[[:space:]]*release_mode:[[:space:]]*//p' | head -1)
+  if { [ -n "$rv" ] && [ "$rv" != required ]; } || { [ -n "$relm" ] && [ "$relm" != confirm ]; }; then
+    emit_deny "rule 11: a new GOAL.md may only start with review: required and release_mode: confirm. The user switches them."
+  fi
+}
+check_goal_write() { # $1 = absolute path of a GOAL.md being written by Edit/MultiEdit/Write
+  local old new before after size
+  case "$TOOL" in
+    Edit|MultiEdit)
+      if [ "$TOOL" = Edit ]; then
+        old=$(jq -r '.tool_input.old_string // ""' <<<"$INPUT" | gated_lines)
+        new=$(jq -r '.tool_input.new_string // ""' <<<"$INPUT")
+      else
+        old=$(jq -r '[.tool_input.edits[]?.old_string // ""] | join("\n")' <<<"$INPUT" | gated_lines)
+        new=$(jq -r '[.tool_input.edits[]?.new_string // ""] | join("\n")' <<<"$INPUT")
+      fi
+      if [ ! -f "$1" ]; then   # nothing on disk to edit: an edit can only create the file (empty old_string)
+        new=$(printf '%s\n' "$new" | gated_lines)
+        check_new_goal "$new"
+        return 0
+      fi
+      new=$(printf '%s\n' "$new" | gated_lines)
+      [ "$old" = "$new" ] || deny_goal   # cheap first pass: the edit text itself names a changed setting
+      # second pass: a partial-line edit ("confirm" -> "auto") names no setting, so apply the edit(s) to the
+      # file as it is on disk and compare its gated lines before and after. Anything we cannot check is a deny.
+      size=$(wc -c <"$1" | tr -d ' ') || deny_goal
+      [ "$size" -le 262144 ] || deny_goal
+      before=$(gated_lines <"$1") || deny_goal
+      after=$(printf '%s' "$INPUT" | perl "$SELF_DIR/goal-sim-edit.pl" "$TOOL" "$1" | gated_lines) || deny_goal
+      [ "$before" = "$after" ] || deny_goal ;;
+    Write)
+      new=$(jq -r '.tool_input.content // ""' <<<"$INPUT" | gated_lines)
+      if [ -f "$1" ]; then
+        old=$(gated_lines <"$1")
+        [ "$old" = "$new" ] || deny_goal
+      else
+        check_new_goal "$new"
+      fi ;;
+  esac
+}
+
 tamper_bash() {
-  local k=0 t abs
+  local k=0 t abs u gabs
   while [ "$k" -lt "$NT" ]; do
     t=${TOKS[$k]}
     case "$t" in -*) k=$((k + 1)); continue ;; esac
@@ -501,6 +584,16 @@ tamper_bash() {
     case "$t" in *hooks*|*settings*|*ching*|*.sql) abs=$(resolve_path "$t" "$SIM_CWD") ;; esac
     if [ -n "$abs" ] && is_tamper_path "$abs" && seg_writes; then
       emit_deny "editing hooks, settings or the guard itself ($t) would disable the guardrails. Ask the user."
+    fi
+    gabs=""
+    case "$t" in
+      *[Gg][Oo][Aa][Ll].[Mm][Dd]*)   # any case; drop an attached redirect operator (>>f, 2>f, &>f) and a name= prefix (of=f)
+        u=${t##*[<>]}; u=${u#*=}
+        gabs=$(resolve_path "$u" "$SIM_CWD") ;;
+    esac
+    # '>&f' is split at the '&', so the target is the first token of a segment whose predecessor ended in '>'
+    if [ -n "$gabs" ] && is_goal_path "$gabs" && { goal_seg_writes || { [ "$k" -eq 0 ] && [ "$SEG_AFTER_REDIR" -eq 1 ]; }; }; then
+      emit_deny "rule 11: write GOAL.md with the Edit or Write tool so the guard can check its gate settings."
     fi
     if [ -n "$abs" ] && is_migration_path "$abs" && seg_writes && [ "$SIM_UNKNOWN" -eq 0 ]; then
       if committed_migration "$abs"; then
@@ -513,10 +606,16 @@ tamper_bash() {
 
 # ---------- Bash driver ----------
 SEG_RAW=""
+SEG_AFTER_REDIR=0   # the previous segment ended in '>' (the split at '&' of '>&file' puts the file in this one)
+NEXT_AFTER_REDIR=0
 scan_segment() {
+  local trimmed
   SEG_RAW=$1
   tokenize "$1"
   [ "$NT" -gt 0 ] || return 0
+  SEG_AFTER_REDIR=$NEXT_AFTER_REDIR
+  trimmed=${1%"${1##*[![:space:]]}"}
+  case "$trimmed" in *'>') NEXT_AFTER_REDIR=1 ;; *) NEXT_AFTER_REDIR=0 ;; esac
   # track cd so later relative paths resolve like the shell would
   if [ "${TOKS[0]##*/}" = cd ] || [ "${TOKS[0]##*/}" = pushd ]; then
     local tgt=${TOKS[1]:-$HOME}
@@ -586,6 +685,7 @@ check_write() {
   if is_migration_path "$abs" && committed_migration "$abs"; then
     emit_deny "$p is an already-committed migration; never edit it. Write a NEW numbered migration file that alters it."
   fi
+  if is_goal_path "$abs"; then check_goal_write "$abs"; fi
   allow
 }
 
@@ -618,9 +718,23 @@ check_supabase_mcp() {
   allow
 }
 
+check_send_mcp() { # rule 10 (D18): drafts only
+  local op=${TOOL_LC##*__}
+  case "$op" in *draft*) allow ;; esac
+  case "$op" in
+    *send*|reply|*_reply|reply_*|forward|*_forward|forward_*|*post_message*|*schedule_message*)
+      emit_deny "rule 10: sessions write drafts and never send (D18). Save it as a draft and notify the user to send it." ;;
+  esac
+  allow
+}
+
 case "$TOOL" in
   Bash) check_bash ;;
   Read|Grep) check_read ;;
   Edit|Write|MultiEdit|NotebookEdit) check_write ;;
-  *) case "$TOOL_LC" in mcp__*supabase*) check_supabase_mcp ;; *) allow ;; esac ;;
+  *) case "$TOOL_LC" in
+       mcp__*supabase*) check_supabase_mcp ;;
+       mcp__*gmail*|mcp__*slack*|mcp__*discord*|mcp__*telegram*) check_send_mcp ;;
+       *) allow ;;
+     esac ;;
 esac

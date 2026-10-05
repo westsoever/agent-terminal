@@ -1,24 +1,31 @@
 #!/usr/bin/env bash
-# dash.sh [--speak] [--hours N] [--all]
+# dash.sh [--speak | --inbox | --next] [--hours N] [--all]
 # Machine-wide view: one line per Claude session on this computer.
-# Sources: (1) ~/.agent/sessions/*/meta written by the SessionStart/Stop hooks, (2) transcripts in
-# ~/.claude/projects/*/*.jsonl modified recently (covers sessions that predate the hooks), (3) worktrees
+# Sources: (1) ~/.agent/sessions/*/meta written by the hooks and ching-watch.sh, (2) transcripts in
+# ~/.claude/projects/*/*.jsonl modified recently (sessions that predate the hooks), (3) worktrees
 # (`git worktree list`) of every repo found, shown when they hold repo state but have no live session,
-# plus the optional extra list in ~/.agent-repos. --speak prints a short spoken summary and warns above
-# 5 active sessions.
+# plus the optional extra list in ~/.agent-repos.
+#   (default)  name, state, age, ctx (● healthy ◐ watch ○ handoff ? unknown), tokens today, folder, note
+#   --speak    short spoken summary that leads with how many need you; warns above 5 active sessions
+#   --inbox    NEEDS YOU (blocked/input), READY (release gate passed, waiting for --approve),
+#              FINISHED (done since the last --inbox)
+#   --next     top 5 by urgency x importance x recency, each with its checkpoint next_action
+# Notes come from the STATE.md checkpoint `blocker:` (unless none), else the first "## Blocked" bullet.
 # Env: AGENT_HOME CLAUDE_DIR AGENT_REPOS_FILE DASH_NOW (epoch, tests) DASH_ACTIVE_MINS (30)
 set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
 
-SPEAK=0; HOURS=24
+MODE=table; HOURS=24
 while [ $# -gt 0 ]; do
   case "$1" in
-    --speak) SPEAK=1; shift ;;
+    --speak) MODE=speak; shift ;;
+    --inbox) MODE=inbox; shift ;;
+    --next) MODE=next; shift ;;
     --hours) HOURS=${2:?}; shift 2 ;;
     --all) HOURS=720; shift ;;
-    -h|--help) sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "dash: unknown argument $1" >&2; exit 64 ;;
   esac
 done
@@ -27,10 +34,13 @@ NOW=${DASH_NOW:-$(date +%s)}
 CUTOFF=$((NOW - HOURS * 3600))
 ACTIVE_SECS=$(( ${DASH_ACTIVE_MINS:-30} * 60 ))
 REPOS_FILE=${AGENT_REPOS_FILE:-$HOME/.agent-repos}
+TOKDAY="$AGENT_HOME/tokens/$(date -u -r "$NOW" +%Y-%m-%d)"
 
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/ching-dash.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
-ROWS="$TMP/rows"; : >"$ROWS"      # unit-separator (0x1f) separated: updated sid cwd name branch state note source
+ROWS="$TMP/rows"; : >"$ROWS"
+# fields (0x1f separated): updated sid cwd name branch state note src ctx tok stalled imp next_action
+row() { local IFS=$'\037'; printf '%s\n' "$*" >>"$ROWS"; }
 
 human_age() { # seconds
   local s=$1
@@ -58,6 +68,29 @@ first_blocker() { # STATE.md -> first bullet under "## Blocked" that is not "(no
       if (tolower(l) !~ /^\(?none\)?\.?$/ && l != "") { print l; exit }
     }' "$1"
 }
+is_none() { # true for an empty value or a "nothing here" sentinel: none, (none), none. (any case)
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in ''|none|'(none)'|none.) return 0 ;; esac
+  return 1
+}
+state_note() { # STATE.md -> checkpoint blocker unless none; without a checkpoint block, the first bullet
+  [ -f "$1" ] || return 0
+  if grep -qF '<!-- ching:checkpoint -->' "$1"; then
+    local b; b=$(checkpoint_get "$1" blocker)
+    if is_none "$b"; then return 0; fi
+    printf '%s\n' "$b"
+  else
+    first_blocker "$1"
+  fi
+}
+next_of() { # STATE.md -> checkpoint next_action unless empty or a sentinel (the template ships "(none)")
+  local a; a=$(checkpoint_get "$1" next_action)
+  if is_none "$a"; then return 0; fi
+  printf '%s\n' "$a"
+}
+importance() { if [ -n "$1" ] && [ -f "$1/.agent/GOAL.md" ]; then echo 3; else echo 1; fi; }
+tok_for() { [ -f "$TOKDAY" ] || return 0; awk -v s="$1" '$1 == s { print $2; exit }' "$TOKDAY"; }
+tok_h() { awk -v n="${1:-0}" 'BEGIN { if (n >= 1000000) printf "%.1fM", n / 1000000; else if (n >= 1000) printf "%dk", n / 1000; else if (n > 0) printf "%d", n; else printf "-" }'; }
+ctx_sym() { case "$1" in healthy) printf '●' ;; watch) printf '◐' ;; handoff) printf '○' ;; *) printf '?' ;; esac; }
 
 # ---- 1. registry ----
 if [ -d "$AGENT_HOME/sessions" ]; then
@@ -73,13 +106,13 @@ if [ -d "$AGENT_HOME/sessions" ]; then
     fi
     [ "$upd" -ge "$CUTOFF" ] || continue
     [ "$state" != ended ] || continue
-    # blockers / notes come from the session's own STATE.md (repo state when the repo opted in)
     sdir="$AGENT_HOME/sessions/$sid"
     if [ -n "$root" ] && [ -f "$root/.agent/GOAL.md" ]; then sdir="$root/.agent"; fi
-    note=$(first_blocker "$sdir/STATE.md")
+    note=$(state_note "$sdir/STATE.md")
     [ -z "$note" ] || [ "$state" = blocked ] || [ "$state" = input ] || state=blocked
-    printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$upd" "$sid" "${cwd:-?}" "$(display_name "${cwd:-?}" "$root")" \
-      "$(meta_get "$m" branch)" "$state" "$note" registry >>"$ROWS"
+    row "$upd" "$sid" "${cwd:-?}" "$(display_name "${cwd:-?}" "$root")" "$(meta_get "$m" branch)" "$state" "$note" registry \
+      "$(meta_get "$m" ctx_level)" "$(tok_for "$sid")" "$(meta_get "$m" stalled_at)" "$(importance "$root")" \
+      "$(next_of "$sdir/STATE.md")"
   done
 fi
 
@@ -94,13 +127,14 @@ if [ -d "$CLAUDE_DIR/projects" ]; then
     if printf '%s\n' "$seen" | grep -qxF "$sid"; then continue; fi
     cwd=$(grep -m1 -o '"cwd": *"[^"]*"' "$t" 2>/dev/null | head -1 | sed 's/^"cwd": *"//; s/"$//' || true)
     [ -n "$cwd" ] || cwd="?"
-    root=""
-    if [ -d "$cwd" ]; then root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true); fi
-    branch=""
-    if [ -d "$cwd" ]; then branch=$(git -C "$cwd" symbolic-ref --short -q HEAD 2>/dev/null || true); fi
+    root=""; branch=""
+    if [ -d "$cwd" ]; then
+      root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)
+      branch=$(git -C "$cwd" symbolic-ref --short -q HEAD 2>/dev/null || true)
+    fi
     state=idle
     [ $((NOW - tm)) -ge 120 ] || state=working
-    printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$tm" "$sid" "$cwd" "$(display_name "$cwd" "$root")" "$branch" "$state" "" transcript >>"$ROWS"
+    row "$tm" "$sid" "$cwd" "$(display_name "$cwd" "$root")" "$branch" "$state" "" transcript "" "" "" "$(importance "$root")" ""
   done
 fi
 
@@ -126,17 +160,17 @@ while IFS= read -r repo; do
     [ "$upd" -ge "$CUTOFF" ] || continue
     st=$(sed -n 's/^status:[[:space:]]*//p' "$wt/.agent/STATE.md" | head -1)
     [ -n "$st" ] || st=idle
-    note=$(first_blocker "$wt/.agent/STATE.md")
+    note=$(state_note "$wt/.agent/STATE.md")
     [ -z "$note" ] || st=blocked
-    printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$upd" "worktree" "$wt_phys" "$(basename "$wt")" \
-      "$(git -C "$wt" symbolic-ref --short -q HEAD 2>/dev/null || true)" "$st" "$note" worktree >>"$ROWS"
+    row "$upd" "worktree" "$wt_phys" "$(basename "$wt")" "$(git -C "$wt" symbolic-ref --short -q HEAD 2>/dev/null || true)" \
+      "$st" "$note" worktree "" "" "" "$(importance "$wt_phys")" "$(next_of "$wt/.agent/STATE.md")"
   done
 done <"$TMP/repos"
 
 sort -rn -t $'\037' -k1,1 "$ROWS" >"$TMP/sorted"
 
 active=0; blocked=0; waiting=0; done_n=0; total=0
-while IFS=$'\037' read -r upd sid cwd name branch state note src; do
+while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do
   total=$((total + 1))
   age=$((NOW - upd))
   case "$state" in
@@ -149,23 +183,68 @@ while IFS=$'\037' read -r upd sid cwd name branch state note src; do
   esac
 done <"$TMP/sorted"
 
-if [ "$SPEAK" -eq 0 ]; then
-  if [ "$total" -eq 0 ]; then echo "no Claude sessions seen in the last ${HOURS}h"; exit 0; fi
-  while IFS=$'\037' read -r upd sid cwd name branch state note src; do
-    label=$name; [ -z "$branch" ] || label="$name [$branch]"
-    [ "$src" = worktree ] || label="$label ${sid:0:7}"
-    printf '%-34s %-8s %5s  %s%s\n' "$label" "$state" "$(human_age $((NOW - upd)))" "$cwd" "${note:+  -- $note}"
-  done <"$TMP/sorted"
-  echo "-- $total session(s), $active active"
-  if [ "$active" -gt 5 ]; then echo "WARNING: $active active sessions; the plan caps this at about 5. Park some behind their STATE.md."; fi
-  exit 0
-fi
+label_of() { if [ -n "$2" ]; then printf '%s [%s]' "$1" "$2"; else printf '%s' "$1"; fi; }
+
+case "$MODE" in
+  table)
+    if [ "$total" -eq 0 ]; then echo "no Claude sessions seen in the last ${HOURS}h"; exit 0; fi
+    while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do
+      label=$(label_of "$name" "$branch")
+      [ "$src" = worktree ] || label="$label ${sid:0:7}"
+      printf '%-34s %-8s %5s %s %6s  %s%s\n' "$label" "$state" "$(human_age $((NOW - upd)))" "$(ctx_sym "$ctx")" "$(tok_h "$tok")" \
+        "$cwd" "${note:+  -- $note}"
+    done <"$TMP/sorted"
+    echo "-- $total session(s), $active active"
+    if [ "$active" -gt 5 ]; then echo "WARNING: $active active sessions; the plan caps this at about 5. Park some behind their STATE.md."; fi
+    exit 0 ;;
+
+  inbox)
+    SEEN_F="$AGENT_HOME/inbox.seen"
+    last_seen=$(cat "$SEEN_F" 2>/dev/null || echo 0); case "$last_seen" in ''|*[!0-9]*) last_seen=0 ;; esac
+    : >"$TMP/needs"; : >"$TMP/ready"; : >"$TMP/fin"
+    while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do
+      label=$(label_of "$name" "$branch")
+      case "$state" in
+        blocked) printf '  %s: blocked%s\n' "$label" "${note:+ -- $note}" >>"$TMP/needs" ;;
+        input) printf '  %s: needs your input\n' "$label" >>"$TMP/needs" ;;
+        done) [ "$upd" -le "$last_seen" ] || printf '  %s%s\n' "$label" "${nexta:+ -- next: $nexta}" >>"$TMP/fin" ;;
+      esac
+      r=""; if [ -d "$cwd" ]; then r=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true); fi
+      if [ -n "$r" ] && [ -f "$r/.agent/release-ready" ]; then
+        printf '  %s: release gate passed; run release-gate.sh --approve in %s\n' "$(basename "$r")" "$r" >>"$TMP/ready"
+      fi
+    done <"$TMP/sorted"
+    lane() { echo "$1"; if [ -s "$2" ]; then sort -u "$2"; else echo "  (nothing)"; fi; }
+    lane "NEEDS YOU" "$TMP/needs"
+    lane "READY" "$TMP/ready"
+    lane "FINISHED (since last look)" "$TMP/fin"
+    mkdir -p "$AGENT_HOME"
+    printf '%s\n' "$NOW" >"$SEEN_F"
+    exit 0 ;;
+
+  next)
+    if [ "$total" -eq 0 ]; then echo "no Claude sessions seen in the last ${HOURS}h"; exit 0; fi
+    while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do
+      case "$state" in
+        blocked) u=10 ;;
+        input) u=9 ;;
+        *) if [ -n "$stalled" ]; then u=8; elif [ "$ctx" = handoff ]; then u=7; elif [ "$state" = working ]; then u=4; else u=2; fi ;;
+      esac
+      printf '%s\037%s\037%s\037%s\037%s\n' "$u" "${imp:-1}" $((NOW - upd)) "$(label_of "$name" "$branch") ($state)" "${nexta:-$note}"
+    done <"$TMP/sorted" \
+      | awk -F'\037' '{ r = 1 - ($3 / 3600) / 24; if (r < 0.2) r = 0.2; printf "%.2f\037%s\037%s\n", $1 * $2 * r, $4, $5 }' \
+      | sort -t $'\037' -k1,1 -rn | head -5 \
+      | awk -F'\037' '{ printf "%d. %s  [score %s]%s\n", NR, $2, $1, ($3 != "" ? "  -- " $3 : "") }'
+    exit 0 ;;
+esac
 
 # ---- spoken summary: short sentences, no paths, no ids ----
 if [ "$total" -eq 0 ]; then echo "No Claude sessions in the last $HOURS hours."; exit 0; fi
-out="$active active session"; [ "$active" -eq 1 ] || out="${out}s"; out="$out out of $total."
+need=$((blocked + waiting)); out=""
+if [ "$need" -eq 1 ]; then out="1 needs you. "; elif [ "$need" -gt 1 ]; then out="$need need you. "; fi
+out="$out$active active session"; [ "$active" -eq 1 ] || out="${out}s"; out="$out out of $total."
 n=0
-while IFS=$'\037' read -r upd sid cwd name branch state note src; do
+while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do
   case "$state" in
     blocked) s="$name is blocked${note:+: $note}." ;;
     input) s="$name needs your input." ;;

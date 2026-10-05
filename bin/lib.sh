@@ -78,3 +78,29 @@ sign() { # sign a b c... -> sha256 of "a|b|c|<secret>"
 }
 
 file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+
+# ev KIND [DATA_JSON]: append one line to $AGENT_HOME/events.jsonl, the input contract for the Phase 6
+# learning loop. Uses SID NAME CWD when set. Strings in DATA are cut to 300 chars; a line over 1 KB keeps
+# only {"truncated":true}. Never fails and never prints: observing must not break a hook.
+ev() {
+  local kind=$1 data=${2:-} line
+  [ -n "$data" ] || data='{}'
+  line=$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg sid "${SID:-}" --arg name "${NAME:-}" \
+      --arg cwd "${CWD:-}" --arg kind "$kind" --argjson data "$data" \
+      '{ts:$ts, sid:$sid, name:$name, cwd:$cwd, kind:$kind,
+        data:($data | walk(if type == "string" then .[0:300] else . end))}' 2>/dev/null) || return 0
+  if [ "${#line}" -gt 1024 ]; then
+    line=$(printf '%s' "$line" | jq -c '.data = {truncated: true}' 2>/dev/null) || return 0
+  fi
+  { (umask 077; mkdir -p "$AGENT_HOME" && printf '%s\n' "$line" >>"$AGENT_HOME/events.jsonl"); } 2>/dev/null || true
+  return 0
+}
+
+checkpoint_get() { # file key -> value of the first `key:` line inside the ching:checkpoint block
+  [ -f "$1" ] || return 0
+  awk -v k="$2" '
+    index($0, "<!-- ching:checkpoint -->") == 1 { c = 1; next }
+    index($0, "<!-- /ching:checkpoint -->") == 1 { c = 0; next }
+    c && index($0, k ":") == 1 { v = substr($0, length(k) + 2); sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); print v; exit }
+  ' "$1"
+}

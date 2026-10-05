@@ -15,6 +15,7 @@ The gate parses this file MECHANICALLY and ignores any verdict you write. It rej
     "exception") that is not covered by an `## allowed` pattern
   - the network block has any line whose HTTP status is not 2xx (304 is accepted), including 404,
     unless covered by an `## allowed` pattern. Every non-blank line must END with the status.
+  - the "## not examined" section has fewer than 10 characters
 
 Paste RAW output. Do not summarise, do not delete lines you dislike. If a line is genuinely
 benign (favicon 404), add a pattern under `## allowed` WITH a reason.
@@ -42,3 +43,7 @@ GET http://localhost:3000/the/changed/view 200
 ## exercised
 
 - Opened the changed view, did X, saw Y.
+
+## not examined
+
+- What this verification deliberately did not check (other views, mobile, write paths on preview, load).

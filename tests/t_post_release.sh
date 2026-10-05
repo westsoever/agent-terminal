@@ -48,4 +48,7 @@ assert_eq "no gh installed: still records" "0" "$?"
 # state file is created when absent
 R2=$(mk_repo prrepo2); (cd "$R2" && FAKE_GH=success "$BIN/post-release.sh" >/dev/null 2>&1)
 assert_contains "STATE.md created when missing" "$(cat "$R2/.agent/STATE.md")" "## Releases"
+
+# ---------- events (Phase 1.5) ----------
+assert_contains "events: deploy outcome logged" "$(jq -r 'select(.kind=="release") | .data.outcome' "$AGENT_HOME/events.jsonl")" "deploy-"
 exit 0

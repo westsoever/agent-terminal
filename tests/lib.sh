@@ -24,6 +24,16 @@ export CHING_TEST_MODELS=""   # tests never call a real model; t_escalate.sh set
 unset TMPDIR CHING_ALLOW_PUSH
 mkdir -p "$AGENT_HOME" "$CLAUDE_DIR"
 
+# install.sh calls $LAUNCHCTL: a test must never reach the real launchd
+cat >"$WORK/fake-launchctl" <<'EOS'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$(dirname "$0")/launchctl.log"
+# a test sets LAUNCHCTL_FAIL_BOOTSTRAP to make only the bootstrap subcommand fail
+if [ -n "${LAUNCHCTL_FAIL_BOOTSTRAP:-}" ] && [ "${1:-}" = bootstrap ]; then exit 5; fi
+EOS
+chmod +x "$WORK/fake-launchctl"
+export LAUNCHCTL="$WORK/fake-launchctl"
+
 pass() { printf 'PASS\t%s\t%s\n' "$TNAME" "$1" >>"$RESULTS"; }
 fail() { printf 'FAIL\t%s\t%s\n' "$TNAME" "$1" >>"$RESULTS"; printf 'FAIL [%s]: %s\n%s\n' "$TNAME" "$1" "${2:-}" >&2; }
 

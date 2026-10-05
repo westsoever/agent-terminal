@@ -82,4 +82,18 @@ R2=$(mk_repo repo2)
 run_hook session-start.sh "$(hook_json SessionStart "$R2" s-r2 '{}')" >/dev/null
 assert_no_file "repo without GOAL.md gets no .agent/ dir created" "$R2/.agent/STATE.md"
 assert_file "repo without GOAL.md is still registered" "$AGENT_HOME/sessions/s-r2/meta"
+
+# ---------- events (Phase 1.5) ----------
+EVF="$AGENT_HOME/events.jsonl"
+ER=$(mk_repo evrepo)
+run_hook session-start.sh "$(hook_json SessionStart "$ER" s-ev '{"source":"startup"}')" >/dev/null
+assert_eq "events: session_start with source" "startup" "$(jq -r 'select(.kind=="session_start" and .sid=="s-ev") | .data.source' "$EVF")"
+printf '%s' "$(hook_json UserPromptSubmit "$ER" s-ev)" | "$BIN/session-start.sh" touch
+assert_contains "touch writes prompted to meta" "$(cat "$AGENT_HOME/sessions/s-ev/meta")" "prompted="
+assert_eq "events: prompt" "1" "$(jq -r 'select(.kind=="prompt" and .sid=="s-ev") | .kind' "$EVF" | wc -l | tr -d ' ')"
+run_hook pre-compact.sh "$(hook_json PreCompact "$ER" s-ev '{"trigger":"auto"}')"
+assert_eq "events: compact with trigger" "auto" "$(jq -r 'select(.kind=="compact" and .sid=="s-ev") | .data.trigger' "$EVF")"
+printf '%s' "$(hook_json SessionEnd "$ER" s-ev)" | "$BIN/session-start.sh" end
+assert_eq "events: session_end" "1" "$(jq -r 'select(.kind=="session_end" and .sid=="s-ev") | .kind' "$EVF" | wc -l | tr -d ' ')"
+assert_eq "events: name is the repo" "evrepo" "$(jq -r 'select(.sid=="s-ev") | .name' "$EVF" | sort -u)"
 exit 0

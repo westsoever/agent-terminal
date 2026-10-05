@@ -9,6 +9,7 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 hook_init
 resolve_state
+ev compact "$(jq -nc --arg t "$(jget trigger)" '{trigger:$t}')"
 mkdir -p "$STATE_DIR"
 STATE="$STATE_DIR/STATE.md"
 BEGIN='<!-- ching:snapshot:begin -->'

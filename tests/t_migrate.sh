@@ -112,4 +112,7 @@ gallow "append to an uncommitted migration" "$M" 'echo "-- x" >> db/migrations/0
 gallow "create a new migration with a heredoc" "$M" $'cat > db/migrations/0006_new.sql <<EOF\nalter table t add column c int;\nEOF'
 gallow "reading a committed migration" "$M" 'cat db/migrations/0001_init.sql'
 gallow "migrations in a plain folder with no repo" "$WORK" 'echo x > /tmp/some/migrations/0001.sql'
+
+# ---------- events (Phase 1.5) ----------
+assert_contains "events: migrate gate outcome logged" "$(jq -r 'select(.kind=="migrate") | .data.outcome' "$AGENT_HOME/events.jsonl")" "gate-"
 exit 0

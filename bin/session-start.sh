@@ -15,8 +15,8 @@ resolve_state
 NOW=$(date +%s)
 
 case "$MODE" in
-  touch) meta_set state working; meta_set updated "$NOW"; exit 0 ;;
-  end)   meta_set state ended;   meta_set updated "$NOW"; exit 0 ;;
+  touch) meta_set state working; meta_set updated "$NOW"; meta_set prompted "$NOW"; ev prompt; exit 0 ;;
+  end)   meta_set state ended;   meta_set updated "$NOW"; ev session_end; exit 0 ;;
 esac
 
 BRANCH=$(git -C "$CWD" symbolic-ref --short -q HEAD 2>/dev/null || true)
@@ -31,6 +31,7 @@ meta_set source "$(jget source)"
 meta_set state working
 meta_set updated "$NOW"
 rm -f "$SESS_DIR/retries"
+ev session_start "$(jq -nc --arg s "$(jget source)" '{source:$s}')"
 
 MAX=${SESSION_START_MAX_BYTES:-6000}
 if [ "$REPO_MODE" -eq 1 ]; then WHERE="repo state in $STATE_DIR"; else WHERE="machine-level session state in $STATE_DIR (no repo GOAL.md here)"; fi
