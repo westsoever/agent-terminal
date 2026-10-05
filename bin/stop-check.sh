@@ -14,6 +14,9 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
 
+# A model started by test-escalate.sh inherits this hook: its stop is never gated, counted or notified.
+[ -z "${CHING_ESCALATING:-}" ] || exit 0
+
 MAX=${STOP_CHECK_MAX_RETRIES:-3}
 TIMEOUT=${STOP_CHECK_TIMEOUT:-900}
 

@@ -103,4 +103,10 @@ assert_eq "escalation: only the cheap model was called" "cheap" "$(tr '\n' ' ' <
 rm -f "$ESC_FILE"
 out=$(CHING_TEST_MODELS="" stop "$R" sess-ESC2)
 assert_eq "no models configured: plain block" "block" "$(printf '%s' "$out" | jq -r .decision)"
+# recursion guard: a model started by test-escalate.sh inherits this hook; its stop is never gated
+: >"$ESC_CALLS"; rm -f "$ESC_FILE"
+out=$(CHING_ESCALATING=1 CHING_CLAUDE_BIN="$WORK/fake-claude" CHING_TEST_MODELS="cheap strong" stop "$R" sess-ESC3)
+assert_eq "escalating child: stop is allowed, never blocked" "" "$out"
+assert_eq "escalating child: no model is started" "0" "$(wc -l <"$ESC_CALLS" | tr -d ' ')"
+assert_no_file "escalating child: no retry counter written" "$AGENT_HOME/sessions/sess-ESC3/retries"
 exit 0
