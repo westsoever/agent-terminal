@@ -5,6 +5,8 @@
 # events.jsonl rotation. It never touches a session: it writes meta keys, $AGENT_HOME/tokens/<UTC day>,
 # events and notifications only.
 # Meta keys written: tok_offset tok_last_mid ctx_level ctx_pct stalled_at
+# Check-in nudges (3b): sessions waiting on the user get a `waiting` banner (finished sessions with open
+# work) and, after a delay, one spoken note. Meta keys: nudged_for spoken_for. Env: WATCH_WAIT_GRACE_MINS (2)
 # Env: AGENT_HOME WATCH_NOW (epoch, tests) WATCH_STALL_MINS (20) WATCH_ROTATE_BYTES (20971520)
 #      TOKEN_BUDGET_DAILY (unset = no token alerts; also read from $AGENT_HOME/defaults/ching.env)
 set -euo pipefail
@@ -111,6 +113,49 @@ for m in "$AGENT_HOME"/sessions/*/meta; do
     [ "$lvl" != handoff ] || wnotify handoff "Context ${pct}% full: run /handoff and continue in a fresh session."
   fi
 done
+
+# 3b. check-in nudges. A session is waiting when its last Stop left it `input`, `blocked`, or `done` with
+# something open (a checkpoint blocker or next_action other than "none", or a non-empty NEXT.md), at least
+# WATCH_WAIT_GRACE_MINS ago. A spell is identified by the session's `updated` time, so a new Stop or prompt
+# starts a new one. input and blocked already got their banner at Stop; `done` only lands in the inbox, so
+# the watcher sends it a `waiting` banner, once per spell and only when notify.sh really delivered it.
+NOTIFY_LOG_FILE=${NOTIFY_LOG:-$AGENT_HOME/notify.log}
+GRACE_SECS=$(( ${WATCH_WAIT_GRACE_MINS:-2} * 60 ))
+
+log_lines() { if [ -f "$NOTIFY_LOG_FILE" ]; then wc -l <"$NOTIFY_LOG_FILE" | tr -d ' '; else echo 0; fi; }
+open_value() { # text -> text, or nothing when it is blank or "none"
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in ''|none) ;; *) printf '%s' "$1" ;; esac
+}
+
+for m in "$AGENT_HOME"/sessions/*/meta; do
+  [ -f "$m" ] || continue
+  SESS_DIR=$(dirname "$m"); SID=$(basename "$SESS_DIR")
+  state=$(meta_get "$m" state)
+  case "$state" in input|blocked|done) ;; *) continue ;; esac
+  upd=$(meta_get "$m" updated)
+  case "$upd" in ''|*[!0-9]*) continue ;; esac
+  age=$((NOW - upd))
+  [ "$age" -ge "$GRACE_SECS" ] || continue
+  CWD=$(meta_get "$m" cwd); NAME=$(meta_get "$m" name); ROOT=$(meta_get "$m" root)
+  resolve_state
+  nxt=$(open_value "$(checkpoint_get "$STATE_DIR/STATE.md" next_action)")
+  blk=$(open_value "$(checkpoint_get "$STATE_DIR/STATE.md" blocker)")
+  if [ "$state" = "done" ] && [ -z "$nxt" ] && [ -z "$blk" ]; then
+    { [ -f "$STATE_DIR/NEXT.md" ] && grep -q '[^[:space:]]' "$STATE_DIR/NEXT.md"; } || continue
+  fi
+  if [ "$state" = "done" ] && [ "$(meta_get "$m" nudged_for)" != "$upd" ]; then
+    before=$(log_lines)
+    wnotify waiting "${nxt:-$blk}"
+    method=$(tail -1 "$NOTIFY_LOG_FILE" 2>/dev/null | cut -f2 || true)
+    case "$method" in
+      suppressed:*) ;;
+      *) if [ "$(log_lines)" -gt "$before" ]; then
+           meta_set nudged_for "$upd"
+           ev waiting "$(jq -nc --argjson m $((age / 60)) --arg s "$state" '{mins:$m,state:$s}')"
+         fi ;;
+    esac
+  fi
+done # end of nudge pass
 
 # 4. daily token budget (machine-wide), one alert per mark per day
 if [ -n "${TOKEN_BUDGET_DAILY:-}" ] && [ -f "$AGENT_HOME/tokens/$DAY" ]; then
