@@ -204,16 +204,24 @@ else
   rne=$(compact_section "$REVIEW" "not examined")
   [ "${#rne}" -ge 10 ] || RP="$RP"$'\n'"  - ## not examined needs at least 10 characters"
   nb=$(kv "$REVIEW" blocking)
-  case "$nb" in ''|*[!0-9]*) RP="$RP"$'\n'"  - blocking: must be a number"; nb=0 ;; esac
-  if [ "$nb" -gt 0 ]; then
-    unresolved=$(awk '
-      /^[[:space:]]*[-*][[:space:]]*\[blocking\]/ { if (p) n++; p = 1; next }
-      p && /^[[:space:]]*resolved:[[:space:]]*[^[:space:]]/ { p = 0; next }
-      p && /^[[:space:]]*[-*][[:space:]]/ { n++; p = 0 }
-      /^## / { if (p) n++; p = 0 }
-      END { if (p) n++; print n + 0 }' "$REVIEW")
-    [ "$unresolved" -eq 0 ] || RP="$RP"$'\n'"  - $unresolved blocking finding(s) without a resolved: line"
-  fi
+  # more than 6 characters is never a real count; also keeps the numeric tests below from erroring
+  case "$nb" in ''|*[!0-9]*|???????*) RP="$RP"$'\n'"  - blocking: must be a number"; nb=0 ;; esac
+  # The [blocking] scan always runs, whatever blocking: says. A finding is a -, * or numbered (1. / 1))
+  # bullet, optionally bold, tagged [blocking] in any case. Prints "<found> <unresolved>"; a finding is
+  # unresolved unless a non-empty resolved: line follows before the next bullet or ## heading.
+  scan=$(awk '
+    { low = tolower($0) }
+    low ~ /^[[:space:]]*([-*]|[0-9]+[.)])[[:space:]]*\**[[:space:]]*\[blocking\]/ { f++; if (p) n++; p = 1; next }
+    p && /^[[:space:]]*resolved:[[:space:]]*[^[:space:]]/ { p = 0; next }
+    p && /^[[:space:]]*([-*]|[0-9]+[.)])[[:space:]]/ { n++; p = 0 }
+    /^## / { if (p) n++; p = 0 }
+    END { if (p) n++; print f + 0, n + 0 }' "$REVIEW") || scan=""
+  case "$scan" in
+    [0-9]*" "[0-9]*) found=${scan% *}; unresolved=${scan#* } ;;
+    *) found=0; unresolved=0; RP="$RP"$'\n'"  - could not scan the [blocking] findings" ;;
+  esac
+  [ "$found" -ge "$nb" ] || RP="$RP"$'\n'"  - blocking: $nb but only $found [blocking] bullets found"
+  [ "$unresolved" -eq 0 ] || RP="$RP"$'\n'"  - $unresolved blocking finding(s) without a resolved: line"
   [ -z "$RP" ] || fail "review file .agent/review/$HEAD_SHA.md rejected:$RP"
 fi
 

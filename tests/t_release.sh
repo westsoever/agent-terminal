@@ -227,12 +227,37 @@ write_goal "$RV" "true" auto "review: off"
 out=$(gate "$RV")
 assert_contains "review: off skips the review" "$out" "review skipped"
 assert_contains "review: off still passes the rest" "$out" "PASS"
-assert_contains "events: gate outcome logged" "$(jq -r 'select(.kind=="release") | .data.outcome' "$AGENT_HOME/events.jsonl")" "gate-pass-auto"
-assert_contains "events: gate failure logged" "$(jq -r 'select(.kind=="release") | .data.outcome' "$AGENT_HOME/events.jsonl")" "gate-fail"
+assert_contains "events: gate outcome logged" "$(jq -r 'select(.kind=="release" and .name=="revrepo") | .data.outcome' "$AGENT_HOME/events.jsonl")" "gate-pass-auto"
+assert_contains "events: gate failure logged" "$(jq -r 'select(.kind=="release" and .name=="revrepo") | .data.outcome' "$AGENT_HOME/events.jsonl")" "gate-fail"
 for l in error-resilience identity simulation; do
   assert_file "lens $l exists" "$KIT/templates/review-lenses/$l.md"
   assert_contains "lens $l asks for not examined" "$(cat "$KIT/templates/review-lenses/$l.md")" "## not examined"
 done
 assert_contains "REVIEW.md template has blocking:" "$(cat "$KIT/templates/REVIEW.md")" "blocking:"
 assert_contains "VERIFY.md template has not examined" "$(cat "$KIT/templates/VERIFY.md")" "## not examined"
+
+# the [blocking] scan always runs; the stated count must not exceed the findings listed
+write_goal "$RV" "true" auto
+mk_review "$RV" "$sha" 0 "- [blocking] a.txt:1 wrong value"
+assert_contains "blocking: 0 with an unresolved bullet is rejected" "$(gate "$RV")" "without a resolved: line"
+mk_review "$RV" "$sha" 1 "- [Blocking] a.txt:1 wrong value"
+assert_contains "unresolved '- [Blocking]' (mixed case) is rejected" "$(gate "$RV")" "without a resolved: line"
+mk_review "$RV" "$sha" 1 "- **[blocking]** a.txt:1 wrong value"
+assert_contains "unresolved '- **[blocking]**' (bold) is rejected" "$(gate "$RV")" "without a resolved: line"
+mk_review "$RV" "$sha" 1 "1. [blocking] a.txt:1 wrong value"
+assert_contains "unresolved '1. [blocking]' (numbered) is rejected" "$(gate "$RV")" "without a resolved: line"
+mk_review "$RV" "$sha" 2 "- [blocking] a.txt:1 wrong value"$'\n'"  resolved: kept on purpose, see STATE.md decision"
+assert_contains "blocking: 2 with one bullet is rejected" "$(gate "$RV")" "blocking: 2 but only 1 [blocking] bullets found"
+mk_review "$RV" "$sha" 2 ""
+assert_contains "blocking: 2 with no bullets is rejected" "$(gate "$RV")" "blocking: 2 but only 0 [blocking] bullets found"
+mk_review "$RV" "$sha" 99999999999 ""
+assert_contains "blocking: 99999999999 is rejected as not a number" "$(gate "$RV")" "blocking: must be a number"
+mk_review "$RV" "$sha" many "- [blocking] a.txt:1 wrong value"
+out=$(gate "$RV")
+assert_contains "blocking: many is rejected as not a number" "$out" "blocking: must be a number"
+assert_contains "blocking: many still scans the bullets" "$out" "without a resolved: line"
+mk_review "$RV" "$sha" 1 "- **[BLOCKING]** a.txt:1 wrong value"$'\n'"  resolved: fixed in abc1234"
+assert_contains "resolved '- **[BLOCKING]**' with blocking: 1 passes" "$(gate "$RV")" "PASS"
+mk_review "$RV" "$sha" 1 "- [blocking] a.txt:1 wrong value"$'\n'"  resolved: fixed in abc1234"$'\n'"1) [Blocking] b.txt:2 other value"$'\n'"   resolved: kept on purpose"
+assert_contains "more bullets than stated, all resolved, passes" "$(gate "$RV")" "PASS"
 exit 0
