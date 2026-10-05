@@ -40,3 +40,10 @@ Nothing was lost. Everything below is work that stopped waiting for a step.
 2. Answer the CVR question, then let the vault session continue.
 3. Pull and merge the bbqos vault (item 2), then decide on parking the 17 stale projects.
 4. Let the Ching build session finish before touching the two test files.
+
+## Status at 22:05 (user decisions)
+
+- Item 1 (miso 0068): being applied and pushed from another session in `~/.miso`. Do not apply from here, to avoid a double run.
+- Item 2 (bbqos vault): being pulled and merged in a different workspace.
+- Item 3 (CVR): the only open item. The user will start it overnight, once they know how much session limit is left. The cvrapi.dk-first vs web-search question is still unanswered.
+- Item 4 (Ching build): running in a separate session.
