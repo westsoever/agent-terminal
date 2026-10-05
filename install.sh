@@ -10,11 +10,12 @@
 #       diff shown before applying; nothing is written when the result is identical).
 #   $CLAUDE_DIR/ching  -> symlink to this directory;  $CLAUDE_DIR/commands/{handoff,next}.md -> symlinks.
 #   ~/.agent-repos: created empty with a comment if absent (optional extra list for dash.sh).
+#   $LAUNCH_AGENTS_DIR/org.ching.watch.plist (default ~/Library/LaunchAgents): runs bin/ching-watch.sh every 300 s.
 # It never edits or removes vscode-session-manager-hook.sh or its entries. The blanket osascript
 # "Session finished" popup is removed ONLY with --replace-popup.
 #
 # Overrides (for tests): SETTINGS_FILE, CLAUDE_DIR (default: dirname of SETTINGS_FILE when that is set,
-# else ~/.claude), AGENT_REPOS_FILE, AGENT_HOME.
+# else ~/.claude), AGENT_REPOS_FILE, AGENT_HOME, LAUNCHCTL, LAUNCH_AGENTS_DIR.
 set -euo pipefail
 
 CHING_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -66,7 +67,7 @@ fi
 if [ -f "$SETTINGS_FILE" ]; then CURRENT=$(cat "$SETTINGS_FILE"); else CURRENT='{}'; fi
 printf '%s' "$CURRENT" | jq -e . >/dev/null 2>&1 || { echo "install: $SETTINGS_FILE is not valid JSON" >&2; exit 1; }
 
-GUARD_MATCHER='Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit|mcp__.*[Ss]upabase.*'
+GUARD_MATCHER='Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit|mcp__.*[Ss]upabase.*|mcp__.*([Gg]mail|[Ss]lack|[Dd]iscord|[Tt]elegram).*'
 
 # event, matcher, command, timeout (seconds); tab separated because matchers contain '|'
 hook_line() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4"; }
@@ -97,7 +98,8 @@ else
     .hooks = (.hooks // {})
     | reduce $add[] as $h (.;
         .hooks[$h.event] = ((.hooks[$h.event] // []) as $g
-          | if has_cmd($g; $h.command) then $g
+          | if has_cmd($g; $h.command)
+            then $g | map(if ([.hooks[]?.command] | index($h.command)) != null then .matcher = $h.matcher else . end)
             else $g + [{matcher: $h.matcher, hooks: [{type: "command", command: $h.command, timeout: $h.timeout}]}] end))
     | if $popup == 1 and .hooks.Stop then
         .hooks.Stop |= (map(.hooks |= map(select(((.command // "") | test("osascript.*Session finished")) | not)))
@@ -140,13 +142,45 @@ fi
 NEED_REPOS=0
 if [ "$UNINSTALL" -eq 0 ] && [ ! -e "$AGENT_REPOS_FILE" ]; then NEED_REPOS=1; fi
 
-if [ "$CHANGED" -eq 0 ] && [ -z "$link_plan" ] && [ "$NEED_REPOS" -eq 0 ]; then
+# ---------------- launchd watcher (ching-watch.sh every 5 minutes) ----------------
+LAUNCH_AGENTS_DIR=${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}
+LAUNCHCTL=${LAUNCHCTL:-launchctl}
+PLIST="$LAUNCH_AGENTS_DIR/org.ching.watch.plist"
+AH=${AGENT_HOME:-$HOME/.agent}
+PLIST_BODY=$(cat <<EOP
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>org.ching.watch</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>$LINK/bin/ching-watch.sh</string></array>
+  <key>StartInterval</key><integer>300</integer>
+  <key>RunAtLoad</key><true/>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>AGENT_HOME</key><string>$AH</string>
+  </dict>
+  <key>StandardOutPath</key><string>$AH/watch.log</string>
+  <key>StandardErrorPath</key><string>$AH/watch.log</string>
+</dict>
+</plist>
+EOP
+)
+NEED_PLIST=0
+if [ "$UNINSTALL" -eq 0 ]; then
+  if [ ! -f "$PLIST" ] || [ "$(cat "$PLIST")" != "$PLIST_BODY" ]; then NEED_PLIST=1; fi
+elif [ -f "$PLIST" ]; then
+  NEED_PLIST=1
+fi
+
+if [ "$CHANGED" -eq 0 ] && [ -z "$link_plan" ] && [ "$NEED_REPOS" -eq 0 ] && [ "$NEED_PLIST" -eq 0 ]; then
   say "nothing to do"; exit 0
 fi
 if [ "$DRY" -eq 1 ]; then
   while IFS='|' read -r t l; do [ -z "$l" ] || act "symlink $l -> $t"; done <<<"$link_plan"
   [ "$NEED_REPOS" -eq 0 ] || act "create $AGENT_REPOS_FILE (empty, optional)"
   [ "$CHANGED" -eq 0 ] || act "back up and rewrite $SETTINGS_FILE"
+  [ "$NEED_PLIST" -eq 0 ] || { if [ "$UNINSTALL" -eq 1 ]; then act "launchctl bootout and remove $PLIST"; else act "write $PLIST and launchctl bootstrap it"; fi; }
   exit 0
 fi
 
@@ -179,5 +213,16 @@ if [ "$NEED_REPOS" -eq 1 ]; then
   sed -i.bak 's/^~/# ~/' "$AGENT_REPOS_FILE.tmp"; rm -f "$AGENT_REPOS_FILE.tmp.bak"
   mv "$AGENT_REPOS_FILE.tmp" "$AGENT_REPOS_FILE"; act "create $AGENT_REPOS_FILE"
 fi
-if [ "$UNINSTALL" -eq 1 ]; then say "note: --uninstall removes hook entries only; symlinks and a removed popup are left as they are."; fi
+if [ "$NEED_PLIST" -eq 1 ]; then
+  if [ "$UNINSTALL" -eq 1 ]; then
+    "$LAUNCHCTL" bootout "gui/$(id -u)/org.ching.watch" >/dev/null 2>&1 || true
+    rm -f "$PLIST"; act "removed $PLIST"
+  else
+    mkdir -p "$LAUNCH_AGENTS_DIR" "$AH"
+    printf '%s\n' "$PLIST_BODY" >"$PLIST.tmp" && mv "$PLIST.tmp" "$PLIST"
+    "$LAUNCHCTL" bootout "gui/$(id -u)/org.ching.watch" >/dev/null 2>&1 || true
+    "$LAUNCHCTL" bootstrap "gui/$(id -u)" "$PLIST"; act "loaded $PLIST (ching-watch every 5 minutes)"
+  fi
+fi
+if [ "$UNINSTALL" -eq 1 ]; then say "note: --uninstall removes hook entries and the watcher; symlinks and a removed popup are left as they are."; fi
 exit 0
