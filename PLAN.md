@@ -4,6 +4,8 @@ Status: **DRAFT v2 for review** (v2 applies your first review: agents may push t
 
 > **v3 scope change (from the user):** the kit manages the **whole computer**, not just miso, miso-app and miso-workspace. Any open Claude session, in any repo or plain folder (including `~`), is in scope. Consequences built in Phase 1: global state in `~/.agent/` (sessions registry, per-session `STATE.md`/`NEXT.md`, optional defaults; override with `AGENT_HOME`); a repo's own `.agent/` is an optional override that is active only when it contains a `GOAL.md`; hooks and `guard.sh` work in any cwd with no git repo or `GOAL.md` assumed; `dash.sh` discovers sessions machine-wide (registry + `~/.claude/projects` transcripts + `git worktree list`), `~/.agent-repos` is an optional extra; the release gate and migrate gate stay per repo and are opt-in by a repo `GOAL.md` (elsewhere `guard.sh` still denies pushes to the default branch without a token); the dispatcher manages all sessions, not a fixed list. D6 and Phase 2 are adjusted below; everything else is unchanged.
 
+> **v4 (2026-10-05): Hermes harvest.** Four Hermes Agent repos were evaluated (read-only, nothing installed). Ching takes ideas only, and Claude Code stays the only engine (D15). A new **Phase 1.5** goes in before the pilot: coordination upgrades (event log, notification routing and budget, stall/context/token watcher, `dash.sh --inbox/--next`) and review hardening (review before every release, "not examined" footer, guard rules 8-11). The learning-loop ideas are recorded for **Phase 6**. Full design: `docs/superpowers/specs/2026-10-05-hermes-harvest-design.md`; plain-language summary: `ching-functions.md`. Ching is now the main AI operations layer for all local files (D14).
+
 How to use this file: read sections 1-5 (the design), correct anything wrong, then we work through section 6 one phase at a time. Every phase ends with a **checkpoint**: I show you results and stop until you say go.
 
 ---
@@ -32,6 +34,12 @@ Success is measured in the pilot (section 7), not by whether the scripts exist.
 | D7 | The **director loop** (`claude -p` rewriting NEXT.md) is deferred until the pilot shows a gap. | My recommendation, pending your OK |
 | D8 | Agents **can push to production** (`main`), but only through the **release gate** (section 5.2): tests green, change verified in the real app, evidence recorded for that exact commit. | Your review comment; gate design is mine |
 | D9 | Agents **can create, apply and follow up on migrations** against the shared Supabase project, only through the numbered-file ledger runner (section 5.3). "Update" means a new numbered file. | Your review comment; guardrails are mine |
+| D10-D13 | Split big phases across parallel agents with a separate verifier (D10); Ching is a learning system (D11, Phase 6); mem0 excluded (D12); Checkpoint 1 approved and hooks installed (D13). Full text in `DECISIONS.md`. | User |
+| D14 | Ching is the **main AI operations layer for all local files**. Review before release is required by default in every repo, with or without `GOAL.md`; only a human-written `review: off` disables it. | User, v4 |
+| D15 | Hermes repos are **a source of ideas only**. No Hermes runtime, plugin, skill or GUI runs in Ching. | User, v4 |
+| D16 | Phase 1.5 (coordination + review hardening) is built **before** the pilot; the learning-loop ideas wait for Phase 6 and real pilot data. | User, v4 |
+| D17 | Stay in bash: an append-only event log (`~/.agent/events.jsonl`) plus a one-shot launchd watcher. No daemon, no cloud scheduler, no AI calls in Phase 1.5. | User, v4 |
+| D18 | Sessions may write **drafts only**. They never send email or chat messages (guard rule 10). | User, v4 |
 
 Items marked "pending your OK" are the ones to challenge when you review.
 
@@ -94,14 +102,17 @@ Items marked "pending your OK" are the ones to challenge when you review.
     release-gate.sh           runs tests + checks verification evidence, mints a one-commit release token (5.2)
     post-release.sh           watches the deploy run, reports result, flags failure (5.2)
     migrate-gate.sh           dry run + migration lint before `db-migrate.ts --apply` is allowed (5.3)
-    dash.sh                   one line per repo/worktree; --speak gives a short sentence for voice
+    dash.sh                   one line per session; --speak, --inbox (needs you / ready / finished), --next (ranked)  [v4]
+    ching-watch.sh            launchd every 5 min, one-shot: stall, context pressure, token totals, log rotation  [v4]
+    lib.sh                    shared helpers, incl. ev (event log) and checkpoint_get  [v4]
   commands/handoff.md next.md installed to ~/.claude/commands/
-  templates/                  GOAL.md STATE.md NEXT.md, AGENTS.md autonomy block, gitignore lines
+  templates/                  GOAL.md STATE.md NEXT.md VERIFY.md REVIEW.md review-lenses/, AGENTS.md autonomy block, gitignore lines
   dispatcher/AGENTS.md        policy for the voice dispatcher session
   tests/                      shell tests run in a throwaway repo
 
 ~/.agent-repos                list of repos; worktrees discovered with `git worktree list`
-<repo>/.agent/                GOAL.md STATE.md NEXT.md (gitignored, per worktree)
+<repo>/.agent/                GOAL.md STATE.md NEXT.md verify/ review/ (gitignored, per worktree)
+~/.agent/                     sessions/<id>/ (meta, STATE.md, NEXT.md), events.jsonl, notify/, tokens/, defaults/  [v3/v4]
 ```
 
 **Coexistence rule:** `install.sh` only *adds* hook entries. It never edits or removes `vscode-session-manager-hook.sh`. The one thing it removes is the blanket `osascript` "Session finished" popup, replaced by `notify.sh`, and only after you confirm.
@@ -129,6 +140,11 @@ Enforced by `guard.sh` as a `PreToolUse` hook, applies to every session. **Pleas
 6. Supabase MCP `apply_migration`, `execute_sql` with anything other than read-only SQL, and Management API DDL. They bypass the ledger (this is miso's own rule). Migrations go through section 5.3.
 7. Editing a migration file that is already committed, and `db-migrate.ts --record-only`. The runner refuses edited applied files anyway; `--record-only` needs human judgment.
 
+8. *(v4)* Publishing: `npm`/`bun`/`pnpm`/`yarn` publish, `gh release create|delete|edit`, `gh repo delete`, `gh repo edit --visibility`, `gh repo create --public`.
+9. *(v4)* Closing other people's items: `gh pr close`, `gh issue close|delete`, `gh api` calls that set `state=closed`. Commenting stays allowed.
+10. *(v4, D18)* Sending: MCP send/reply/forward/post tools for Gmail, Slack, Discord and Telegram. Drafts stay allowed.
+11. *(v4)* Gate settings: sessions may not add or change `review:`, `release_mode:` or `test_command:` in any `GOAL.md` (repo `.agent/` or `~/.agent/defaults/`).
+
 A denied call returns a reason that tells the session what to do instead (open a PR, run the gate, or stop and notify).
 
 ### 5.2 Release path: how new work is tested and shipped (D8)
@@ -152,7 +168,9 @@ The steps a session follows before shipping:
    - miso-workspace: there is no preview, so verification is the miso-app local run with `SPACES_ROOT`.
    - **Write actions are never exercised on a preview** (it uses real data, and the repo rule says so). Write paths are proven by tests and the local run.
 3. **Evidence file.** The session writes `.agent/verify/<commit-sha>.md`: what it exercised, URLs, screenshot paths, "no console errors", or "no UI surface" with the reason.
-4. **`release-gate.sh`** checks: clean tree, up to date with `origin/main`, test command passes, evidence file exists for this exact `HEAD`. If all pass it writes a token valid for that one commit.
+3b. *(v4)* **Evidence also has a `## not examined` section** (at least 10 characters): what the verification deliberately did not check.
+3c. *(v4, D14)* **Review.** A fresh read-only reviewer subagent reads the diff with three lenses (`templates/review-lenses/`: error-resilience, identity, simulation) and writes `.agent/review/<commit-sha>.md`: `blocking: <n>`, findings, a `resolved:` line under every blocking finding, and `## not examined`. Required in every repo unless its `GOAL.md` says `review: off` (only the user can write that, guard rule 11).
+4. **`release-gate.sh`** checks: clean tree, up to date with `origin/main`, test command passes, evidence file exists for this exact `HEAD`, and *(v4)* the review file is valid for this `HEAD`. If all pass it writes a token valid for that one commit.
 5. **`guard.sh` allows `git push origin HEAD:main`** only when the token matches `HEAD`. A new commit invalidates the token.
 6. **`post-release.sh`** watches the deploy run (`gh run watch`), reports the result into `STATE.md` under **Releases**, and sends a notification. If CI fails or the smoke test fails, the session may push **one revert commit** (it still passes the gate's clean-tree and token checks), then stops and notifies you.
 
@@ -203,7 +221,24 @@ Work in `/tmp/agent-sandbox` (a fresh git repo). Back up `~/.claude/settings.jso
 - [ ] **1.8** Write `install.sh`: idempotent, backs up `settings.json`, shows a diff before applying.
 - [ ] **1.9** Tests in a throwaway repo: SessionStart injects, Stop retries then ends, notification shows repo name, each guardrail denies, the release token flow (no token, valid token, stale token), a destructive migration is blocked while an additive one passes, running `install.sh` twice changes nothing.
 
-**Checkpoint 1:** test output plus the exact `settings.json` diff. You approve before `install.sh` touches your real settings.
+**Checkpoint 1:** test output plus the exact `settings.json` diff. You approve before `install.sh` touches your real settings. **Done: approved, hooks installed (D13, `CHECKPOINT-1.md`).**
+
+### Phase 1.5: Hermes harvest (v4; design in `docs/superpowers/specs/2026-10-05-hermes-harvest-design.md`)
+
+Built per D10: the shared contracts land first, then parallel implementers on disjoint files, then a separate verifier. TDD in the existing harness. The detailed task list lives in the implementation plan under `docs/superpowers/plans/`.
+
+- [ ] **1.5.1** Contracts: `ev` and `checkpoint_get` in `lib.sh`; checkpoint block in `templates/STATE.md` and `/handoff`; `t_events.sh`.
+- [ ] **1.5.2** Events from every hook and gate (session-start, pre-compact, stop-check, guard after its decision, release/migrate/post-release).
+- [ ] **1.5.3** `notify.sh`: `done` goes to the inbox instead of a push; budget of 4 non-urgent alerts a day, 09:00-21:00, 45-minute cooldown; `input`/`blocked`/`ready` always delivered.
+- [ ] **1.5.4** `ching-watch.sh` + launchd plist via `install.sh`: stall after 20 minutes, context levels (healthy under 60%, watch, handoff over 80%), daily token totals with optional `TOKEN_BUDGET_DAILY`, event-log rotation.
+- [ ] **1.5.5** `dash.sh`: `ctx` and `tok` columns, `--inbox`, `--next` (U×I×R), new `--speak` wording; dispatcher policy uses the inbox.
+- [ ] **1.5.6** `stop-check.sh`: in repo mode, block once per prompt when the checkpoint is missing or stale. (Sequence after the in-flight `test-escalate` edits to this file.)
+- [ ] **1.5.7** Review hardening: `## not examined` in VERIFY.md, `templates/REVIEW.md`, three lens prompts, review checks in `release-gate.sh`, `review: required` in the defaults `GOAL.md`.
+- [ ] **1.5.8** Guard rules 8-11 with deny and allow tests; wider guard matcher in `install.sh`.
+- [ ] **1.5.9** Autonomy block: checkpoint every turn, name the exact missing piece, the review step, drafts only.
+- [ ] **1.5.10** Verification agent: full suite plus shellcheck, `live-smoke.sh` shows events, and the error-resilience lens run over `guard.sh` and `stop-check.sh` (findings fixed or logged).
+
+**Checkpoint 1.5:** test output, the `settings.json` and launchd diff, and the lens findings. You approve before `install.sh` re-runs on your real settings.
 
 ### Phase 2: Pilot on a couple of real sessions across different folders (2-3 days of real use)
 
@@ -212,6 +247,7 @@ Work in `/tmp/agent-sandbox` (a fresh git repo). Back up `~/.claude/settings.jso
 - [ ] **2.3** Work normally with those sessions. Record the three metrics in section 7.
 - [ ] **2.4** Read miso's `release.yml` and fill in its release path in 5.2. Run the browser verification step for real on one change.
 - [ ] **2.5** If a migration is needed during the pilot, run it through `migrate-gate.sh` with you watching the first one.
+- [ ] **2.6** *(v4)* Tune the notification budget, stall threshold and context levels from what the pilot shows (`notify` and `stall` events). The first real release goes through the review step with you watching.
 
 **Checkpoint 2:** metrics review. We tune `GOAL.md` and the policy before adding anything.
 
@@ -241,10 +277,22 @@ Runs only if Phase 0.5 passed. If it failed, the dispatcher is status-only and r
 
 **Checkpoint 5:** a week of metrics across all three.
 
+### Phase 6: Learning loop (D11), specified after the pilot
+
+Gets its own spec once the pilot has produced real `events.jsonl` data. The design inputs harvested in v4 (spec section 7):
+- lesson records `{task_type, what_worked, what_failed, do_differently, quality}`, with keyword-gated retrieval and the top 3 injected at SessionStart;
+- decay scoring `importance × e^(−0.693·days/14)`; pruning is proposed, never automatic;
+- consolidation into short scored facts under a size cap;
+- per-task-type stats (stop retries, time to green, overturned assumptions) and habits derived from transcripts;
+- a blind-spot ledger built from recurring `not_examined` lines;
+- a skill-candidate miner: repeated 3-6-step workflows across 3 or more sessions on 2 or more days become `~/.agent/proposals/skill-<slug>.md`, which you approve and skill-creator builds.
+
+Everything writes only to `~/.agent/proposals/`. The model call is a local `claude -p` started by launchd. It never writes skills, guard or settings by itself.
+
 ### Later (not scheduled)
 
 - Phone voice via VoiceMode Connect (routes audio through voicemode.dev's cloud; needs your explicit decision).
-- Director loop (`claude -p` on a cheaper model rewriting `NEXT.md`), only if the pilot shows sessions losing the thread.
+- ~~Director loop~~: replaced by the Phase 6 learning loop (D11).
 - Cloud sessions for long migrations. Hooks may not fire there; test first.
 
 ## 7. How we judge it (pilot metrics, from your original doc)
@@ -252,6 +300,8 @@ Runs only if Phase 0.5 passed. If it failed, the dispatcher is status-only and r
 1. Times a session stopped to ask you something.
 2. Logged assumptions you had to overturn.
 3. Minutes per handoff (switching to a session and being productive).
+
+Coordination-specific (v4, read from `events.jsonl`): notifications delivered vs suppressed per day; stalls detected, and how many were real; `/handoff` runs triggered by the context watcher; review findings marked blocking per release.
 
 Voice-specific: end-of-speech to first spoken word (target to be set from Phase 0.6, not guessed now); mishears that led to a wrong instruction being relayed (target: zero reaching a worker unconfirmed).
 
@@ -271,6 +321,10 @@ Reading the results: too many questions means a vague `GOAL.md` or a missing tes
 | Third-party code with mic access (VoiceMode) | Pin the version, review the plugin's `plugin.json` and MCP launcher before install, local services only. |
 | Editing your `settings.json` breaks existing hooks | Backup first, additive-only merge, diff shown before applying, idempotent installer. |
 | `.agent/` state diverges between worktrees | State is per worktree by design; `dash.sh` lists each worktree separately. |
+| Event log holds paths and one-line summaries | Local only, mode 0600, strings capped at 300 characters, never sent anywhere; you can delete it at any time. |
+| A session forges a review file | Mechanical checks (commit, mtime, blocking items resolved, not-examined section) plus policy; same honest limit as the browser evidence. Verified in the pilot by you watching the first release. |
+| Notification budget hides something important | `input`, `blocked` and `ready` bypass the budget; every suppressed alert is logged and shown in `dash.sh --inbox`. |
+| A session switches off review | Guard rule 11 denies session edits to `review:`, `release_mode:` and `test_command:`. |
 | Token cost of parallel sessions | Cap about 4-5 active sessions; strongest model for planning/review, cheaper model for well-specified execution. |
 
 ## 9. Questions for your review
@@ -280,6 +334,5 @@ Reading the results: too many questions means a vague `GOAL.md` or a missing tes
 3. **Where does the kit live?** It is personal tooling, not product code. Options: (a) local `git init` in `ching` only, no remote (recommended: history and rollback, nothing published); (b) a **private** repo under `westsoever/` for backup and a second machine, created only when you say so; (c) no git at all, `install.sh` copies from the folder. `gh` is already signed in as `westsoever`, so (b) needs no setup. It will not go under `technobbq/`.
 4. **Supabase access (5.3):** is a narrower token than the current personal access token possible for you, and does your plan include database branching?
 5. **Notification click:** should clicking a notification focus the Claude Desktop app, or VS Code?
-6. **The "Session finished" popup:** OK to remove it once `notify.sh` replaces it?
-4. **Notification click:** should clicking a notification focus the Claude Desktop app, or VS Code?
-5. **The "Session finished" popup:** OK to remove it once `notify.sh` replaces it?
+6. **The "Session finished" popup:** OK to remove it once `notify.sh` replaces it? (v4: `done` no longer pushes at all, so the popup would be the only "finished" signal left.)
+7. *(v4)* **Daily token budget:** set `TOKEN_BUDGET_DAILY` (alerts at 80% and 100%), or leave it unset and only show the `tok` column?

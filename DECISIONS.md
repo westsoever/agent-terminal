@@ -2,6 +2,19 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D14-D18 (2026-10-05): Hermes harvest (Phase 1.5)
+
+**Decisions (user, in the brainstorming session that evaluated four Hermes Agent repos):**
+
+- **D14:** Ching is the main AI operations layer for all local files. Review before release is required by default in every repo; only a human-written `review: off` in `GOAL.md` disables it (guard rule 11 stops sessions from changing gate settings).
+- **D15:** super-hermes, hermes-workspace, hermes-plugins and hermes-skill-factory are a source of ideas only. Nothing from them is installed or run. Claude Code stays the only engine.
+- **D16:** Phase 1.5 (coordination + review hardening) is built before the Phase 2 pilot. The learning-loop ideas are recorded for Phase 6 and specified after the pilot.
+- **D17:** Stay in bash: an append-only `~/.agent/events.jsonl` plus a one-shot launchd watcher. No daemon, no cloud scheduler, no AI calls in Phase 1.5.
+- **D18:** Sessions write drafts only. They never send email or chat messages (guard rule 10).
+- Notification policy confirmed: only `input`, `blocked` and `ready` always reach the user; at most 4 other alerts a day, 09:00-21:00, 45-minute cooldown; `done` goes to `dash.sh --inbox`.
+
+Why, and what was rejected: `docs/superpowers/specs/2026-10-05-hermes-harvest-design.md` section 3. Plain summary: `ching-functions.md`.
+
 ## D13 (2026-10-05): Checkpoint 1 approved; hooks installed on the real settings
 
 **Decision (user, "go ahead", following the orchestrator's recommendation):** install the kit's hooks into `~/.claude/settings.json`.
