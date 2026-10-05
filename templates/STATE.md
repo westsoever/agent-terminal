@@ -1,7 +1,16 @@
 # State
 
 status: idle
-<!-- status is one of: idle | working | blocked | done. dash.sh reads this line. -->
+<!-- status is one of: idle | working | input | blocked | done. dash.sh reads this line. -->
+
+<!-- ching:checkpoint -->
+result: (none)
+blocker: none
+next_action: (none)
+files_changed: 0
+examined: (none)
+not_examined: (none)
+<!-- /ching:checkpoint -->
 
 ## Done
 - (none)

@@ -115,4 +115,30 @@ EVF="$AGENT_HOME/events.jsonl"
 assert_eq "events: three test blocks and one cap for sess-A" "4" "$(jq -r 'select(.sid=="sess-A" and .kind=="stop_blocked") | .kind' "$EVF" | wc -l | tr -d ' ')"
 assert_contains "events: cap is marked" "$(jq -r 'select(.sid=="sess-A" and .kind=="stop_blocked") | .data.reason' "$EVF")" "tests-cap"
 assert_contains "events: a green stop logs stop_ok" "$(jq -r 'select(.kind=="stop_ok") | .sid' "$EVF")" "sess-B"
+
+# ---------- checkpoint rule (Phase 1.5) ----------
+CR=$(mk_repo cprepo); write_goal "$CR" "true"
+touch_prompt() { printf '%s' "$(hook_json UserPromptSubmit "$1" "$2")" | "$BIN/session-start.sh" touch; }
+touch_prompt "$CR" cp-1
+out=$(stop "$CR" cp-1)
+assert_eq "checkpoint missing: blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+assert_contains "checkpoint missing: reason names /handoff" "$(printf '%s' "$out" | jq -r .reason)" "/handoff"
+out=$(stop "$CR" cp-1)
+assert_eq "checkpoint: asked only once per prompt" "" "$out"
+touch_prompt "$CR" cp-2
+printf '# State\nstatus: done\n<!-- ching:checkpoint -->\nresult: ok\nblocker: none\nnext_action: none\n<!-- /ching:checkpoint -->\n' >"$CR/.agent/STATE.md"
+out=$(stop "$CR" cp-2)
+assert_eq "fresh checkpoint: no block" "" "$out"
+assert_contains "fresh checkpoint: checkpoint event" "$(jq -r 'select(.kind=="checkpoint") | .sid' "$AGENT_HOME/events.jsonl")" "cp-2"
+touch -t 202001010000 "$CR/.agent/STATE.md"
+touch_prompt "$CR" cp-2
+out=$(stop "$CR" cp-2)
+assert_eq "stale checkpoint (older than the prompt): blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+CP="$WORK/cp plain"; mkdir -p "$CP"
+touch_prompt "$CP" cp-3
+out=$(stop "$CP" cp-3)
+assert_eq "plain folder: never blocks for a checkpoint" "" "$out"
+NR=$(mk_repo cpnoprompt); write_goal "$NR" "true"
+out=$(stop "$NR" cp-4)
+assert_eq "no recorded prompt: never blocks for a checkpoint" "" "$out"
 exit 0

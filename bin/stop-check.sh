@@ -29,8 +29,32 @@ notify() { # kind message
 }
 set_state() { meta_set state "$1"; meta_set updated "$(date +%s)"; }
 
+# Repo mode only, and only once a prompt was recorded: block ONCE per prompt when STATE.md has no
+# checkpoint block or it was not updated since that prompt. The meta key makes the next Stop pass.
+checkpoint_gate() {
+  [ "$REPO_MODE" -eq 1 ] || return 0
+  local prompted st status
+  [ -f "$SESS_DIR/meta" ] || return 0   # meta_get on a missing file fails under pipefail and set -e would end the hook
+  prompted=$(meta_get "$SESS_DIR/meta" prompted)
+  [ -n "$prompted" ] || return 0
+  [ "$(meta_get "$SESS_DIR/meta" checkpoint_blocked_for)" != "$prompted" ] || return 0
+  st="$STATE_DIR/STATE.md"
+  if [ -f "$st" ] && grep -qF '<!-- ching:checkpoint -->' "$st" && [ "$(file_mtime "$st")" -ge "$prompted" ]; then
+    status=$(sed -n 's/^status:[[:space:]]*//p' "$st" | head -1)
+    ev checkpoint "$(jq -nc --arg s "$status" --arg b "$(checkpoint_get "$st" blocker)" --arg n "$(checkpoint_get "$st" next_action)" \
+      '{status:$s,blocker:$b,next_action:$n}')"
+    return 0
+  fi
+  meta_set checkpoint_blocked_for "$prompted"
+  ev stop_blocked '{"retry":1,"reason":"checkpoint"}'
+  jq -n --arg r "Do not stop yet: update the checkpoint block in $st for this turn (run /handoff: result, blocker, next_action, files_changed, examined, not_examined). This is asked once per prompt." \
+    '{decision:"block", reason:$r}'
+  exit 0
+}
+
 # A turn that ends with a question to the user is "needs input"; anything else is "done".
 finish_ok() {
+  checkpoint_gate
   local last snippet kind="done"
   last=$(printf '%s' "$LAST_MSG" | awk 'NF { l = $0 } END { print l }')
   if printf '%s' "$last" | grep -Eq '\?[[:space:]]*[)"*_]*$'; then kind=input; fi
