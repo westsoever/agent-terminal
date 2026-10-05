@@ -2,6 +2,9 @@
 # Stop hook: retry then end, per-session counters, schema, any folder.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# This suite can itself be the test_command of a live stop-check.sh run (the marker is inherited): the hooks
+# under test must not see it, or every one of them would exit at the recursion guard.
+unset CHING_STOP_CHECK_RUNNING CHING_ESCALATING
 
 R=$(mk_repo stoprepo)
 OKFILE="$WORK/tests-ok"
@@ -109,6 +112,72 @@ out=$(CHING_ESCALATING=1 CHING_CLAUDE_BIN="$WORK/fake-claude" CHING_TEST_MODELS=
 assert_eq "escalating child: stop is allowed, never blocked" "" "$out"
 assert_eq "escalating child: no model is started" "0" "$(wc -l <"$ESC_CALLS" | tr -d ' ')"
 assert_no_file "escalating child: no retry counter written" "$AGENT_HOME/sessions/sess-ESC3/retries"
+
+# ---------- runaway guards (Task 12a) ----------
+# F1: the test_command itself may start a Claude session; that session's Stop hook is stop-check.sh again,
+# under a new session id. The hook marks its test run, so the nested stop is never gated, counted or run.
+# The stand-in test is bounded (it nests at most twice) so an unfixed hook ends instead of looping.
+NR1=$(mk_repo nestrepo)
+cat >"$WORK/nest-test.sh" <<'EOS'
+#!/usr/bin/env bash
+echo run >>"$NEST_CNT"
+n=$(wc -l <"$NEST_CNT" | tr -d ' ')
+if [ "$n" -lt 3 ]; then
+  jq -n --arg c "$NEST_CWD" --arg s "sess-NEST-in$n" \
+    '{hook_event_name:"Stop",cwd:$c,session_id:$s,stop_hook_active:false,last_assistant_message:"x"}' \
+    | "$NEST_HOOK" >>"$NEST_OUT" 2>&1
+  echo "$?" >>"$NEST_RC"
+fi
+exit 1
+EOS
+export NEST_CNT="$WORK/nest-cnt" NEST_OUT="$WORK/nest-out" NEST_RC="$WORK/nest-rc" NEST_CWD="$NR1" NEST_HOOK="$BIN/stop-check.sh"
+: >"$NEST_CNT"; : >"$NEST_OUT"; : >"$NEST_RC"
+write_goal "$NR1" "bash $WORK/nest-test.sh"
+out=$(stop "$NR1" sess-NEST)
+assert_eq "nested stop: the top-level stop still blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+assert_eq "nested stop: the test command ran once (not once per nesting level)" "1" "$(wc -l <"$NEST_CNT" | tr -d ' ')"
+assert_eq "nested stop: the nested hook ran and exited 0" "0" "$(tr '\n' ' ' <"$NEST_RC" | sed 's/ $//')"
+assert_eq "nested stop: the nested hook printed nothing" "" "$(cat "$NEST_OUT")"
+assert_no_file "nested stop: no retry counter for the first nested session" "$AGENT_HOME/sessions/sess-NEST-in1/retries"
+assert_no_file "nested stop: no retry counter for a second nested session" "$AGENT_HOME/sessions/sess-NEST-in2/retries"
+assert_file "nested stop: the top-level session has its own counter" "$AGENT_HOME/sessions/sess-NEST/retries"
+
+# F2: the stop that hits the cap is allowed anyway, so it must not pay for the model ladder again.
+cat >"$WORK/fake-claude-nofix" <<'EOS'
+#!/usr/bin/env bash
+while [ $# -gt 0 ]; do [ "$1" = --model ] && echo "$2" >>"$NOFIX_CALLS"; shift; done
+exit 0
+EOS
+chmod +x "$WORK/fake-claude-nofix"
+export NOFIX_CALLS="$WORK/nofix-calls"; : >"$NOFIX_CALLS"
+write_goal "$R" "test -f $WORK/never-exists"
+for i in 1 2 3; do
+  out=$(CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-CAPLADDER)
+  assert_eq "cap ladder: stop $i blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+done
+GAVE_UP_BEFORE=$(grep -c 'gave up after' "$R/.agent/STATE.md" || true)
+out=$(CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-CAPLADDER)
+assert_eq "cap ladder: stop 4 is allowed" "" "$out"
+assert_eq "cap ladder: 3 blocking stops x 2 models, none on the cap stop" "6" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+assert_no_file "cap ladder: counter reset at the cap" "$AGENT_HOME/sessions/sess-CAPLADDER/retries"
+assert_eq "cap ladder: the cap stop is still recorded in STATE.md" "$((GAVE_UP_BEFORE + 1))" "$(grep -c 'gave up after' "$R/.agent/STATE.md" || true)"
+
+# F6: a non-numeric or zero cap must not switch the safety limit off.
+for i in 1 2 3; do
+  out=$(STOP_CHECK_MAX_RETRIES=three stop "$R" sess-MAXWORD)
+  assert_contains "MAX=three behaves like 3: stop $i blocks, attempt $i of 3" "$(printf '%s' "$out" | jq -r .reason)" "attempt $i of 3"
+done
+out=$(STOP_CHECK_MAX_RETRIES=three stop "$R" sess-MAXWORD)
+assert_eq "MAX=three behaves like 3: stop 4 is allowed" "" "$out"
+out=$(STOP_CHECK_MAX_RETRIES=0 stop "$R" sess-MAXZERO)
+assert_contains "MAX=0 behaves like 1: first stop blocks, attempt 1 of 1" "$(printf '%s' "$out" | jq -r .reason)" "attempt 1 of 1"
+out=$(STOP_CHECK_MAX_RETRIES=0 stop "$R" sess-MAXZERO)
+assert_eq "MAX=0 behaves like 1: second stop is allowed" "" "$out"
+# TIMEOUT=0 is perl `alarm 0` (no alarm): it behaves like 1 second. (A non-number falls back to 900 s, which
+# cannot be observed without a 900 s test, so only the zero case is tested.)
+write_goal "$R" "sleep 3; exit 1"
+out=$(STOP_CHECK_TIMEOUT=0 stop "$R" sess-TMOZERO)
+assert_contains "TIMEOUT=0 behaves like 1: timed out after 1s" "$(printf '%s' "$out" | jq -r .reason)" "timed out after 1s"
 
 # ---------- events (Phase 1.5) ----------
 EVF="$AGENT_HOME/events.jsonl"

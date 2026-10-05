@@ -16,9 +16,19 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # A model started by test-escalate.sh inherits this hook: its stop is never gated, counted or notified.
 [ -z "${CHING_ESCALATING:-}" ] || exit 0
+# The same for anything the test_command itself starts (a claude -p smoke test, an Agent-SDK test, a suite
+# with a live test): it inherits CHING_STOP_CHECK_RUNNING from the run below, so its own Stop hook ends here
+# instead of running the test_command again under a new session id without end.
+[ -z "${CHING_STOP_CHECK_RUNNING:-}" ] || exit 0
 
+# Both caps are safety limits: a non-number falls back to the default, and neither may be below 1
+# (STOP_CHECK_TIMEOUT=0 would mean no alarm at all, STOP_CHECK_MAX_RETRIES=three would never be reached).
 MAX=${STOP_CHECK_MAX_RETRIES:-3}
+case "$MAX" in ''|*[!0-9]*) MAX=3 ;; esac
+[ "$MAX" -ge 1 ] || MAX=1
 TIMEOUT=${STOP_CHECK_TIMEOUT:-900}
+case "$TIMEOUT" in ''|*[!0-9]*) TIMEOUT=900 ;; esac
+[ "$TIMEOUT" -ge 1 ] || TIMEOUT=1
 
 hook_init
 resolve_state
@@ -97,9 +107,20 @@ fi
 
 OUT=$(mktemp "${TMPDIR:-/tmp}/ching-stop.XXXXXX")
 trap 'rm -f "$OUT"' EXIT
+
+# The retry count so far, read before the run: when it is already at the cap, this is the stop that will
+# be allowed whatever happens, so the paid model ladder must not run for it.
+n=0
+if [ -f "$COUNTER" ]; then n=$(cat "$COUNTER" 2>/dev/null || echo 0); fi
+case "$n" in ''|*[!0-9]*) n=0 ;; esac
+
 rc=0
 # test-escalate.sh runs the check with no model first; only on failure does it call the cheapest model
 # (Haiku), then the next (Sonnet), re-running the check after each. CHING_TEST_MODELS="" turns that off.
+# CHING_STOP_CHECK_RUNNING marks everything the test command starts (see the guard at the top). It is not
+# CHING_ESCALATING: test-escalate.sh would switch the model ladder off for this run too.
+export CHING_STOP_CHECK_RUNNING=1
+if [ "$n" -ge "$MAX" ]; then export CHING_TEST_MODELS=""; fi
 CHING_TEST_NOTIFY=0 "$SELF_DIR/test-escalate.sh" -C "$WORK_DIR" -- \
   perl -e 'alarm shift @ARGV; exec @ARGV' "$TIMEOUT" bash -c "$TEST_CMD" >"$OUT" 2>&1 </dev/null || rc=$?
 
@@ -109,10 +130,6 @@ if [ "$rc" -eq 0 ]; then
   printf '%s\n' "$FP" >"$PASS_FILE"
   finish_ok
 fi
-
-n=0
-if [ -f "$COUNTER" ]; then n=$(cat "$COUNTER" 2>/dev/null || echo 0); fi
-case "$n" in ''|*[!0-9]*) n=0 ;; esac
 
 if [ "$n" -ge "$MAX" ]; then
   # Cap reached: allow the stop, record it, and tell the human.
