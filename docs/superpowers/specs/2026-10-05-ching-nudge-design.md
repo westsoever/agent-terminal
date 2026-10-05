@@ -1,8 +1,8 @@
 # Ching check-in nudges (waiting-session reminders) - design
 
-Date: 2026-10-05
-Status: draft for review. Not scheduled yet: it builds on Phase 1.5 and must wait for the Phase 1.5 build to finish.
-Builds on: `2026-10-05-hermes-harvest-design.md` (events, `notify.sh` budget, `ching-watch.sh`, checkpoint block).
+Date: 2026-10-05 (rev 2, after a feasibility and simplicity review)
+Status: draft for review. Not scheduled: it builds on Phase 1.5 and starts after Checkpoint 1.5.
+Builds on: `2026-10-05-hermes-harvest-design.md` (event log, `notify.sh` budget, `ching-watch.sh`, checkpoint block).
 
 ## 1. Intent
 
@@ -10,95 +10,95 @@ The user wants Ching to be always on and to check in when work is waiting on the
 
 Agreed in conversation (2026-10-05, voice and chat):
 
-- **Trigger:** a session is idle or waiting on the user with work still open. A `working` session never triggers a reminder, even if the keyboard and mouse have been idle for hours.
+- **Trigger:** a session is waiting on the user. A `working` session never triggers a reminder, even if the keyboard and mouse have been idle for hours.
 - **Delivery:** a banner first. If the user has not reacted after about 5 minutes, Ching speaks a short note through the local voice.
 - **Later, not in scope:** a notch widget that pops out on hover. It would read the same event log.
 
-Assumption made by the author, open to correction in review: the spoken follow-up happens only when the user is at the Mac (keyboard or mouse used in the last 10 minutes). Otherwise the nudge stays banner-only.
+Assumption, open to correction: the spoken note happens only when the user is at the Mac (keyboard or mouse used in the last 10 minutes).
 
-Success: a session that finishes a turn and sits waiting produces one banner, then at most one spoken note, per waiting spell. Nothing is spoken to an empty room, over another session's voice, or at night. No AI calls, no daemon (D17).
+Success: each waiting spell produces at most one banner and one spoken note. Nothing is spoken to an empty room, over another session's voice, or in quiet hours. No AI calls, no daemon (D17).
 
-## 2. Design
+## 2. What the review found, and what changed from rev 1
 
-The nudge is a new check inside `ching-watch.sh`, plus one small script, `bin/speak.sh`.
+Checked against the code in the `phase-1.5-harvest` worktree and on the machine:
 
-### 2.1 "Waiting" definition
+- **Wrong state source.** Rev 1 read `status:` from STATE.md, which only exists after `/handoff`. The hooks already keep a reliable `state` and `updated` time in each session's registry `meta` (`stop-check.sh` sets them at every Stop). Rev 2 uses those, and no transcript read.
+- **Wrong states.** Hooks never set `idle`. At Stop a session becomes `done` (turn finished), `input` (the last line is a question) or `blocked`. Rev 1 would have missed `done`, the most common waiting case.
+- **Duplicate banner.** `input` and `blocked` are urgent kinds, so `notify.sh` already pushes a banner at Stop. A second banner would be noise. Rev 2 reuses that banner as stage 1 and only adds a new banner for `done`.
+- **Too many moving parts.** Rev 1 added a 60-second tick with a gate for the heavy work, three meta keys, and a custom daily cap in `notify.sh`. Rev 2 keeps the 5-minute tick, one meta key, and uses the existing budget. The spoken note lands 5 to 10 minutes after the Stop, which matches "about 5 minutes".
+- **Checked and fine.** The Kokoro endpoint returns MP3 (the first request took 9.7 s, within the 30 s timeout), `afplay` exists, `ioreg` reports `HIDIdleTime` (18 s measured), and the conch file is JSON with `held` and `expires`. `install.sh` links the whole kit directory, so a new `bin/speak.sh` needs no installer change.
 
-A registry session (state not `ended`) is **waiting** when all hold:
+## 3. Design
 
-1. its `status:` is `idle`, `input` or `blocked`;
-2. there is open work: the checkpoint block has `blocker:` other than `none`, or `next_action:` that is non-empty and not `none`, or the session's `NEXT.md` is non-empty;
-3. the transcript mtime is at least `WATCH_WAIT_GRACE_MINS` (default 2) ago. This avoids a banner at the end of every turn while the user is still reading.
+A new check in `ching-watch.sh` and one small script, `bin/speak.sh`.
 
-`done` and `working` sessions are never waiting. A newer transcript write (a new prompt or turn) ends the waiting spell and clears `wait_since`, `nudged_at` and `spoken_at` in the session meta.
+### 3.1 Waiting
 
-### 2.2 Stage 1: banner
+A registry session (state not `ended`) is **waiting** when:
 
-When a session becomes waiting and `wait_since` is unset: set `wait_since=<now>`, emit a `waiting` event `{mins, blocker}`, run `notify.sh waiting`, and set `nudged_at`. The banner text is `<session name>: <blocker, else next_action>`.
+1. meta `state` is `input` or `blocked`, or `done` with open work (the checkpoint has `blocker:` other than `none` or a `next_action:` other than `none`, or the session's `NEXT.md` is non-empty); and
+2. the `updated` time is at least `WATCH_WAIT_GRACE_MINS` (default 2) ago.
 
-`notify.sh` change: `waiting` is a new budgeted kind with two differences from `idle` and `stall`. It is exempt from the 45-minute cooldown, because the once-per-spell rule already limits it. It has its own daily cap, `WATCH_NUDGE_MAX` (default 10), counted in `~/.agent/notify/nudge-YYYY-MM-DD`. Quiet hours (`NOTIFY_QUIET_START` / `NOTIFY_QUIET_END`) apply. A suppressed nudge is logged with its reason and does not set `nudged_at`, so it is retried on the next tick while the spell lasts.
+`working` never waits. A new prompt or Stop changes `updated` (and `state`), so a waiting spell ends by itself and the next one starts clean. Spell identity is the `updated` value.
 
-### 2.3 Stage 2: spoken note
+### 3.2 Stage 1: banner
 
-When a session is waiting, `nudged_at` is set, `spoken_at` is unset, and `WATCH_SPEAK_AFTER_MINS` (default 5) have passed since `nudged_at`, speak only if all of these hold:
+- `input` and `blocked`: the banner already went out at Stop. The watcher sends nothing.
+- `done` with open work: the watcher runs `notify.sh waiting` once per spell, with the text `<session name>: <next_action, else blocker>`, and emits a `waiting` event.
 
-- **Presence:** the user used the keyboard or mouse in the last `WATCH_PRESENT_MINS` (default 10). Read with `ioreg -c IOHIDSystem` (`HIDIdleTime`, nanoseconds). If the value cannot be read, treat the user as absent.
-- **Voice free:** the VoiceMode conch is not held. `~/.voicemode/conch` is JSON with `held` and `expires`; it is held when `held` is true and `expires` is in the future. A missing or unparseable file counts as free.
-- **Quiet hours** do not apply.
-- Nobody has been spoken to in the last `WATCH_SPEAK_GAP_MINS` (default 10), tracked in `~/.agent/notify/last-spoken`. This stops several waiting sessions from talking back to back.
+`waiting` is a new kind in `notify.sh`, **budgeted like `idle` and `stall`**: quiet hours, 4 a day, 45-minute cooldown. No special cap. The user can raise `NOTIFY_BUDGET`. A suppressed `waiting` is logged with its reason and retried on the next tick.
 
-The note is one sentence, built from the checkpoint with no AI call: `<session name> has been waiting <n> minutes: <blocker, else next_action>.` On success set `spoken_at` and emit `nudge_spoken`. If any condition fails, nothing is set, so the check repeats on the next tick, and it gives up when the spell ends.
+### 3.3 Stage 2: spoken note
 
-### 2.4 `bin/speak.sh`
+For a waiting session whose `updated` is at least `WATCH_SPEAK_AFTER_MINS` (default 5) ago and whose meta `spoken_for` is not equal to the current `updated` value, speak when all hold:
 
-`speak.sh "<text>"` posts the text to the local Kokoro service (`http://127.0.0.1:8880/v1/audio/speech`, voice `af_sky`, mp3), writes the audio to a temp file and plays it with `afplay`, then deletes the file. It has a 30-second overall timeout, never prompts, and exits non-zero if Kokoro is down. Tests replace it with `SPEAK_CMD`, and `HID_IDLE_CMD` replaces the `ioreg` read. Nothing leaves the machine.
+- the local hour is inside the same window as banners (`NOTIFY_QUIET_END` to `NOTIFY_QUIET_START`);
+- **presence:** keyboard or mouse used in the last `WATCH_PRESENT_MINS` (default 10), read from `ioreg -c IOHIDSystem` (`HIDIdleTime`, nanoseconds). Unreadable counts as absent;
+- **voice free:** `~/.voicemode/conch` does not have `held` true with `expires` in the future. A missing or unparseable file counts as free;
+- **no pile-up:** nothing was spoken in the last `WATCH_SPEAK_GAP_MINS` (default 10), tracked by the mtime of `~/.agent/notify/last-spoken`.
 
-### 2.5 Tick rate
+The sentence is built from the checkpoint with no AI call: `<session name> has been waiting <n> minutes: <next_action, else blocker, else "it needs your input">.` On success set `spoken_for=<updated>`, touch `last-spoken`, and emit `nudge_spoken`. If a condition fails, nothing is set and the check repeats on the next tick.
 
-The Phase 1.5 watcher runs every 300 seconds (`StartInterval` 300). Stage 2 needs a finer tick, so this change sets `StartInterval` to 60 and gates the existing stall, context, token and rotation work to run only when at least 300 seconds have passed since `~/.agent/watch.heavy`. The nudge checks read only meta files, STATE.md and one `ioreg` call, so a 60-second tick is cheap. `install.sh` rewrites the plist; its idempotence rule is unchanged.
+### 3.4 `bin/speak.sh`
 
-## 3. Events
+`speak.sh "<text>"` posts to the local Kokoro service (`http://127.0.0.1:8880/v1/audio/speech`, voice `af_sky`, mp3), plays the file with `afplay`, and deletes it. 30-second overall timeout, never prompts, non-zero exit if Kokoro is down. Tests replace it with `SPEAK_CMD` and the idle read with `HID_IDLE_CMD`. Nothing leaves the machine.
+
+## 4. Events and files
 
 | Event | Fields | Writer |
 |---|---|---|
-| `waiting` | `{mins, blocker}` | ching-watch.sh, at stage 1 |
+| `waiting` | `{mins, state}` | ching-watch.sh, when it sends the `done` banner |
 | `nudge_spoken` | `{mins}` | ching-watch.sh, after `speak.sh` succeeds |
-
-`notify` events for kind `waiting` follow the existing contract. `dash.sh --next` already scores `idle` and `input`, so it needs no change.
-
-## 4. Files
 
 | File | Change |
 |---|---|
-| `bin/ching-watch.sh` | waiting check, stage 1 and 2, heavy-work gate |
+| `bin/ching-watch.sh` | waiting check, `done` banner, spoken note |
 | `bin/speak.sh` | new |
-| `bin/notify.sh` | `waiting` kind, nudge cap |
-| `install.sh` | plist `StartInterval` 60, install `speak.sh` |
-| `tests/t_watch.sh` | waiting cases below |
-| `tests/t_notify.sh` | `waiting` cases below |
-| `tests/t_speak.sh` | new |
+| `bin/notify.sh` | `waiting` as a budgeted kind |
+| `tests/t_watch.sh`, `tests/t_notify.sh`, `tests/t_speak.sh` | cases below |
+| `tests/live-smoke.sh` | one manual check that `afplay` and `ioreg` work from the launchd job |
 
 ## 5. Tests
 
 Bash, with stubs for `speak.sh`, `HID_IDLE_CMD`, the conch file and `WATCH_NOW`:
 
-- A `working` session, idle keyboard for hours: no event, no banner, no speech.
-- An `idle` session with a blocker, 1 minute old: nothing. At 3 minutes: one `waiting` event and one banner. A second tick: no second banner.
-- A new transcript write clears the spell, and a later spell nudges again.
-- A suppressed banner (quiet hours, daily cap) leaves `nudged_at` unset and logs the reason.
-- 5 minutes after the banner, user present, conch free: one spoken note and `nudge_spoken`. A second tick: no second note.
-- Same case with the user away, a held conch, an expired conch (counts as free), or an unreadable `ioreg`: speech skipped or allowed as specified, with `spoken_at` unset on skip.
-- Two waiting sessions: only one speaks within `WATCH_SPEAK_GAP_MINS`.
-- `done` sessions and sessions with no open work never nudge.
+- `working` session, keyboard idle for hours: no event, banner or speech.
+- `done` with a next action, 1 minute old: nothing. At 3 minutes: one `waiting` event and one banner. A second tick: no second banner.
+- `done` with no open work: never nudges.
+- `input` and `blocked`: no watcher banner; spoken note after 5 minutes.
+- A new Stop (new `updated`) re-arms the spell. A new prompt ends it.
+- A suppressed banner (quiet hours or budget) logs its reason and retries next tick.
+- Spoken note: user present and conch free speaks once, and a second tick does not repeat. User away, conch held, quiet hours, an unreadable `ioreg`, or a recent `last-spoken` each skip it without setting `spoken_for`. An expired conch counts as free.
 - `speak.sh`: Kokoro down returns non-zero, and the timeout is honored.
 
 ## 6. Ordering and risks
 
-- **Ordering.** The Phase 1.5 plan owns `ching-watch.sh` (Task 5), `install.sh` (Task 6) and `notify.sh` (Task 4). This work starts after Checkpoint 1.5, so it never edits the same files as the build.
-- **Nagging.** Mitigated by the grace period, once-per-spell banner, daily cap, quiet hours, speech gap and presence check. The pilot should tune the defaults, as for the Phase 1.5 stall threshold.
-- **Voice contention.** Speech yields to a held conch. A session starting `converse` in the middle of a spoken note is possible, since `speak.sh` does not take the conch. The note is short, and the cost is one overlapping sentence.
-- **Stale `status:`.** If a session's `status:` is `idle` but the user is in fact mid-turn, the 2-minute grace plus the transcript-mtime check covers it.
+- **Ordering.** Phase 1.5 owns `ching-watch.sh` (Task 5), `notify.sh` (Task 4) and `install.sh` (Task 6). This work starts after Checkpoint 1.5 and edits two of those files.
+- **Unverified.** Audio and `ioreg` from a launchd job are checked by the live-smoke step before the pilot, not assumed.
+- **Nagging.** Limited by the grace period, one banner and one note per spell, the existing budget, quiet hours, the speech gap and the presence check. Tune the defaults in the pilot.
+- **Voice overlap.** `speak.sh` does not take the conch, so a `converse` call that starts mid-note overlaps by one sentence at most.
+- **`done` with no checkpoint.** Outside repo mode and without `/handoff` there is no checkpoint, so only a non-empty `NEXT.md` marks a `done` session as having open work.
 
 ## 7. Out of scope
 
-The notch widget, AI-written reminder text, nudging about things other than waiting sessions, and phone or remote delivery.
+The notch widget, AI-written reminder text, nudging about anything other than waiting sessions, and phone or remote delivery.
