@@ -67,7 +67,7 @@ fi
 if [ -f "$SETTINGS_FILE" ]; then CURRENT=$(cat "$SETTINGS_FILE"); else CURRENT='{}'; fi
 printf '%s' "$CURRENT" | jq -e . >/dev/null 2>&1 || { echo "install: $SETTINGS_FILE is not valid JSON" >&2; exit 1; }
 
-GUARD_MATCHER='Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit|mcp__.*[Ss]upabase.*|mcp__.*([Gg]mail|[Ss]lack|[Dd]iscord|[Tt]elegram).*'
+GUARD_MATCHER='Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit|Monitor|mcp__.*[Ss]upabase.*|mcp__.*([Gg]mail|[Ss]lack|[Dd]iscord|[Tt]elegram).*'
 
 # event, matcher, command, timeout (seconds); tab separated because matchers contain '|'
 hook_line() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4"; }

@@ -477,4 +477,154 @@ gallow "sed -E to stdout on settings.json" "$R" "sed -E 's/a/b/' $SETTINGS"
 gallow "perl -ne on settings.json" "$R" "perl -ne 'print if /hooks/' $SETTINGS"
 gallow "perl -lane on settings.json" "$R" "perl -lane 'print' $SETTINGS"
 gallow "grep -i on settings.json" "$R" "grep -i hooks $SETTINGS"
+
+# ---------- fix wave FA7 ----------
+# F1: strip_heredocs never drops the lines that follow something that is not a heredoc
+F1=$(mk_repo f1)
+gdeny "heredoc: a here-string with a literal word does not hide a force push" "$F1" "$(printf '%s\n' 'grep foo <<< "some text"' 'git push --force origin main')"
+gdeny "heredoc: a here-string does not hide gh pr close" "$F1" "$(printf '%s\n' 'grep foo <<< "some text"' 'gh pr close 5')"
+gdeny "heredoc: a here-string does not hide npm publish" "$F1" "$(printf '%s\n' 'cat <<< hello' 'npm publish')"
+gdeny "heredoc: a here-string does not hide rm -rf /etc" "$F1" "$(printf '%s\n' 'cat <<<"x"' 'rm -rf /etc')"
+gdeny "heredoc: hyphenated delimiter, denied command after the terminator" "$F1" "$(printf '%s\n' "cat > n.md <<'END-OF-FILE'" 'body' 'END-OF-FILE' 'git push --force origin main')"
+gdeny "heredoc: dotted delimiter, denied command after the terminator" "$F1" "$(printf '%s\n' "cat > n.md <<'EOF.1'" 'body' 'EOF.1' 'gh pr close 5')"
+gdeny "heredoc: '<<EOF' inside a double-quoted commit message" "$F1" "$(printf '%s\n' 'git commit -m "handle <<EOF"' 'rm -rf /etc')"
+gdeny "heredoc: '<<EOF' inside single quotes" "$F1" "$(printf '%s\n' "grep -n '<<EOF' f" 'rm -rf /etc')"
+gdeny "heredoc: a quoted <<EOF decoy, then a real heredoc with the same word" "$F1" "$(printf '%s\n' "grep -n '<<EOF' f" 'git push --force origin main' 'cat > n.md <<EOF' 'x' 'EOF')"
+gdeny "heredoc: a shift in arithmetic does not hide npm publish" "$F1" "$(printf '%s\n' 'echo $((1<<n))' 'npm publish')"
+gdeny "heredoc: an unterminated heredoc keeps its lines" "$F1" "$(printf '%s\n' 'cat <<EOF' 'git push --force origin main')"
+gdeny "heredoc: the operator line is continued, the next line is part of the command" "$F1" "$(printf '%s\n' 'cat <<EOF && \' 'git push --force origin main' 'body' 'EOF')"
+gdeny "heredoc: a command after two heredocs on one line" "$F1" "$(printf '%s\n' 'cat <<A <<B' 'x' 'A' 'y' 'B' 'rm -rf /etc')"
+gallow "heredoc: an ordinary heredoc whose body mentions denied words" "$F1" "$(printf '%s\n' 'cat > notes.md <<EOF' 'run gh pr close 5 and npm publish' 'EOF')"
+gallow "heredoc: a hyphenated delimiter with a proper terminator" "$F1" "$(printf '%s\n' "cat > n.md <<'END-OF-FILE'" 'git push --force origin main' 'END-OF-FILE')"
+gallow "heredoc: two heredocs on one line, bodies mention denied words" "$F1" "$(printf '%s\n' 'cat <<A <<B' 'git push --force origin main' 'A' 'npm publish' 'B')"
+gallow "heredoc: a shift in arithmetic alone" "$F1" 'echo $((1<<n))'
+gallow "heredoc: a here-string alone" "$F1" 'grep foo <<< "some text"'
+
+# F7: gh api with the method attached to the flag, and GraphQL mutations
+gdeny "gh api merge with --method=PUT" "$GR" 'gh api repos/o/r/pulls/5/merge --method=PUT'
+gdeny "gh api merge with -XPUT" "$GR" 'gh api repos/o/r/pulls/5/merge -XPUT'
+gdeny "gh api -XDELETE of a ref" "$GR" 'gh api -XDELETE repos/o/r/git/refs/heads/main'
+gdeny "gh api --method=DELETE of a ref" "$GR" 'gh api --method=DELETE repos/o/r/git/refs/heads/main'
+gdeny "gh api graphql closePullRequest" "$GR" "gh api graphql -f query='mutation{closePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'"
+gdeny "gh api graphql mergePullRequest with variables" "$GR" 'gh api graphql -f query='"'"'mutation($id:ID!){mergePullRequest(input:{pullRequestId:$id}){clientMutationId}}'"'"' -f id=x'
+gdeny "gh api graphql closeIssue, query flag before graphql" "$GR" "gh api -f query='mutation { closeIssue(input:{issueId:\"x\"}) { clientMutationId } }' graphql"
+gdeny "gh api graphql with --input cannot be inspected" "$GR" 'gh api graphql --input q.json'
+gdeny "gh api PATCH with --input" "$GR" 'gh api repos/o/r/issues/5 -XPATCH --input body.json'
+gdeny "gh api --method PATCH with --input" "$GR" 'gh api repos/o/r/issues/5 --method PATCH --input body.json'
+gallow "gh api repos/o/r" "$GR" 'gh api repos/o/r'
+gallow "gh api -X GET" "$GR" 'gh api -X GET repos/o/r/pulls'
+gallow "gh api -XGET" "$GR" 'gh api -XGET repos/o/r/pulls'
+gallow "gh api --method=GET" "$GR" 'gh api --method=GET repos/o/r/pulls'
+gallow "gh api graphql query" "$GR" "gh api graphql -f query='query{viewer{login}}'"
+gallow "gh api graphql query with variables" "$GR" 'gh api graphql -f query='"'"'query($n:Int!){viewer{repositories(first:$n){nodes{name}}}}'"'"' -F n=5'
+
+# F3: the Monitor tool runs a shell command, so it goes through the Bash rules; the installer matcher covers it
+tdeny "Monitor with a force push" Monitor "$R" '{"command":"git push --force origin main","description":"x","timeout_ms":1000}'
+tdeny "Monitor with gh pr close" Monitor "$R" '{"command":"gh pr close 5","description":"x","timeout_ms":1000}'
+tallow "Monitor with tail -f" Monitor "$R" '{"command":"tail -f x.log","description":"watch the log","timeout_ms":1000}'
+MATCHER=$(sed -n "s/^GUARD_MATCHER='\(.*\)'\$/\1/p" "$KIT/install.sh")
+DISPATCH=$(sed -n '/^case "\$TOOL" in/,$p' "$BIN/guard.sh")
+for n in $(printf '%s' "${MATCHER%%|mcp__*}" | tr '|' ' '); do
+  if printf '%s\n' "$DISPATCH" | grep -Eq "(^|[ |])${n}([|)])"; then pass "tool $n in the installer matcher has an explicit branch in guard.sh"; else fail "tool $n in the installer matcher has an explicit branch in guard.sh" "  matcher: $MATCHER"; fi
+done
+case "$MATCHER" in *'|Monitor|'*) pass "installer matcher lists Monitor" ;; *) fail "installer matcher lists Monitor" "  matcher: $MATCHER" ;; esac
+
+# F6b: a new GOAL.md written by Edit/MultiEdit is checked as the result of the edits, and a NUL byte is never allowed
+NB=$(mk_repo fa-newmulti)
+tdeny "rule 11: new-file MultiEdit, empty old_string then a partial-line confirm -> auto" MultiEdit "$NB" "$(jq -n --arg f "$NB/.agent/GOAL.md" '{file_path:$f,edits:[{old_string:"",new_string:"# Goal\nrelease_mode: confirm\nreview: required\n"},{old_string:"confirm",new_string:"auto"}]}')"
+tdeny "rule 11: new-file MultiEdit, partial-line required -> off" MultiEdit "$NB" "$(jq -n --arg f "$NB/.agent/GOAL.md" '{file_path:$f,edits:[{old_string:"",new_string:"# Goal\nrelease_mode: confirm\nreview: required\n"},{old_string:"required",new_string:"off"}]}')"
+tallow "rule 11: new-file MultiEdit with safe settings and a prose edit" MultiEdit "$NB" "$(jq -n --arg f "$NB/.agent/GOAL.md" '{file_path:$f,edits:[{old_string:"",new_string:"# Goal\nrelease_mode: confirm\nreview: required\n"},{old_string:"# Goal",new_string:"# Objective"}]}')"
+tallow "rule 11: new-file Edit with safe settings" Edit "$NB" "$(jq -n --arg f "$NB/.agent/GOAL.md" '{file_path:$f,old_string:"",new_string:"# Goal\nreview: required\nrelease_mode: confirm\n"}')"
+tdeny "rule 11: any NUL byte in an Edit of a GOAL.md" Edit "$G11" "$(jq -n --arg f "$GF" '{file_path:$f,old_string:"# Goal",new_string:"# Goal\u0000 prose"}')"
+tdeny "rule 11: any NUL byte in a Write of a new GOAL.md with safe settings" Write "$NB" "$(jq -n --arg f "$NB/.agent/GOAL.md" '{file_path:$f,content:"# Goal\u0000\nreview: required\nrelease_mode: confirm\n"}')"
+tdeny "rule 11: any NUL byte in a MultiEdit of a GOAL.md" MultiEdit "$G11" "$(jq -n --arg f "$GF" '{file_path:$f,edits:[{old_string:"# Goal",new_string:"# Goal\u0000"}]}')"
+tallow "a NUL byte in a Write to a file that is not a GOAL.md" Write "$R" "$(jq -n --arg f "$RP/blob.bin" '{file_path:$f,content:"a\u0000b"}')"
+
+# F12: cd with options still moves the simulated working directory
+gdeny "cd -P outside the repo, then rm -rf" "$R" 'cd -P /usr/local && rm -rf lib'
+gdeny "cd -- outside the repo, then rm -rf" "$R" 'cd -- /usr/local && rm -rf lib'
+gdeny "cd -L outside the repo, then rm -rf" "$R" 'cd -L /usr/local; rm -rf lib'
+gdeny "cd -P into a variable, then a relative rm -rf" "$R" 'cd -P $X && rm -rf lib'
+gallow "cd -P into /tmp, then rm -rf" "$R" 'cd -P /tmp && rm -rf scratch'
+gallow "cd -- into the repo, then rm -rf" "$R" "cd -- $RP && rm -rf dist"
+
+# F10: a failure after the decision or in the splitter must not allow the call
+BIGD="$WORK/fa7-big"; mkdir -p "$BIGD"
+{ printf 'rm -rf $'; head -c 1100000 /dev/zero | tr '\0' A; } >"$BIGD/cmd.txt"
+jq -Rs --arg d "$R" '{hook_event_name:"PreToolUse",tool_name:"Bash",cwd:$d,tool_input:{command:.}}' "$BIGD/cmd.txt" >"$BIGD/in.json"
+t0=$SECONDS
+out=$("$BIN/guard.sh" <"$BIGD/in.json" 2>"$BIGD/err"); rc=$?
+t1=$((SECONDS - t0))
+assert_eq "1.1 MB token under rm -rf: exit 0" "0" "$rc"
+assert_eq "1.1 MB token under rm -rf: a valid deny on stdout" "deny" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)"
+assert_contains "1.1 MB token under rm -rf: denied by the delete rule, not by a timeout" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason' 2>/dev/null | head -c 200)" "unresolved variable"
+assert_eq "1.1 MB token under rm -rf: the reason is truncated" "yes" "$([ "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason | length' 2>/dev/null || echo 999999)" -le 700 ] && echo yes || echo no)"
+assert_eq "1.1 MB token under rm -rf: decided within 20 s" "yes" "$([ "$t1" -lt 20 ] && echo yes || echo "no ($t1 s)")"
+mkdir -p "$WORK/nosed"
+for tool in jq git perl awk tr dirname basename cat grep sort wc head date; do ln -sf "$(command -v "$tool")" "$WORK/nosed/$tool"; done
+out=$(printf '%s' "$(bash_json "$R" 'git push --force origin main')" | PATH="$WORK/nosed" /bin/bash "$BIN/guard.sh" 2>&1); rc=$?
+assert_eq "no sed on PATH: fails closed with exit 2" "2" "$rc"
+assert_contains "no sed on PATH: says what is missing" "$out" "sed"
+rm -f "$WORK/nosed/awk"
+out=$(printf '%s' "$(bash_json "$R" 'git push --force origin main')" | PATH="$WORK/nosed" /bin/bash "$BIN/guard.sh" 2>&1); rc=$?
+assert_eq "no awk on PATH either: still fails closed with exit 2" "2" "$rc"
+
+# F5: a cheap fail-closed time ceiling, and no quadratic work on a long segment
+cmd2k=$(i=0; while [ "$i" -lt 2000 ]; do printf 'env A=1 '; i=$((i + 1)); done; printf 'echo hi')
+jq -n --arg c "$cmd2k" --arg d "$R" '{hook_event_name:"PreToolUse",tool_name:"Bash",cwd:$d,tool_input:{command:$c}}' >"$BIGD/in2k.json"
+t0=$SECONDS
+out=$("$BIN/guard.sh" <"$BIGD/in2k.json" 2>&1); rc=$?
+t1=$((SECONDS - t0))
+assert_eq "2000 leading env tokens: exit 0" "0" "$rc"
+case "$out" in ''|*'"permissionDecision": "deny"'*) pass "2000 leading env tokens: allowed or denied, never an error" ;; *) fail "2000 leading env tokens: allowed or denied, never an error" "$out" ;; esac
+assert_eq "2000 leading env tokens: decided within 12 s" "yes" "$([ "$t1" -lt 12 ] && echo yes || echo "no ($t1 s)")"
+out=$(SECONDS=8 "$BIN/guard.sh" <<<"$(bash_json "$R" 'ls -la')" 2>&1); rc=$?
+assert_eq "time ceiling reached: exit 0" "0" "$rc"
+assert_contains "time ceiling reached: denies as too large" "$out" "too large"
+out=$(SECONDS=7 "$BIN/guard.sh" <<<"$(bash_json "$R" 'ls -la')" 2>&1)
+assert_eq "just under the ceiling: an ordinary command is allowed" "" "$out"
+
+# F2: wrappers with option values, leading redirections, more launchers
+gdeny "xargs -I {} gh pr close" "$GR" 'echo 5 | xargs -I {} gh pr close {}'
+gdeny "xargs -I {} gh release create" "$GR" 'echo v1 | xargs -I {} gh release create {}'
+gdeny "xargs -I {} rm -rf outside the repo" "$GR" 'ls | xargs -I {} rm -rf /etc/{}'
+gdeny "xargs -a list -I{} gh issue close" "$GR" 'xargs -a list -I{} gh issue close {}'
+gdeny "xargs -d newline npm publish" "$GR" 'xargs -d x npm publish'
+gdeny "sudo -u deploy git push --force" "$GR" 'sudo -u deploy git push --force origin main'
+gdeny "sudo -u root npm publish" "$GR" 'sudo -u root npm publish'
+gdeny "env -u X gh pr close" "$GR" 'env -u X gh pr close 5'
+gdeny "timeout -s KILL 10 npm publish" "$GR" 'timeout -s KILL 10 npm publish'
+gdeny "timeout -k 5 10 gh pr close" "$GR" 'timeout -k 5 10 gh pr close 5'
+gdeny "leading >/dev/null redirect before gh pr close" "$GR" '>/dev/null gh pr close 5'
+gdeny "leading </dev/null redirect before npm publish" "$GR" '</dev/null npm publish'
+gdeny "leading spaced redirect before gh pr close" "$GR" '> /dev/null gh pr close 5'
+gdeny "parallel gh pr close" "$GR" 'parallel gh pr close ::: 1 2'
+gdeny "doppler run -- npm publish" "$GR" 'doppler run -- npm publish'
+gdeny "dotenv -- gh pr close" "$GR" 'dotenv -- gh pr close 5'
+gdeny "direnv gh pr close" "$GR" 'direnv gh pr close 5'
+gdeny "volta run npm publish" "$GR" 'volta run npm publish'
+gdeny "mise exec -- npm publish" "$GR" 'mise exec -- npm publish'
+gdeny "op run -- gh pr close" "$GR" 'op run -- gh pr close 5'
+gallow "xargs -I {} echo" "$GR" 'ls | xargs -I {} echo {}'
+gallow "xargs -n 1 echo" "$GR" 'ls | xargs -n 1 echo'
+gallow "sudo -u deploy ls" "$GR" 'sudo -u deploy ls'
+gallow "timeout -s KILL 10 sleep" "$GR" 'timeout -s KILL 10 sleep 5'
+gallow "env -u X ls" "$GR" 'env -u X ls'
+gallow "leading redirect before ls" "$GR" '>/dev/null ls'
+gallow "xargs -I {} rm inside the repo" "$GR" 'ls | xargs -I {} rm -rf build/{}'
+
+# F9 (narrow): more send and publish spellings
+tdeny "rule 10: slack reply to a thread" mcp__plugin_slack_slack__slack_reply_to_thread "$GR" '{"text":"hi"}'
+tdeny "rule 10: chat_postMessage" mcp__plugin_slack_slack__chat_postMessage "$GR" '{"text":"hi"}'
+tdeny "rule 10: replyAll" mcp__claude_ai_Gmail__replyAll "$GR" '{}'
+tdeny "rule 10: reply_all" mcp__claude_ai_Gmail__reply_all "$GR" '{}'
+tdeny "rule 10: slack update_message" mcp__plugin_slack_slack__slack_update_message "$GR" '{"text":"hi"}'
+tdeny "rule 10: slack upload_file" mcp__plugin_slack_slack__slack_upload_file "$GR" '{}'
+tallow "rule 10: slack get_thread_replies" mcp__plugin_slack_slack__slack_get_thread_replies "$GR" '{"channel_id":"C1","ts":"1"}'
+tallow "rule 10: slack list_replies" mcp__plugin_slack_slack__slack_list_replies "$GR" '{"channel_id":"C1","ts":"1"}'
+tallow "rule 10: slack read_channel" mcp__plugin_slack_slack__slack_read_channel "$GR" '{"channel_id":"C1"}'
+gdeny "rule 8: npm unpublish" "$GR" 'npm unpublish x@1'
+gdeny "rule 8: npm deprecate" "$GR" 'npm deprecate x "msg"'
+gdeny "rule 8: npm dist-tag add" "$GR" 'npm dist-tag add x@1 latest'
+gallow "rule 8: npm view" "$GR" 'npm view x versions'
 exit 0
