@@ -109,4 +109,10 @@ out=$(CHING_ESCALATING=1 CHING_CLAUDE_BIN="$WORK/fake-claude" CHING_TEST_MODELS=
 assert_eq "escalating child: stop is allowed, never blocked" "" "$out"
 assert_eq "escalating child: no model is started" "0" "$(wc -l <"$ESC_CALLS" | tr -d ' ')"
 assert_no_file "escalating child: no retry counter written" "$AGENT_HOME/sessions/sess-ESC3/retries"
+
+# ---------- events (Phase 1.5) ----------
+EVF="$AGENT_HOME/events.jsonl"
+assert_eq "events: three test blocks and one cap for sess-A" "4" "$(jq -r 'select(.sid=="sess-A" and .kind=="stop_blocked") | .kind' "$EVF" | wc -l | tr -d ' ')"
+assert_contains "events: cap is marked" "$(jq -r 'select(.sid=="sess-A" and .kind=="stop_blocked") | .data.reason' "$EVF")" "tests-cap"
+assert_contains "events: a green stop logs stop_ok" "$(jq -r 'select(.kind=="stop_ok") | .sid' "$EVF")" "sess-B"
 exit 0

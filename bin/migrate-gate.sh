@@ -30,6 +30,7 @@ esac
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
 [ -n "$ROOT" ] || { echo "migrate-gate: not inside a git repository" >&2; exit 1; }
 cd "$ROOT"
+CWD=$ROOT; NAME=$(basename "$ROOT")
 AGENT_DIR="$ROOT/.agent"
 GOAL="$AGENT_DIR/GOAL.md"
 MIG_DIR=$(goal_get "$GOAL" migrations_dir); [ -n "$MIG_DIR" ] || MIG_DIR=db/migrations
@@ -117,7 +118,7 @@ my %seen; print "ERR: $_\n" for grep { !$seen{$_}++ } @err;
 %seen = (); print "DESTRUCTIVE: $_\n" for grep { !$seen{$_}++ } @dest;
 PERL
 
-fail() { echo "migrate-gate: FAIL: $1" >&2; exit 1; }
+fail() { ev migrate "$(jq -nc --arg m "$1" '{outcome:"gate-fail",detail:$m}')"; echo "migrate-gate: FAIL: $1" >&2; exit 1; }
 
 EDITED=$(edited_committed)
 [ -z "$EDITED" ] || fail "edits an already-committed migration (write a NEW numbered file instead): $(echo "$EDITED" | tr '\n' ' ')"
@@ -178,4 +179,5 @@ mkdir -p "$AGENT_DIR"
 now=$(date +%s); sh=$(set_hash)
 printf 'set=%s\ntime=%s\nsig=%s\n' "$sh" "$now" "$(sign migrate-token "$sh" "$now")" >"$TOKEN"
 n=$(printf '%s\n' "$CREATED" | sed '/^$/d' | wc -l | tr -d ' ')
+ev migrate "$(jq -nc --argjson n "$n" '{outcome:"gate-pass",files:$n}')"
 echo "migrate-gate: PASS for $n new migration file(s). Token minted; you may run the --apply now."

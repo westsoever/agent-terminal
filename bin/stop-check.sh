@@ -35,6 +35,7 @@ finish_ok() {
   last=$(printf '%s' "$LAST_MSG" | awk 'NF { l = $0 } END { print l }')
   if printf '%s' "$last" | grep -Eq '\?[[:space:]]*[)"*_]*$'; then kind=input; fi
   snippet=$(printf '%s' "$LAST_MSG" | tr '\n' ' ' | cut -c1-140)
+  ev stop_ok "$(jq -nc --arg k "$kind" '{outcome:$k}')"
   set_state "$kind"
   notify "$kind" "${snippet:-Session finished.}"
   exit 0
@@ -96,6 +97,7 @@ if [ "$n" -ge "$MAX" ]; then
       "$(date '+%Y-%m-%d %H:%M')" "$MAX" "$SID" "$TEST_CMD" "$rc"
     tail -n 15 "$OUT" | sed 's/^/    /'
   } >>"$STATE_DIR/STATE.md" 2>/dev/null || true
+  ev stop_blocked '{"retry":"cap","reason":"tests-cap"}'
   set_state blocked
   notify blocked "Tests still failing after $MAX retries: $TEST_CMD"
   exit 0
@@ -103,6 +105,7 @@ fi
 
 n=$((n + 1))
 printf '%s\n' "$n" >"$COUNTER"
+ev stop_blocked "$(jq -nc --argjson n "$n" '{retry:$n,reason:"tests"}')"
 TAIL=$(tail -n 40 "$OUT" | cut -c1-400 | head -c 3500)
 if [ "$rc" -eq 142 ]; then WHY="timed out after ${TIMEOUT}s"; else WHY="exit code $rc"; fi
 REASON="Do not stop yet: the done-check in $GOAL_FILE failed ($WHY, attempt $n of $MAX). Command: $TEST_CMD"$'\n\n'"Last output:"$'\n'"$TAIL"$'\n\n'"Fix the failure and finish. Do not ask questions; log assumptions in STATE.md."
