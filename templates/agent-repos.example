@@ -1,0 +1,3 @@
+# ~/.agent-repos : one repository path per line. `~` is allowed. Lines starting with # are ignored.
+# dash.sh discovers worktrees with `git worktree list`, so list each repo once (its main checkout).
+~/bbq/miso

@@ -1,0 +1,3 @@
+# agent working state (per worktree, never committed)
+.agent/
+.claude/worktrees/
