@@ -20,6 +20,7 @@ export NOTIFY_DRY_RUN=1
 export NOTIFY_TERMINAL_NOTIFIER="$WORK/no-such-terminal-notifier"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+export CHING_TEST_MODELS=""   # tests never call a real model; t_escalate.sh sets its own fake
 unset TMPDIR CHING_ALLOW_PUSH
 mkdir -p "$AGENT_HOME" "$CLAUDE_DIR"
 

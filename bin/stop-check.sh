@@ -7,7 +7,8 @@
 # Schemas confirmed in Phase 0: stdin has session_id, cwd, stop_hook_active, last_assistant_message;
 # block = {"decision":"block","reason":"..."} on stdout, exit 0. Claude Code's own cap is 8, ours is 3;
 # the per-session counter (not stop_hook_active) enforces it.
-# Env: STOP_CHECK_MAX_RETRIES (3) STOP_CHECK_TIMEOUT (900 s)
+# The check goes through test-escalate.sh (no model unless it fails; Haiku, then Sonnet).
+# Env: STOP_CHECK_MAX_RETRIES (3) STOP_CHECK_TIMEOUT (900 s) CHING_TEST_MODELS (see test-escalate.sh)
 set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
@@ -67,9 +68,13 @@ fi
 OUT=$(mktemp "${TMPDIR:-/tmp}/ching-stop.XXXXXX")
 trap 'rm -f "$OUT"' EXIT
 rc=0
-(cd "$WORK_DIR" && perl -e 'alarm shift @ARGV; exec @ARGV' "$TIMEOUT" bash -c "$TEST_CMD") >"$OUT" 2>&1 </dev/null || rc=$?
+# test-escalate.sh runs the check with no model first; only on failure does it call the cheapest model
+# (Haiku), then the next (Sonnet), re-running the check after each. CHING_TEST_MODELS="" turns that off.
+CHING_TEST_NOTIFY=0 "$SELF_DIR/test-escalate.sh" -C "$WORK_DIR" -- \
+  perl -e 'alarm shift @ARGV; exec @ARGV' "$TIMEOUT" bash -c "$TEST_CMD" >"$OUT" 2>&1 </dev/null || rc=$?
 
 if [ "$rc" -eq 0 ]; then
+  FP=$(fingerprint)   # a model may have changed files while fixing: record the tree as it is now
   rm -f "$COUNTER"
   printf '%s\n' "$FP" >"$PASS_FILE"
   finish_ok

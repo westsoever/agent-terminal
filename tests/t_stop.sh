@@ -87,4 +87,20 @@ rm -rf "$AGENT_HOME/defaults"
 write_goal "$R" "sleep 5"
 out=$(STOP_CHECK_TIMEOUT=1 stop "$R" sess-J)
 assert_contains "timeout -> block with timed out" "$(printf '%s' "$out" | jq -r .reason)" "timed out"
+
+# escalation: a failing check calls the cheap model, which fixes it, so the stop is allowed
+cat >"$WORK/fake-claude" <<'EOS'
+#!/usr/bin/env bash
+while [ $# -gt 0 ]; do [ "$1" = --model ] && echo "$2" >>"$ESC_CALLS"; shift; done
+touch "$ESC_FILE"
+EOS
+chmod +x "$WORK/fake-claude"
+export ESC_CALLS="$WORK/esc-calls" ESC_FILE="$WORK/esc-ok"; : >"$ESC_CALLS"; rm -f "$ESC_FILE"
+write_goal "$R" "test -f $ESC_FILE"
+out=$(CHING_CLAUDE_BIN="$WORK/fake-claude" CHING_TEST_MODELS="cheap strong" stop "$R" sess-ESC1)
+assert_eq "escalation: cheap model fixed it, stop allowed" "" "$out"
+assert_eq "escalation: only the cheap model was called" "cheap" "$(tr '\n' ' ' <"$ESC_CALLS" | sed 's/ $//')"
+rm -f "$ESC_FILE"
+out=$(CHING_TEST_MODELS="" stop "$R" sess-ESC2)
+assert_eq "no models configured: plain block" "block" "$(printf '%s' "$out" | jq -r .decision)"
 exit 0
