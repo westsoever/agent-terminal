@@ -15,7 +15,8 @@
 # apply_migration / non-read-only execute_sql / Management API / CLI db push | 7 editing a committed
 # migration, db-migrate --record-only, --apply without a migrate token | 8 publishing (npm/bun/pnpm/yarn
 # publish, gh release, gh repo delete/visibility/public) | 9 closing PRs/issues | 10 sending email/chat
-# (drafts only). Extras: --no-verify, hook/settings/token tampering, gh pr merge, piping into a shell.
+# (drafts only) | 11 gate settings in GOAL.md (review, release_mode, test_command). Extras: --no-verify,
+# hook/settings/token tampering, gh pr merge, piping into a shell.
 # Every deny is also logged as a `deny` event, after the decision has been printed.
 # Env: GUARD_PROTECTED_BRANCHES (default "main master" plus the remote default branch)
 set -euo pipefail
@@ -152,7 +153,7 @@ seg_writes() { # does the current segment write/modify files?
     t=${TOKS[$k]}; b=${t##*/}
     case "$b" in
       rm|mv|cp|tee|truncate|ln|chmod|chown|dd|install|rsync|ed|unlink|shred) return 0 ;;
-      sed|perl) seg_matches '-i*' && return 0 ;;
+      sed|perl) { seg_matches '-i*' || seg_matches '-[pnlasE0-9]*i*'; } && return 0 ;;   # -i, -i.bak, and clustered forms such as perl -pi -e
     esac
     case "$t" in --in-place*) return 0 ;; esac
     k=$((k + 1))
@@ -514,15 +515,58 @@ is_tamper_path() {
   return 1
 }
 
+# ---------- rule 11: gate settings in GOAL.md ----------
+is_goal_path() {
+  case "$1" in */.agent/GOAL.md|*/defaults/GOAL.md) return 0 ;; esac   # */defaults/ also covers AGENT_HOME overrides
+  return 1
+}
+gated_lines() { grep -E '^[[:space:]]*(review|release_mode|test_command):' | sed 's/[[:space:]]*$//' | sort || true; }
+deny_goal() { emit_deny "rule 11: review, release_mode and test_command in GOAL.md are the user's settings. Put the proposed change in STATE.md and notify the user."; }
+goal_seg_writes() { # seg_writes, except that discarding or merging a stream (2>/dev/null, 2>&1 split at '&') is not a write
+  local keep=$SEG_RAW rc=0
+  SEG_RAW=$(printf '%s\n' "$keep" | sed -E 's#[0-9]*>>?[[:space:]]*/dev/null([[:space:]]|$)# #g; s#[0-9]*>[[:space:]]*$##')
+  seg_writes || rc=$?
+  SEG_RAW=$keep
+  return "$rc"
+}
+check_goal_write() { # $1 = absolute path of a GOAL.md being written by Edit/MultiEdit/Write
+  local old new rv relm
+  case "$TOOL" in
+    Edit)
+      old=$(jq -r '.tool_input.old_string // ""' <<<"$INPUT" | gated_lines)
+      new=$(jq -r '.tool_input.new_string // ""' <<<"$INPUT" | gated_lines)
+      [ "$old" = "$new" ] || deny_goal ;;
+    MultiEdit)
+      old=$(jq -r '[.tool_input.edits[]?.old_string // ""] | join("\n")' <<<"$INPUT" | gated_lines)
+      new=$(jq -r '[.tool_input.edits[]?.new_string // ""] | join("\n")' <<<"$INPUT" | gated_lines)
+      [ "$old" = "$new" ] || deny_goal ;;
+    Write)
+      new=$(jq -r '.tool_input.content // ""' <<<"$INPUT" | gated_lines)
+      if [ -f "$1" ]; then
+        old=$(gated_lines <"$1")
+        [ "$old" = "$new" ] || deny_goal
+      else
+        rv=$(printf '%s\n' "$new" | sed -n 's/^[[:space:]]*review:[[:space:]]*//p' | head -1)
+        relm=$(printf '%s\n' "$new" | sed -n 's/^[[:space:]]*release_mode:[[:space:]]*//p' | head -1)
+        if { [ -n "$rv" ] && [ "$rv" != required ]; } || { [ -n "$relm" ] && [ "$relm" != confirm ]; }; then
+          emit_deny "rule 11: a new GOAL.md may only start with review: required and release_mode: confirm. The user switches them."
+        fi
+      fi ;;
+  esac
+}
+
 tamper_bash() {
   local k=0 t abs
   while [ "$k" -lt "$NT" ]; do
     t=${TOKS[$k]}
     case "$t" in -*) k=$((k + 1)); continue ;; esac
     abs=""
-    case "$t" in *hooks*|*settings*|*ching*|*.sql) abs=$(resolve_path "$t" "$SIM_CWD") ;; esac
+    case "$t" in *hooks*|*settings*|*ching*|*.sql|*GOAL.md*) abs=$(resolve_path "$t" "$SIM_CWD") ;; esac
     if [ -n "$abs" ] && is_tamper_path "$abs" && seg_writes; then
       emit_deny "editing hooks, settings or the guard itself ($t) would disable the guardrails. Ask the user."
+    fi
+    if [ -n "$abs" ] && is_goal_path "$abs" && goal_seg_writes; then
+      emit_deny "rule 11: write GOAL.md with the Edit or Write tool so the guard can check its gate settings."
     fi
     if [ -n "$abs" ] && is_migration_path "$abs" && seg_writes && [ "$SIM_UNKNOWN" -eq 0 ]; then
       if committed_migration "$abs"; then
@@ -608,6 +652,7 @@ check_write() {
   if is_migration_path "$abs" && committed_migration "$abs"; then
     emit_deny "$p is an already-committed migration; never edit it. Write a NEW numbered migration file that alters it."
   fi
+  if is_goal_path "$abs"; then check_goal_write "$abs"; fi
   allow
 }
 
