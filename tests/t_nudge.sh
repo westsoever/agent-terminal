@@ -89,4 +89,99 @@ assert_eq "suppressed: nudged_for stays unset" "" "$(mget d7 nudged_for)"
 run
 assert_eq "next tick delivers it" "1" "$(banners)"
 assert_eq "now nudged_for is set" "$(( NOON - 180 ))" "$(mget d7 nudged_for)"
+# ---------- spoken note ----------
+spoken() { wc -l <"$SPOKEN" | tr -d ' '; }
+conch() { # held|released offset_secs: write a conch file expiring offset_secs from now
+  local h=true; [ "$1" = held ] || h=false
+  printf '{"pid":1,"held":%s,"expires":"%s.000000"}\n' "$h" "$(date -r $(( $(now) + $2 )) '+%Y-%m-%dT%H:%M:%S')" >"$VOICEMODE_CONCH"
+}
+
+# one note per spell, after the delay
+reset; reg i1 input 240; run
+assert_eq "input, 4 minutes: too early to speak" "0" "$(spoken)"
+reset; reg i1 input 360; run
+assert_eq "input, 6 minutes: one spoken note" "1" "$(spoken)"
+assert_contains "the note names the session and the wait" "$(cat "$SPOKEN")" "i1 has been waiting 6 minutes"
+assert_contains "no checkpoint: the note says it needs input" "$(cat "$SPOKEN")" "it needs your input"
+assert_eq "spoken_for records the spell" "$(( NOON - 360 ))" "$(mget i1 spoken_for)"
+assert_eq "event: nudge_spoken" "6" "$(jq -r 'select(.kind=="nudge_spoken") | .data.mins' "$EVF")"
+run
+assert_eq "same spell: not spoken twice" "1" "$(spoken)"
+TNOW=$(( NOON + 3600 )); reg i1 input 360; run
+assert_eq "new Stop re-arms the spoken note" "2" "$(spoken)"
+unset TNOW
+
+# what the note says
+reset; reg b1 blocked 400; checkpoint b1 "x" "need the staging token"; run
+assert_contains "blocked with a blocker: the note says the next action first" "$(cat "$SPOKEN")" "waiting 6 minutes: x."
+reset; reg b2 blocked 400; checkpoint b2 none "need the staging token"; run
+assert_contains "blocker used when there is no next action" "$(cat "$SPOKEN")" "need the staging token"
+reset; reg b3 blocked 400; run
+assert_contains "blocked without a checkpoint" "$(cat "$SPOKEN")" "it is blocked"
+reset; reg d1 done 400; checkpoint d1 "ship the migration" none; run
+assert_contains "done with open work: banner and spoken note" "$(cat "$SPOKEN")" "ship the migration"
+assert_eq "done with open work: banner too" "1" "$(banners)"
+reset; reg d2 done 400; run
+assert_eq "done without open work: never spoken" "0" "$(spoken)"
+reset; reg w1 working 7200; run
+assert_eq "working: never spoken" "0" "$(spoken)"
+
+# quiet hours
+reset; TNOW=$(( NOON + 10 * 3600 )); reg i1 input 400; run
+assert_eq "22:00: not spoken" "0" "$(spoken)"
+assert_eq "22:00: spoken_for stays unset" "" "$(mget i1 spoken_for)"
+unset TNOW
+
+# Review Focus 5: presence boundary and unreadable idle time
+reset; reg i1 input 400
+HID_IDLE_CMD="echo 599" run
+assert_eq "599 s idle: still present, spoken" "1" "$(spoken)"
+reset; reg i1 input 400
+HID_IDLE_CMD="echo 600" run
+assert_eq "600 s idle: absent, not spoken" "0" "$(spoken)"
+assert_eq "absent: spoken_for stays unset" "" "$(mget i1 spoken_for)"
+reset; reg i1 input 400
+HID_IDLE_CMD="echo notanumber" run
+assert_eq "non-numeric idle: counts as absent" "0" "$(spoken)"
+reset; reg i1 input 400
+HID_IDLE_CMD="false" run
+assert_eq "failing idle read: counts as absent" "0" "$(spoken)"
+run
+assert_eq "the user returns (idle read works again): spoken on the next tick" "1" "$(spoken)"
+
+# Review Focus 4: only a live, unexpired hold blocks speech
+reset; reg i1 input 400; conch held 60; run
+assert_eq "conch held and unexpired: not spoken" "0" "$(spoken)"
+run
+assert_eq "still held: retried, still silent" "0" "$(spoken)"
+conch held -60; run
+assert_eq "conch expired: spoken" "1" "$(spoken)"
+reset; reg i1 input 400; conch released 60; run
+assert_eq "conch held:false: spoken" "1" "$(spoken)"
+reset; reg i1 input 400; echo 'not json {' >"$VOICEMODE_CONCH"; run
+assert_eq "corrupt conch file: counts as free" "1" "$(spoken)"
+reset; reg i1 input 400; run
+assert_eq "missing conch file: counts as free" "1" "$(spoken)"
+
+# two waiting sessions do not talk back to back; the second goes on a later tick
+reset; reg i1 input 400; reg i2 input 400; run
+assert_eq "two waiting sessions: one note now" "1" "$(spoken)"
+assert_eq "the second is left for later" "" "$(mget i2 spoken_for)"
+TNOW=$(( NOON + 601 )); run
+assert_eq "after the gap the second one speaks" "2" "$(spoken)"
+assert_eq "and the first is not repeated" "1" "$(grep -c 'i1 has been waiting' "$SPOKEN")"
+unset TNOW
+
+# a failing voice does not mark the spell as spoken
+reset; reg i1 input 400
+SPEAK_CMD=false run
+assert_eq "voice failure: spoken_for stays unset" "" "$(mget i1 spoken_for)"
+assert_no_file "voice failure: no last-spoken stamp" "$AGENT_HOME/notify/last-spoken"
+run
+assert_eq "voice back: spoken on the next tick" "1" "$(spoken)"
+
+# hostile names and next actions reach the voice as one line, capped
+reset; reg i1 input 400; checkpoint i1 'do "this" now; it'"'"'s a \ test' none; run
+assert_eq "quotes and a backslash in the next action: spoken once" "1" "$(spoken)"
+assert_contains "and spoken as written" "$(cat "$SPOKEN")" 'do "this" now; it'"'"'s a \ test'
 exit 0

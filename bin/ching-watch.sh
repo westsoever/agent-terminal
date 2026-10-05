@@ -7,6 +7,7 @@
 # Meta keys written: tok_offset tok_last_mid ctx_level ctx_pct stalled_at
 # Check-in nudges (3b): sessions waiting on the user get a `waiting` banner (finished sessions with open
 # work) and, after a delay, one spoken note. Meta keys: nudged_for spoken_for. Env: WATCH_WAIT_GRACE_MINS (2)
+# WATCH_SPEAK_AFTER_MINS (5) WATCH_PRESENT_MINS (10) WATCH_SPEAK_GAP_MINS (10) SPEAK_CMD HID_IDLE_CMD VOICEMODE_CONCH
 # Env: AGENT_HOME WATCH_NOW (epoch, tests) WATCH_STALL_MINS (20) WATCH_ROTATE_BYTES (20971520)
 #      TOKEN_BUDGET_DAILY (unset = no token alerts; also read from $AGENT_HOME/defaults/ching.env)
 set -euo pipefail
@@ -114,6 +115,41 @@ for m in "$AGENT_HOME"/sessions/*/meta; do
   fi
 done
 
+SPEAK_AFTER_SECS=$(( ${WATCH_SPEAK_AFTER_MINS:-5} * 60 ))
+PRESENT_SECS=$(( ${WATCH_PRESENT_MINS:-10} * 60 ))
+SPEAK_GAP_SECS=$(( ${WATCH_SPEAK_GAP_MINS:-10} * 60 ))
+CONCH_FILE=${VOICEMODE_CONCH:-$HOME/.voicemode/conch}
+LAST_SPOKEN="$AGENT_HOME/notify/last-spoken"
+
+hour_ok() { # inside the same window as budgeted banners
+  local h; h=$(date -r "$NOW" +%H); h=${h#0}
+  [ "$h" -ge "${NOTIFY_QUIET_END:-9}" ] && [ "$h" -lt "${NOTIFY_QUIET_START:-21}" ]
+}
+user_present() { # keyboard or mouse used within PRESENT_SECS; unreadable counts as absent
+  local idle
+  if [ -n "${HID_IDLE_CMD:-}" ]; then
+    idle=$(bash -c "$HID_IDLE_CMD" 2>/dev/null || true)
+  else
+    idle=$(ioreg -c IOHIDSystem 2>/dev/null | awk '/"HIDIdleTime"/ { print int($NF / 1000000000); exit }' || true)
+  fi
+  case "$idle" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$idle" -lt "$PRESENT_SECS" ]
+}
+voice_free() { # false only while another session holds a live, unexpired VoiceMode conch
+  local exp secs
+  [ -f "$CONCH_FILE" ] || return 0
+  exp=$(jq -r 'select(.held == true) | .expires // empty' "$CONCH_FILE" 2>/dev/null || true)
+  [ -n "$exp" ] || return 0
+  secs=$(date -j -f '%Y-%m-%dT%H:%M:%S' "${exp%%.*}" +%s 2>/dev/null || true)
+  case "$secs" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$secs" -le "$NOW" ]
+}
+gap_ok() { # nothing was spoken in the last SPEAK_GAP_SECS
+  local last; last=$(cat "$LAST_SPOKEN" 2>/dev/null || echo 0)
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  [ $((NOW - last)) -ge "$SPEAK_GAP_SECS" ]
+}
+
 # 3b. check-in nudges. A session is waiting when its last Stop left it `input`, `blocked`, or `done` with
 # something open (a checkpoint blocker or next_action other than "none", or a non-empty NEXT.md), at least
 # WATCH_WAIT_GRACE_MINS ago. A spell is identified by the session's `updated` time, so a new Stop or prompt
@@ -154,6 +190,19 @@ for m in "$AGENT_HOME"/sessions/*/meta; do
            ev waiting "$(jq -nc --argjson m $((age / 60)) --arg s "$state" '{mins:$m,state:$s}')"
          fi ;;
     esac
+  fi
+  # spoken note: once per spell, only when it can be heard and will not talk over anyone
+  [ "$age" -ge "$SPEAK_AFTER_SECS" ] || continue
+  [ "$(meta_get "$m" spoken_for)" != "$upd" ] || continue
+  hour_ok && user_present && voice_free && gap_ok || continue
+  dflt="it needs your input"; [ "$state" != blocked ] || dflt="it is blocked"
+  mins=$((age / 60))
+  say=$(printf '%s has been waiting %s minutes: %s.' "$NAME" "$mins" "${nxt:-${blk:-$dflt}}" | tr '\n\r' '  ' | cut -c1-300)
+  mkdir -p "$AGENT_HOME/notify"
+  if "${SPEAK_CMD:-$SELF_DIR/speak.sh}" "$say" >/dev/null 2>&1; then
+    meta_set spoken_for "$upd"
+    printf '%s\n' "$NOW" >"$LAST_SPOKEN"
+    ev nudge_spoken "$(jq -nc --argjson m "$mins" '{mins:$m}')"
   fi
 done # end of nudge pass
 
