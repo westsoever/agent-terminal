@@ -323,6 +323,7 @@ check_gh() { # $1 = index of gh
     a=${TOKS[$k]}
     case "$a" in
       -X|--method) method=${TOKS[$((k + 1))]:-}; k=$((k + 1)) ;;
+      -R|--repo) k=$((k + 1)) ;;   # the repo is a value, not a subcommand (gh pr -R o/r close 5)
       -f|-F|--field|--raw-field|--input) mut=1 ;;
       -*) ;;
       *) if [ "$n" -lt 2 ]; then subs="$subs $a"; n=$((n + 1)); fi
@@ -643,7 +644,7 @@ check_send_mcp() { # rule 10 (D18): drafts only
   local op=${TOOL_LC##*__}
   case "$op" in *draft*) allow ;; esac
   case "$op" in
-    *send*|reply|*_reply|reply_*|forward|*_forward|forward_*|*post_message*)
+    *send*|reply|*_reply|reply_*|forward|*_forward|forward_*|*post_message*|*schedule_message*)
       emit_deny "rule 10: sessions write drafts and never send (D18). Save it as a draft and notify the user to send it." ;;
   esac
   allow

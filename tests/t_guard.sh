@@ -291,4 +291,16 @@ out=$(jq -n --arg c "$GR" '{hook_event_name:"PreToolUse",session_id:"g-ro",tool_
 assert_eq "unwritable AGENT_HOME: deny still exits 0" "0" "$rc"
 assert_contains "unwritable AGENT_HOME: deny still printed" "$out" '"deny"'
 assert_eq "unwritable AGENT_HOME: nothing on stderr" "0" "$(wc -c <"$WORK/p15-stderr" | tr -d ' ')"
+# a scheduled message is a send with nobody watching; listing or deleting scheduled ones is not
+tdeny "rule 10: slack schedule_message" mcp__plugin_slack_slack__slack_schedule_message "$GR" '{"channel_id":"C1","text":"hi","post_at":1893456000}'
+tallow "rule 10: slack list_scheduled_messages" mcp__plugin_slack_slack__slack_list_scheduled_messages "$GR" '{"channel_id":"C1"}'
+tallow "rule 10: slack delete_scheduled_message" mcp__plugin_slack_slack__slack_delete_scheduled_message "$GR" '{"channel_id":"C1","scheduled_message_id":"Q1"}'
+# gh -R/--repo between the command and the subcommand must not be taken for a subcommand
+gdeny "rule 9: gh pr -R o/r close" "$GR" "gh pr -R o/r close 5"
+gdeny "rule 9: gh issue --repo o/r close" "$GR" "gh issue --repo o/r close 7"
+gdeny "rule 9: gh pr --repo=o/r close (attached form)" "$GR" "gh pr --repo=o/r close 5"
+gdeny "rule 8: gh release -R o/r create" "$GR" "gh release -R o/r create v1"
+gdeny "pr merge rule also sees through gh pr -R o/r merge" "$GR" "gh pr -R o/r merge 5"
+gallow "gh pr -R o/r view" "$GR" "gh pr -R o/r view 5"
+gallow "gh pr -R o/r comment" "$GR" "gh pr -R o/r comment 5 --body 'ok'"
 exit 0
