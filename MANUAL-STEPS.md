@@ -81,7 +81,7 @@ Reply format at the end of each item, e.g. `0.4 pass`, or `0.4 fail: <what you s
 
 ---
 
-## - [ ] 0.7 Two sessions, one voice (about 10 min)
+## - [ ] 0.7 Two sessions, one voice (about 10 min) DEFERRED by user, to run later
 
 **Why:** Plan says a second session waits instead of talking over the first. Phase 0 reading of the source found the default is the opposite: the second call is refused (not queued) unless it asks to wait. Live confirmation tells us the dispatcher-only design is safe, and that a worker which tries to talk gets silenced, not garbled.
 
@@ -105,7 +105,7 @@ Reply format at the end of each item, e.g. `0.4 pass`, or `0.4 fail: <what you s
 
 ---
 
-## - [ ] 0.3 Notification types for foreground vs background sessions (about 12 min)
+## - [ ] 0.3 Notification types for foreground vs background sessions (about 12 min) DEFERRED by user, to run later
 
 **Why:** The plan uses `agent_needs_input` / `agent_completed` to decide when to notify you. Docs say these belong to background sessions with the agent view open. If they never fire in normal sessions, the design falls back to `Stop` + `idle_prompt` and classifies in a script (probably what we will do anyway).
 
