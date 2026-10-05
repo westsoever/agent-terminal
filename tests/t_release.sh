@@ -114,6 +114,11 @@ gallow "valid token: push origin HEAD:main allowed" "$R" 'git push origin HEAD:m
 gallow "valid token: bare 'git push' on main allowed" "$R" 'git push'
 gallow "valid token: git -C ... push allowed" "$R" "git -C $RP push origin HEAD:main"
 gallow "valid token: cd && push allowed" "$R" "cd $RP && git push origin main"
+H=$(head_of "$R")
+gdeny "valid token: gh pr merge without --match-head-commit denied" "$R" 'gh pr merge 12 --squash'
+gdeny "valid token: gh pr merge pinned to another commit denied" "$R" 'gh pr merge 12 --squash --match-head-commit 0000000000000000000000000000000000000000'
+gallow "valid token: gh pr merge pinned to the released commit allowed" "$R" "gh pr merge 12 --squash --match-head-commit $H"
+gallow "valid token: gh pr merge with =form pin allowed" "$R" "gh pr merge 12 --match-head-commit=$H"
 gdeny "valid token still never allows force" "$R" 'git push --force origin HEAD:main'
 gdeny "valid token: --no-verify denied" "$R" 'git push --no-verify origin HEAD:main'
 gdeny "valid token: obfuscated target still denied (cannot resolve)" "$R" 'git push origin HEAD:m""ain$X'
@@ -126,6 +131,7 @@ commit_file "$R" c.txt three "three"
 out=$(verify "$R"); assert_eq "stale token (new commit): verify fails" "1" "$?"
 assert_contains "stale token: message names both commits" "$out" "re-run release-gate.sh"
 gdeny "stale token: push to main denied" "$R" 'git push origin HEAD:main'
+gdeny "stale token: gh pr merge denied even when pinned" "$R" "gh pr merge 12 --match-head-commit $(head_of "$R")"
 # forged / edited tokens
 HEAD3=$(head_of "$R")
 printf '%s\n' "$HEAD3" >"$R/.agent/release-token"

@@ -325,7 +325,22 @@ check_gh() { # $1 = index of gh
     k=$((k + 1))
   done
   case "$subs" in
-    " pr merge"*) emit_deny "gh pr merge puts code on the default branch without the release gate. Ask the user to merge, or push through release-gate.sh." ;;
+    " pr merge"*)
+      # Allowed only through the gate: valid token for the local HEAD, and the merge pinned to that exact
+      # commit with --match-head-commit so GitHub refuses it if the PR head is anything else.
+      local msha pin="" kk
+      msha=$(git -C "$SIM_CWD" rev-parse HEAD 2>/dev/null || true)
+      [ -n "$msha" ] || emit_deny "gh pr merge: cannot resolve HEAD here. Run it from inside the repo whose release token you minted."
+      kk=$(( $1 + 1 ))
+      while [ "$kk" -lt "$NT" ]; do
+        case "${TOKS[$kk]}" in
+          --match-head-commit) pin=${TOKS[$((kk + 1))]:-} ;;
+          --match-head-commit=*) pin=${TOKS[$kk]#--match-head-commit=} ;;
+        esac
+        kk=$((kk + 1))
+      done
+      require_token "$msha" "$SIM_CWD" "gh pr merge"
+      [ "$pin" = "$msha" ] || emit_deny "gh pr merge must be pinned to the released commit: add --match-head-commit $msha." ;;
     " workflow run"*|" workflow dispatch"*|" run rerun"*) emit_deny "starting or re-running workflows by hand is not allowed; deploys come from CI on a push. To roll back, push a revert commit through the release gate." ;;
     " api"*)
       case "$method" in ''|GET|get) ;; *) mut=1 ;; esac
