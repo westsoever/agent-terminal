@@ -11,8 +11,8 @@ Test method: `claude -p --model haiku --permission-mode bypassPermissions --sett
 | 0.1 PreToolUse deny under bypass | **PASS** (hook JSON deny, hook exit 2, and `permissions.deny` all block) | none |
 | 0.2 Stop hook block + loop field | **PASS** (`stop_hook_active`, per-session counter works; built-in cap observed) | none |
 | 0.3 Notification `agent_needs_input` / `agent_completed` | **NOT TESTABLE headlessly: needs user** | Use `Stop` + `idle_prompt` and classify in script, unless the user test passes |
-| 0.4 SessionStart in Desktop / VS Code | **NEEDS USER** (kit ready, steps below) | Per-repo `.claude/settings.json` hooks, or run managed sessions in CLI/VS Code |
-| 0.5 SendMessage wakes idle session | **NEEDS USER** (docs say yes, unverified) | Dispatcher reports only; `/voice` into the worker |
+| 0.4 SessionStart in Desktop / VS Code | **PASS** (user ran it 2026-10-05; log shows SessionStart with entrypoint `claude-desktop` and `claude-vscode`, plus `cli` inside VS Code's terminal; project-level hooks, user-level hooks still to re-check) | Per-repo `.claude/settings.json` hooks, or run managed sessions in CLI/VS Code |
+| 0.5 SendMessage wakes idle session | **PASS** (user-reported 2026-10-05; `/tmp/agent-sandbox/ping.txt` contains `ping`, written 14:14; busy vs idle cases not separately logged, so the user's word covers both) | Dispatcher reports only; `/voice` into the worker |
 | 0.6 VoiceMode (partial) | **RECORDED** (version, local services, lock path). Latency not measured | n/a |
 | 0.7 Conch lock | **DESCRIBED from source, not run live.** Surprise: default is NOT "wait" | See 0.7 |
 | 0.8 Browser verification harness | **PASS** via `claude -p` + chrome-devtools MCP (headless). Surprise: model self-verdict was wrong | Gate must check evidence mechanically |

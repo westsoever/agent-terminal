@@ -2,6 +2,16 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D13 (2026-10-05): Checkpoint 1 approved; hooks installed on the real settings
+
+**Decision (user, "go ahead", following the orchestrator's recommendation):** install the kit's hooks into `~/.claude/settings.json`.
+
+- Installed without `--replace-popup`: the old "Session finished" popup stays, so each stop notifies twice until the user opts in.
+- `gh pr merge` is allowed only with a valid release token for the local HEAD and `--match-head-commit <that sha>`. Anything else is denied (guard.sh, tests in t_release.sh).
+- The git pre-push hook stays off; it is installed per repo with `install.sh --install-prepush <repo>`.
+- Result: 7 new hook entries, 602 checks green, existing `vscode-session-manager-hook.sh` and `auto_title_sessions.py` entries untouched. Backups: `~/.claude/settings.json.bak.ching.20261005-140153` and `/tmp/agent-sandbox-backup/settings.pre-install.*.json`. Undo with `install.sh --uninstall`.
+- Not yet verified: that hooks fire from the real settings file in Desktop and VS Code, and how already-open sessions pick them up (MANUAL-STEPS.md 0.4).
+
 ## D12 (2026-10-05): mem0 is not included
 
 **Decision (user):** Do not include mem0, now or later. It is the wrong tool: its defaults send data to OpenAI (LLM and embeddings), it needs a vector database and a separate service, and running it locally means standing up Ollama and Qdrant. The user expected a lightweight harness around Claude, which it is not. If it cannot run locally without that extra stack, it stays out.

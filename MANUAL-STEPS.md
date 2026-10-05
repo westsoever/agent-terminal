@@ -16,7 +16,7 @@ Reply format at the end of each item, e.g. `0.4 pass`, or `0.4 fail: <what you s
 
 ---
 
-## - [ ] 0.4 SessionStart hook fires in Desktop and VS Code (about 6 min)
+## - [x] 0.4 SessionStart hook fires in Desktop and VS Code (about 6 min) PASS 2026-10-05
 
 **Why:** The whole kit injects `STATE.md` / `NEXT.md` through `SessionStart`. If a client ignores the hook, sessions started there start blind. Fallback if it fails: per-repo hooks, or run managed sessions in the CLI.
 
@@ -39,7 +39,7 @@ Reply format at the end of each item, e.g. `0.4 pass`, or `0.4 fail: <what you s
 
 ---
 
-## - [ ] 0.5 SendMessage wakes an idle session (about 8 min)
+## - [x] 0.5 SendMessage wakes an idle session (about 8 min) PASS 2026-10-05 (user-reported)
 
 **Why:** The voice dispatcher relays "tell miso-app to X" with `SendMessage`. If an idle session ignores messages, the dispatcher can only report, not relay. Fallback: report-only dispatcher, you dictate with `/voice` into the worker.
 
