@@ -1,0 +1,5 @@
+{"hooks":{
+ "SessionStart":[{"hooks":[{"type":"command","command":"/tmp/agent-sandbox/hooks/log-client.sh SessionStart"}]}],
+ "UserPromptSubmit":[{"hooks":[{"type":"command","command":"/tmp/agent-sandbox/hooks/log-client.sh UserPromptSubmit"}]}],
+ "Notification":[{"matcher":"","hooks":[{"type":"command","command":"/tmp/agent-sandbox/hooks/log-client.sh Notification"}]}],
+ "Stop":[{"hooks":[{"type":"command","command":"/tmp/agent-sandbox/hooks/log-client.sh Stop"}]}]}}
