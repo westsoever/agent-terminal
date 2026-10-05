@@ -153,7 +153,7 @@ seg_writes() { # does the current segment write/modify files?
     t=${TOKS[$k]}; b=${t##*/}
     case "$b" in
       rm|mv|cp|tee|truncate|ln|chmod|chown|dd|install|rsync|ed|unlink|shred) return 0 ;;
-      sed|perl) { seg_matches '-i*' || seg_matches '-[pnlasE0-9]*i*'; } && return 0 ;;   # -i, -i.bak, and clustered forms such as perl -pi -e
+      sed|perl) { seg_matches '-i*' || seg_matches '-[!-]*i*'; } && return 0 ;;   # -i, -i.bak, and any short-option cluster holding an i (-pi, -ri, -wpi)
     esac
     case "$t" in --in-place*) return 0 ;; esac
     k=$((k + 1))
@@ -430,7 +430,11 @@ check_secret_dump() { # one segment
   case "$first" in
     printenv) emit_deny "printenv dumps credentials into the session." ;;
     env) [ "$NT" -gt 1 ] || emit_deny "'env' with no command dumps credentials into the session." ;;
-    export|declare|typeset) seg_matches '-p' && emit_deny "listing exported variables dumps credentials into the session." ;;
+    # `A && B` as the last statement of a case arm returns 1 when A fails, and set -e then kills the caller
+    # ("internal error; failing closed") for every plain `export FOO=1`: use if. Bare export/declare/typeset
+    # (no operand) list the environment just like -p does.
+    export|declare|typeset)
+      if seg_matches '-p' || ! seg_has_operand; then emit_deny "listing exported variables dumps credentials into the session."; fi ;;
     echo|printf) k=1; while [ "$k" -lt "$NT" ]; do var_is_secret "${TOKS[$k]}" && emit_deny "printing a token/secret variable is not allowed."; k=$((k + 1)); done ;;
   esac
 }
@@ -507,9 +511,12 @@ committed_migration() { # absolute physical path -> 0 if it exists in HEAD of it
   git -C "$top" cat-file -e "HEAD:$rel" 2>/dev/null
 }
 
-is_tamper_path() {
-  case "$1" in "$SELF_DIR"|"$SELF_DIR"/*) return 0 ;; esac
-  case "$1" in
+is_tamper_path() { # macOS volumes are case-insensitive: match on the lower-cased path (like is_goal_path)
+  local l s
+  l=$(printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z')
+  s=$(printf '%s' "$SELF_DIR" | LC_ALL=C tr 'A-Z' 'a-z')
+  case "$l" in "$s"|"$s"/*) return 0 ;; esac
+  case "$l" in
     */.claude/settings.json|*/.claude/settings.local.json|*/.git/hooks|*/.git/hooks/*|*.githooks|*.githooks/*|*/ching/bin|*/ching/bin/*|*/.claude/ching|*/.claude/ching/*) return 0 ;;
   esac
   return 1
@@ -522,7 +529,9 @@ is_goal_path() { # macOS volumes are case-insensitive by default, so .agent/goal
   case "$l" in */.agent/goal.md|*/defaults/goal.md) return 0 ;; esac   # */defaults/ also covers AGENT_HOME overrides
   return 1
 }
-gated_lines() { grep -E '^[[:space:]]*(review|release_mode|test_command):' | sed 's/[[:space:]]*$//' | sort || true; }
+# -a: a NUL byte in the text must not turn the output into "Binary file matches" (the lines would vanish);
+# LC_ALL=C on every stage: sed fails on a byte sequence that is not valid UTF-8 and would drop the lines too.
+gated_lines() { LC_ALL=C grep -aE '^[[:space:]]*(review|release_mode|test_command):' | LC_ALL=C sed 's/[[:space:]]*$//' | LC_ALL=C sort || true; }
 deny_goal() { emit_deny "rule 11: review, release_mode and test_command in GOAL.md are the user's settings. Put the proposed change in STATE.md and notify the user."; }
 goal_seg_writes() { # seg_writes, except that discarding or merging a stream (2>/dev/null, 2>&1 split at '&') is not a write
   local keep=$SEG_RAW rc=0
@@ -533,9 +542,11 @@ goal_seg_writes() { # seg_writes, except that discarding or merging a stream (2>
 }
 check_new_goal() { # $1 = the gated lines of a GOAL.md that does not exist yet
   local rv relm
-  rv=$(printf '%s\n' "$1" | sed -n 's/^[[:space:]]*review:[[:space:]]*//p' | head -1)
-  relm=$(printf '%s\n' "$1" | sed -n 's/^[[:space:]]*release_mode:[[:space:]]*//p' | head -1)
-  if { [ -n "$rv" ] && [ "$rv" != required ]; } || { [ -n "$relm" ] && [ "$relm" != confirm ]; }; then
+  # EVERY review:/release_mode: line counts, not just the first one: a harmless indented decoy line must not
+  # hide the unindented line goal_get reads. `grep -vx ... || true` keeps this safe under pipefail.
+  rv=$(printf '%s\n' "$1" | LC_ALL=C sed -n 's/^[[:space:]]*review:[[:space:]]*//p' | LC_ALL=C grep -vxe required -e '' || true)
+  relm=$(printf '%s\n' "$1" | LC_ALL=C sed -n 's/^[[:space:]]*release_mode:[[:space:]]*//p' | LC_ALL=C grep -vxe confirm -e '' || true)
+  if [ -n "$rv" ] || [ -n "$relm" ]; then
     emit_deny "rule 11: a new GOAL.md may only start with review: required and release_mode: confirm. The user switches them."
   fi
 }
@@ -575,21 +586,36 @@ check_goal_write() { # $1 = absolute path of a GOAL.md being written by Edit/Mul
   esac
 }
 
+goal_token_path() { # token -> sets GABS to the GOAL.md path it names, or "" (not in a $() so that a deny can exit)
+  # The path may follow an attached redirect operator (>>f, 2>f, &>f) or a name= prefix (of=f), and a directory
+  # name may itself hold a '<', '>' or '=' (.agent/sub=dir/../GOAL.md). So try the whole token and the tail
+  # after each of those characters; any one resolving to a GOAL.md path counts.
+  local rest=$1 n=0 cand
+  GABS=""
+  while :; do
+    cand=$(resolve_path "$rest" "$SIM_CWD")
+    if is_goal_path "$cand"; then GABS=$cand; return 0; fi
+    [ "$rest" != "${rest#*[<>=]}" ] || return 0
+    rest=${rest#*[<>=]}
+    n=$((n + 1))
+    if [ "$n" -gt 24 ]; then emit_deny "rule 11: a token naming GOAL.md with this many '<', '>' or '=' cannot be checked. Use the Edit or Write tool."; fi
+  done
+}
+
 tamper_bash() {
-  local k=0 t abs u gabs
+  local k=0 t abs gabs
   while [ "$k" -lt "$NT" ]; do
     t=${TOKS[$k]}
     case "$t" in -*) k=$((k + 1)); continue ;; esac
     abs=""
-    case "$t" in *hooks*|*settings*|*ching*|*.sql) abs=$(resolve_path "$t" "$SIM_CWD") ;; esac
+    # any case: macOS volumes are case-insensitive, so .claude/Settings.JSON is settings.json
+    case "$t" in *[Hh][Oo][Oo][Kk][Ss]*|*[Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss]*|*[Cc][Hh][Ii][Nn][Gg]*|*.[Ss][Qq][Ll]) abs=$(resolve_path "$t" "$SIM_CWD") ;; esac
     if [ -n "$abs" ] && is_tamper_path "$abs" && seg_writes; then
       emit_deny "editing hooks, settings or the guard itself ($t) would disable the guardrails. Ask the user."
     fi
     gabs=""
     case "$t" in
-      *[Gg][Oo][Aa][Ll].[Mm][Dd]*)   # any case; drop an attached redirect operator (>>f, 2>f, &>f) and a name= prefix (of=f)
-        u=${t##*[<>]}; u=${u#*=}
-        gabs=$(resolve_path "$u" "$SIM_CWD") ;;
+      *[Gg][Oo][Aa][Ll].[Mm][Dd]*) goal_token_path "$t"; gabs=$GABS ;;
     esac
     # '>&f' is split at the '&', so the target is the first token of a segment whose predecessor ended in '>'
     if [ -n "$gabs" ] && is_goal_path "$gabs" && { goal_seg_writes || { [ "$k" -eq 0 ] && [ "$SEG_AFTER_REDIR" -eq 1 ]; }; }; then
@@ -647,11 +673,17 @@ strip_heredocs() { # drop heredoc bodies unless the heredoc feeds an interpreter
     }'
 }
 
+join_continuations() { # backslash-newline is a line continuation: `git push \` + `origin HEAD:main` is one command
+  # An odd number of backslashes before the newline continues the line; an even number is literal backslashes.
+  # Runs AFTER strip_heredocs: a heredoc body line ending in a backslash must not swallow its terminator.
+  perl -0777 -pe 's/(?<!\\)((?:\\\\)*)\\\n/$1/g'
+}
+
 check_bash() {
   local cmd seg
   cmd=$(jq -r '.tool_input.command // ""' <<<"$INPUT")
   [ -n "$cmd" ] || allow
-  cmd=$(printf '%s\n' "$cmd" | strip_heredocs)
+  cmd=$(printf '%s\n' "$cmd" | strip_heredocs | join_continuations)
   while IFS= read -r seg; do   # pass 1: per line, for rules that need the whole line (.env readers)
     SEG_RAW=$seg; tokenize "$seg"
     if [ "$NT" -gt 0 ]; then check_env_files; fi

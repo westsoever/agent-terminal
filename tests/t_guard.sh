@@ -408,4 +408,73 @@ gdeny "rule 11: redirect into .AGENT/GOAL.md" "$G11" "echo x >> .AGENT/GOAL.md"
 gdeny "rule 11: attached redirect into .agent/Goal.md" "$G11" "echo x >.agent/Goal.md"
 gdeny "rule 11: sed -i on .agent/goal.md" "$G11" "sed -i '' 's/confirm/auto/' .agent/goal.md"
 gallow "rule 11: reading .agent/goal.md" "$G11" "cat .agent/goal.md"
+
+# ---------- fix wave FA ----------
+# FA1: a NUL byte must not void rule 11 (grep without -a prints "Binary file matches" instead of the lines)
+NA=$(mk_repo fa-new)
+tdeny "rule 11: new GOAL.md with a NUL byte, then review: off" Write "$NA" "$(jq -n --arg f "$NA/.agent/GOAL.md" '{file_path:$f,content:"# Goal\u0000\nreview: off\n"}')"
+tdeny "rule 11: new GOAL.md with review: off and a NUL byte after it" Write "$NA" "$(jq -n --arg f "$NA/.agent/GOAL.md" '{file_path:$f,content:"# Goal\nreview: off\u0000\n"}')"
+ZA=$(mk_repo fa-nul); write_goal "$ZA" "bun test" confirm
+printf 'binary\000tail\n' >>"$ZA/.agent/GOAL.md"
+tdeny "rule 11: partial-line Edit confirm -> auto on a GOAL.md that holds a NUL byte" Edit "$ZA" "$(jq -n --arg f "$ZA/.agent/GOAL.md" '{file_path:$f,old_string:"confirm",new_string:"auto"}')"
+tallow "rule 11: prose Edit on a GOAL.md that holds a NUL byte" Edit "$ZA" "$(jq -n --arg f "$ZA/.agent/GOAL.md" '{file_path:$f,old_string:"# Goal",new_string:"# Goal\nShip it."}')"
+tdeny "rule 11: Write over a GOAL.md with a NUL byte that flips release_mode" Write "$ZA" "$(jq -n --arg f "$ZA/.agent/GOAL.md" '{file_path:$f,content:"# Goal\ntest_command: bun test\nrelease_mode: auto\n"}')"
+
+# FA2: a '=' or '>' inside a directory name must not hide a GOAL.md path
+mkdir -p "$G11/.agent/sub=dir" "$G11/.agent/sub>dir"
+gdeny "rule 11: '=' directory, absolute path" "$G11" "echo x >> $G11/.agent/sub=dir/../GOAL.md"
+gdeny "rule 11: '=' directory, attached >> redirect" "$G11" "echo x >>$G11/.agent/sub=dir/../GOAL.md"
+gdeny "rule 11: '=' directory, attached > redirect" "$G11" "echo x >$G11/.agent/sub=dir/../GOAL.md"
+gdeny "rule 11: '=' directory, relative path" "$G11" "echo x >> .agent/sub=dir/../GOAL.md"
+gdeny "rule 11: '>' in a directory name" "$G11" "echo x >> '.agent/sub>dir/../GOAL.md'"
+gdeny "rule 11: '>' in a directory name, attached redirect" "$G11" "echo x >>'.agent/sub>dir/../GOAL.md'"
+gdeny "rule 11: dd of= through an '=' directory" "$G11" "dd if=/tmp/x of=.agent/sub=dir/../GOAL.md"
+gallow "rule 11: reading GOAL.md through an '=' directory" "$G11" "cat .agent/sub=dir/../GOAL.md"
+
+# FA3: a backslash-newline continuation joins the lines, so it cannot split a command past the guard
+F3=$(mk_repo f3); git -C "$F3" checkout -q -b feat-x
+gdeny "continuation: push to main split over two lines" "$F3" "$(printf '%s\n' 'git push \' 'origin HEAD:main')"
+gdeny "continuation: --force on the next line" "$F3" "$(printf '%s\n' 'git push origin HEAD:x \' '--force')"
+gdeny "continuation: GOAL.md redirect target on the next line" "$G11" "$(printf '%s\n' 'echo x >> \' '.agent/GOAL.md')"
+gdeny "continuation: .env on the next line" "$R" "$(printf '%s\n' 'cat \' '.env')"
+gallow "continuation: ls -la" "$F3" "$(printf '%s\n' 'ls \' '-la')"
+gallow "continuation: heredoc body lines ending in a backslash" "$F3" "$(printf '%s\n' "cat <<'EOF'" 'line one \' 'EOF')"
+gdeny "continuation: a heredoc body ending in a backslash does not hide the next command" "$F3" "$(printf '%s\n' "cat <<'EOF'" 'line one \' 'EOF' 'rm -rf /usr')"
+gdeny "continuation: an even number of backslashes is a literal, the next line is its own command" "$F3" "$(printf '%s\n' 'echo a \\' 'git push --force origin x')"
+
+# FA4: a decoy line in a new GOAL.md cannot hide an unsafe setting that goal_get reads
+tdeny "rule 11: new GOAL.md, indented review: required decoy then review: off" Write "$NA" "$(jq -n --arg f "$NA/.agent/GOAL.md" '{file_path:$f,content:"# Goal\n  review: required\nreview: off\n"}')"
+tdeny "rule 11: new GOAL.md, indented release_mode: confirm decoy then release_mode: auto" Write "$NA" "$(jq -n --arg f "$NA/.agent/GOAL.md" '{file_path:$f,content:"# Goal\n  release_mode: confirm\nrelease_mode: auto\n"}')"
+tdeny "rule 11: new GOAL.md, review: required decoy then an indented review: off" Write "$NA" "$(jq -n --arg f "$NA/.agent/GOAL.md" '{file_path:$f,content:"# Goal\nreview: required\n  review: off\n"}')"
+tdeny "rule 11: Edit creating a GOAL.md with a release_mode decoy" Edit "$NA" "$(jq -n --arg f "$NA/.agent/GOAL.md" '{file_path:$f,old_string:"",new_string:"# Goal\n  release_mode: confirm\nrelease_mode: auto\n"}')"
+tallow "rule 11: new GOAL.md repeating the safe values" Write "$NA" "$(jq -n --arg f "$NA/.agent/GOAL.md" '{file_path:$f,content:"# Goal\nreview: required\n  review:   required  \nrelease_mode: confirm\nrelease_mode: confirm\n"}')"
+
+# FA5: export/declare/typeset are ordinary shell; only listing the environment is denied
+gallow "export FOO=1" "$R" 'export FOO=1'
+gallow "declare X=1" "$R" 'declare X=1'
+gallow "typeset Y=2" "$R" 'typeset Y=2'
+gallow "export FOO=1; echo ok" "$R" 'export FOO=1; echo ok'
+gallow "export PATH=\$PATH:/x && ls" "$R" 'export PATH=$PATH:/x && ls'
+gdeny "declare -p" "$R" 'declare -p'
+gdeny "typeset -p" "$R" 'typeset -p'
+gdeny "export FOO=1; export -p" "$R" 'export FOO=1; export -p'
+gdeny "bare export lists the environment" "$R" 'export'
+gdeny "declare -x lists the environment" "$R" 'declare -x'
+
+# FA6: in-place flag clusters and a case-insensitive file system
+SETTINGS="$HOME/.claude/settings.json"
+gdeny "sed -ri on settings.json" "$R" "sed -ri 's/a/b/' $SETTINGS"
+gdeny "perl -wpi on settings.json" "$R" "perl -wpi -e 's/a/b/' $SETTINGS"
+gdeny "perl -wpi on GOAL.md" "$G11" "perl -wpi -e 's/a/b/' .agent/GOAL.md"
+gdeny "redirect into .claude/Settings.JSON" "$R" "echo x > $HOME/.claude/Settings.JSON"
+out=$(printf '%s' "$(bash_json "$R" 'echo x > /Users/nobody/.claude/Settings.JSON')" | HOME=/Users/nobody "$BIN/guard.sh" 2>&1)
+if is_deny "$out"; then pass "deny: redirect into Settings.JSON (realistic HOME)"; else fail "deny: redirect into Settings.JSON (realistic HOME)" "$out"; fi
+gdeny "redirect into .GIT/HOOKS/pre-push" "$R" 'echo exit 0 > .GIT/HOOKS/pre-push'
+tdeny "Write tool on .claude/Settings.JSON" Write "$R" "$(jq -n --arg p "$HOME/.claude/Settings.JSON" '{file_path:$p,content:"{}"}')"
+gallow "cat settings.json" "$R" "cat $SETTINGS"
+gallow "sed -n on settings.json" "$R" "sed -n 1,5p $SETTINGS"
+gallow "sed -E to stdout on settings.json" "$R" "sed -E 's/a/b/' $SETTINGS"
+gallow "perl -ne on settings.json" "$R" "perl -ne 'print if /hooks/' $SETTINGS"
+gallow "perl -lane on settings.json" "$R" "perl -lane 'print' $SETTINGS"
+gallow "grep -i on settings.json" "$R" "grep -i hooks $SETTINGS"
 exit 0
