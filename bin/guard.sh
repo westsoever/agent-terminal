@@ -13,8 +13,10 @@
 # Rules: 1 rm -rf outside the repo//tmp | 2 force push | 3 push to main/default without release token for
 # the pushed commit | 4 vercel deploy, gh workflow run | 5 reading .env*, printing secrets | 6 Supabase
 # apply_migration / non-read-only execute_sql / Management API / CLI db push | 7 editing a committed
-# migration, db-migrate --record-only, --apply without a migrate token. Extras: --no-verify, hook/settings/
-# token tampering, gh pr merge, piping into a shell.
+# migration, db-migrate --record-only, --apply without a migrate token | 8 publishing (npm/bun/pnpm/yarn
+# publish, gh release, gh repo delete/visibility/public) | 9 closing PRs/issues | 10 sending email/chat
+# (drafts only). Extras: --no-verify, hook/settings/token tampering, gh pr merge, piping into a shell.
+# Every deny is also logged as a `deny` event, after the decision has been printed.
 # Env: GUARD_PROTECTED_BRANCHES (default "main master" plus the remote default branch)
 set -euo pipefail
 
@@ -29,6 +31,10 @@ DECIDED=0
 emit_deny() {
   DECIDED=1
   jq -n --arg r "GUARD: $1" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
+  # The decision is printed first; logging it can never change it.
+  ( SID=$(jq -r '.session_id // ""' <<<"$INPUT" 2>/dev/null || true); CWD=${CWD:-$PWD}; NAME=$(basename "$CWD")
+    # shellcheck source=lib.sh
+    . "$SELF_DIR/lib.sh" && ev deny "$(jq -nc --arg r "$1" --arg t "${TOOL:-}" '{rule:$r,tool:$t}')" ) >/dev/null 2>&1 || true
   exit 0
 }
 allow() { DECIDED=1; exit 0; }
@@ -341,11 +347,25 @@ check_gh() { # $1 = index of gh
       done
       require_token "$msha" "$SIM_CWD" "gh pr merge"
       [ "$pin" = "$msha" ] || emit_deny "gh pr merge must be pinned to the released commit: add --match-head-commit $msha." ;;
+    " pr close"*|" issue close"*|" issue delete"*)
+      emit_deny "rule 9: closing or deleting PRs and issues is the user's call. Comment with your reasoning (gh pr comment / gh issue comment) and notify instead." ;;
+    " release create"*|" release delete"*|" release edit"*|" release upload"*)
+      emit_deny "rule 8: publishing a release is the user's call. Prepare it, then notify that it is ready." ;;
+    " repo delete"*) emit_deny "rule 8: deleting a repository is the user's call." ;;
+    " repo edit"*) if seg_matches '--visibility*'; then emit_deny "rule 8: changing repository visibility is the user's call."; fi ;;
+    " repo create"*) if seg_matches '--public'; then emit_deny "rule 8: a public repository publishes code. Create it with --private, or ask the user."; fi ;;
     " workflow run"*|" workflow dispatch"*|" run rerun"*) emit_deny "starting or re-running workflows by hand is not allowed; deploys come from CI on a push. To roll back, push a revert commit through the release gate." ;;
     " api"*)
       case "$method" in ''|GET|get) ;; *) mut=1 ;; esac
+      if [ "$mut" -eq 1 ] && seg_matches '*state=closed*'; then emit_deny "rule 9: closing an issue or PR through the API is the user's call. Comment and notify instead."; fi
       if [ "$mut" -eq 1 ] && [ "$hit" -eq 1 ]; then emit_deny "gh api call that merges, dispatches workflows, or writes refs/contents bypasses the release gate."; fi ;;
   esac
+}
+
+check_publish() { # $1 = index of npm/pnpm/bun/yarn: any `publish` word in the command is denied
+  if seg_matches publish; then
+    emit_deny "rule 8: publishing a package is the user's call. Run '${TOKS[$1]##*/} pack' to check the tarball, then notify that it is ready."
+  fi
 }
 
 check_vercel() { # $1 = index of vercel token
@@ -428,6 +448,7 @@ check_misc() { # one segment, tokens in TOKS
         find) [ "$k" -ne 0 ] || check_find_delete ;;
         git) check_git "$k" ;;
         gh) check_gh "$k" ;;
+        npm|pnpm|bun|yarn) check_publish "$k" ;;
         vercel|vercel@*) check_vercel "$k" ;;
         supabase) check_supabase_cli "$k" ;;
         eval) case "$SEG_RAW" in *'$'*|*'`'*) emit_deny "eval with a variable or substitution hides what will run." ;; esac ;;
@@ -618,9 +639,23 @@ check_supabase_mcp() {
   allow
 }
 
+check_send_mcp() { # rule 10 (D18): drafts only
+  local op=${TOOL_LC##*__}
+  case "$op" in *draft*) allow ;; esac
+  case "$op" in
+    *send*|reply|*_reply|reply_*|forward|*_forward|forward_*|*post_message*)
+      emit_deny "rule 10: sessions write drafts and never send (D18). Save it as a draft and notify the user to send it." ;;
+  esac
+  allow
+}
+
 case "$TOOL" in
   Bash) check_bash ;;
   Read|Grep) check_read ;;
   Edit|Write|MultiEdit|NotebookEdit) check_write ;;
-  *) case "$TOOL_LC" in mcp__*supabase*) check_supabase_mcp ;; *) allow ;; esac ;;
+  *) case "$TOOL_LC" in
+       mcp__*supabase*) check_supabase_mcp ;;
+       mcp__*gmail*|mcp__*slack*|mcp__*discord*|mcp__*telegram*) check_send_mcp ;;
+       *) allow ;;
+     esac ;;
 esac

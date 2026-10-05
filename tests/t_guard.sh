@@ -238,4 +238,57 @@ assert_eq "deny JSON: permissionDecision" "deny" "$(printf '%s' "$out" | jq -r .
 assert_contains "deny reason says what to do instead" "$(printf '%s' "$out" | jq -r .hookSpecificOutput.permissionDecisionReason)" "GUARD:"
 out=$(printf 'not json' | "$BIN/guard.sh" 2>&1); rc=$?
 assert_eq "garbage input fails closed (exit 2)" "2" "$rc"
+
+# ---------- Phase 1.5: rules 8-10 ----------
+GR=$(mk_repo guardp15)
+gdeny "rule 8: npm publish" "$GR" "npm publish"
+gdeny "rule 8: pnpm publish --access public" "$GR" "pnpm publish --access public"
+gdeny "rule 8: bun publish" "$GR" "bun publish"
+gdeny "rule 8: yarn npm publish" "$GR" "yarn npm publish"
+gdeny "rule 8: gh release create" "$GR" "gh release create v1.0.0"
+gdeny "rule 8: gh release delete" "$GR" "gh release delete v1.0.0 --yes"
+gdeny "rule 8: gh repo delete" "$GR" "gh repo delete me/x --yes"
+gdeny "rule 8: gh repo edit visibility" "$GR" "gh repo edit --visibility public"
+gdeny "rule 8: gh repo create --public" "$GR" "gh repo create me/new --public"
+gallow "rule 8: npm pack" "$GR" "npm pack"
+gallow "rule 8: npm test" "$GR" "npm test"
+gallow "rule 8: bun test publish.test.ts" "$GR" "bun test publish.test.ts"
+gallow "rule 8: gh release list" "$GR" "gh release list"
+gallow "rule 8: gh repo view" "$GR" "gh repo view"
+gallow "rule 8: gh repo create --private" "$GR" "gh repo create me/new --private"
+gdeny "rule 9: gh pr close" "$GR" "gh pr close 12"
+gdeny "rule 9: gh issue close" "$GR" "gh issue close 7 --comment done"
+gdeny "rule 9: gh issue delete" "$GR" "gh issue delete 7"
+gdeny "rule 9: gh api state=closed" "$GR" "gh api -X PATCH repos/o/r/issues/7 -f state=closed"
+gallow "rule 9: gh pr comment" "$GR" "gh pr comment 12 --body 'looks good'"
+gallow "rule 9: gh issue comment" "$GR" "gh issue comment 7 --body 'see 8'"
+gallow "rule 9: gh pr view" "$GR" "gh pr view 12"
+tdeny "rule 10: gmail send_message" mcp__claude_ai_Gmail__send_message "$GR" '{"to":"a@b.c","body":"hi"}'
+tdeny "rule 10: gmail reply" mcp__claude_ai_Gmail__reply "$GR" '{"body":"hi"}'
+tdeny "rule 10: gmail forward" mcp__claude_ai_Gmail__forward "$GR" '{}'
+tdeny "rule 10: slack send" mcp__plugin_slack_slack__slack_send_message "$GR" '{"text":"hi"}'
+tdeny "rule 10: telegram reply" mcp__plugin_telegram_telegram__reply "$GR" '{"text":"hi"}'
+tdeny "rule 10: discord reply" mcp__plugin_discord_discord__reply "$GR" '{"text":"hi"}'
+tallow "rule 10: gmail create_draft" mcp__claude_ai_Gmail__create_draft "$GR" '{"to":"a@b.c"}'
+tallow "rule 10: slack send as draft" mcp__plugin_slack_slack__slack_send_message_draft "$GR" '{"text":"hi"}'
+tallow "rule 10: gmail search" mcp__claude_ai_Gmail__search_threads "$GR" '{"q":"x"}'
+out=$(jq -n --arg c "$GR" '{hook_event_name:"PreToolUse",session_id:"g-ev",tool_name:"Bash",cwd:$c,tool_input:{command:"npm publish"}}' | "$BIN/guard.sh")
+assert_contains "deny is printed while logging" "$out" '"deny"'
+assert_contains "events: deny logged with the session id" "$(jq -r 'select(.kind=="deny") | .sid' "$AGENT_HOME/events.jsonl")" "g-ev"
+assert_contains "events: deny names the rule" "$(jq -r 'select(.kind=="deny" and .sid=="g-ev") | .data.rule' "$AGENT_HOME/events.jsonl")" "rule 8"
+# evasions the existing token/segment model already handles for the older rules
+gdeny "rule 8: publish after cd and &&" "$GR" "cd packages/x && npm publish"
+gdeny "rule 8: publish behind env assignments" "$GR" "env NODE_ENV=prod npm publish"
+gdeny "rule 8: gh release create behind GH_REPO=" "$GR" "GH_REPO=o/r gh release create v1.0.0"
+gdeny "rule 9: gh pr close inside bash -c" "$GR" 'bash -c "gh pr close 5"'
+gdeny "rule 9: gh pr close with -R after the subcommand" "$GR" "gh pr close 5 -R o/r"
+gdeny "rule 9: gh issue close via xargs" "$GR" "echo 7 | xargs gh issue close"
+tdeny "rule 10: upper-case tool name" mcp__claude_ai_GMAIL__SEND_MESSAGE "$GR" '{"to":"a@b.c","body":"hi"}'
+# logging a deny can never change it: an unwritable AGENT_HOME still gives the deny, exit 0, silent stderr
+: >"$WORK/p15-notadir"
+out=$(jq -n --arg c "$GR" '{hook_event_name:"PreToolUse",session_id:"g-ro",tool_name:"Bash",cwd:$c,tool_input:{command:"npm publish"}}' \
+  | AGENT_HOME="$WORK/p15-notadir/sub" "$BIN/guard.sh" 2>"$WORK/p15-stderr"); rc=$?
+assert_eq "unwritable AGENT_HOME: deny still exits 0" "0" "$rc"
+assert_contains "unwritable AGENT_HOME: deny still printed" "$out" '"deny"'
+assert_eq "unwritable AGENT_HOME: nothing on stderr" "0" "$(wc -c <"$WORK/p15-stderr" | tr -d ' ')"
 exit 0
