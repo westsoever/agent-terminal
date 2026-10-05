@@ -150,3 +150,21 @@ Ready-made logging hook: `/tmp/agent-sandbox/hooks/log-client.sh` (logs event na
 ## Files left in /tmp (all disposable)
 
 `/tmp/agent-sandbox/` (repo, hooks, settings files, logs, `run.sh`, `unit-guard.sh`, evidence), `/tmp/agent-sandbox-remote.git`, `/tmp/agent-sandbox-backup/`. The HTTP server was stopped; the chrome-devtools-mcp processes seen in `pgrep` were not killed because some may belong to other live sessions.
+
+
+## 0.6 VoiceMode latency (user-run, 2026-10-05): FAIL against the 3 s guess, cause identified
+
+User-reported round trips in the main session: about 40 s (first message), about 20 s, about 15 s. One `converse` timing line the user pasted:
+
+`ttfa 2.0s, gen 2.0s, play 2.4s, record 10.5s, stt 2.9s, audio 318KB, total 17.8s`
+
+Reading it:
+- The voice pipeline itself costs about 5 s: Whisper transcription 2.9 s (large-v2 is the installed model) plus Kokoro time-to-first-audio 2.0 s. `record 10.5s` is the user speaking and the silence wait, not latency.
+- The rest of the 15 to 40 s is the **model turn** in a large session: a big prompt (many skills, MCP tool lists, hook output, claude-mem context) on a large model. That is an estimate from subtraction, not a measurement.
+- Fallback per PLAN section 3 (OpenAI cloud STT/TTS) would not fix the model-turn part and breaks D5, so it is not the answer.
+
+Proposed fixes (not applied; need the user's OK):
+1. **Dispatcher on a small fast model** (Haiku 4.5) in its own slim session folder (`~/.agent/dispatcher/`) with only `dispatcher/AGENTS.md`, no heavy plugins or skill lists, so the prompt is small. Likely the biggest win. Phase 4 should do this by design.
+2. **Faster Whisper model**: switch from large-v2 to `large-v3-turbo` or `small.en` (both listed by `voicemode whisper model`). Cuts the 2.9 s; accuracy trade-off to be checked on the user's voice and accent.
+3. **Short spoken replies** and `converse` called once per turn (speak and listen in one call), never several blocking calls in a row.
+4. Re-measure after 1 to 3 with a pass line the user picks (the plan's 3 s was a guess).

@@ -61,7 +61,7 @@ Reply format at the end of each item, e.g. `0.4 pass`, or `0.4 fail: <what you s
 
 ---
 
-## - [ ] 0.6 VoiceMode latency (about 10 min)
+## - [x] 0.6 VoiceMode latency (about 10 min) DONE 2026-10-05: too slow, see PHASE0-RESULTS.md
 
 **Why:** If speech to first spoken reply is too slow, voice is unusable and we reconsider cloud STT/TTS (a separate decision). This number also sets the target for the pilot. Whisper (port 2022) and Kokoro (port 8880) were already running locally as of today.
 
