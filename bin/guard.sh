@@ -20,15 +20,21 @@
 # The Monitor tool (it runs a shell command) goes through the Bash rules. A missing dependency, a failing
 # splitter, a deny that cannot be printed, or a command that takes more than 8 s to check all fail closed.
 # Every deny is also logged as a `deny` event, after the decision has been printed.
-# Env: GUARD_PROTECTED_BRANCHES (default "main master" plus the remote default branch)
+# Env: GUARD_PROTECTED_BRANCHES (default "main master" plus the remote default branch);
+#      GUARD_TIME_LIMIT (seconds; can only lower the 8 s ceiling, for the tests)
 set -euo pipefail
 
+# The time ceiling counts from here. An inherited SECONDS (the hook environment) would otherwise start the clock
+# late and deny every call. GUARD_TIME_LIMIT can only LOWER the 8 s limit (it is how the tests reach the ceiling).
+SECONDS=0
+TIME_LIMIT=8
+case "${GUARD_TIME_LIMIT:-}" in ''|*[!0-9]*) ;; *) if [ "$GUARD_TIME_LIMIT" -lt 8 ]; then TIME_LIMIT=$GUARD_TIME_LIMIT; fi ;; esac
 PROTECTED=${GUARD_PROTECTED_BRANCHES:-"main master"}
 DEFB=""
 
 # Every external tool the guard needs: a missing one must fail CLOSED (a missing sed used to leave the splitter
 # with no segments, and every command was allowed).
-for dep in jq dirname sed awk perl git tr; do
+for dep in jq dirname sed awk perl git tr grep sort wc head; do
   command -v "$dep" >/dev/null 2>&1 || { echo "GUARD: $dep is not installed; failing closed" >&2; exit 2; }
 done
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -52,7 +58,7 @@ emit_deny() {
   exit 0
 }
 ceiling() { # a fail-closed time ceiling: the hook has 15 s, and a timed-out hook lets the call through
-  if [ "$SECONDS" -ge 8 ]; then emit_deny "command too large to check safely (took too long). Split it into smaller commands."; fi
+  if [ "$SECONDS" -ge "$TIME_LIMIT" ]; then emit_deny "command too large to check safely (took too long). Split it into smaller commands."; fi
 }
 allow() { DECIDED=1; exit 0; }
 # shellcheck disable=SC2329
@@ -753,9 +759,14 @@ scan_segment() {
 #  - here-strings (<<<), and <<word inside quotes, comments or (( )) arithmetic, are not heredocs;
 #  - the delimiter is the whole word after optional quotes (END-OF-FILE, EOF.1), not just its leading letters;
 #  - the skipped lines are buffered and printed at END if the terminator never came;
-#  - a command line that ends in a backslash continues on the next line, so the body starts after the joined line.
+#  - $1 selects how a line that ends in an odd number of backslashes is treated: 1 joins it with the next line
+#    (so the heredoc body starts after the joined line), 2 joins it unless the backslash sits in a comment (the
+#    shell does not continue a comment: `ls # note \` + `gh pr close 5` runs both), 0 never joins. The guard
+#    scans the output of all the views that differ and denies when any one is denied;
+#  - $( inside double quotes is command context again, so the body of git commit -m "$(cat <<'EOF' ... EOF)"
+#    is data like the unquoted $(cat <<'EOF'; bash -c "$(cat <<EOF ...)" stays scanned (an interpreter).
 strip_heredocs() {
-  awk -v sq="'" -v dq='"' '
+  awk -v jn="$1" -v sq="'" -v dq='"' '
     function isinterp(pre,   n, t, i, b, redir, r) {
       n = split(pre, t, /[ \t]+/); redir = 0; r = 0
       for (i = 1; i <= n; i++) {
@@ -766,17 +777,45 @@ strip_heredocs() {
       }
       return r
     }
-    function scan(line,   len, i, j, c, q, depth, ad, w, d) {
-      len = length(line); q = ""; depth = 0; ad = 0
+    function in_comment(line,   len, i, c, q) {   # does a shell comment start somewhere in this line?
+      len = length(line); q = ""
       for (i = 1; i <= len; i++) {
         c = substr(line, i, 1)
         if (q == sq) { if (c == sq) q = ""; continue }
+        if (q == "ansi") { if (c == "\\") i++; else if (c == sq) q = ""; continue }
         if (q == dq) { if (c == "\\") i++; else if (c == dq) q = ""; continue }
         if (c == "\\") { i++; continue }
+        if (c == "$" && substr(line, i + 1, 1) == sq) { q = "ansi"; i++; continue }   # ANSI-C quoting (dollar, single quote): a backslash escapes the next character
+        if (c == sq || c == dq) { q = c; continue }
+        if (c == "#" && (i == 1 || index(" \t;&|(", substr(line, i - 1, 1)) > 0)) return 1
+      }
+      return 0
+    }
+    function scan(line,   len, i, j, c, q, depth, ad, w, d, sp, sv_q, sv_d) {
+      len = length(line); q = ""; depth = 0; ad = 0; sp = 0
+      for (i = 1; i <= len; i++) {
+        c = substr(line, i, 1)
+        if (q == sq) { if (c == sq) q = ""; continue }
+        if (q == "ansi") { if (c == "\\") i++; else if (c == sq) q = ""; continue }
+        if (q == dq) {
+          if (c == "\\") i++
+          else if (c == dq) q = ""
+          else if (c == "$" && substr(line, i + 1, 1) == "(") {   # $( in double quotes: command context until its )
+            sp++; sv_q[sp] = dq; sv_d[sp] = depth; q = ""; depth++; i++
+            if (substr(line, i + 1, 1) == "(") { ad = depth; depth++; i++ }   # $(( is arithmetic
+          }
+          continue
+        }
+        if (c == "\\") { i++; continue }
+        if (c == "$" && substr(line, i + 1, 1) == sq) { q = "ansi"; i++; continue }
         if (c == sq || c == dq) { q = c; continue }
         if (c == "#" && (i == 1 || index(" \t;&|(", substr(line, i - 1, 1)) > 0)) break
         if (c == "(") { depth++; if (!ad && substr(line, i + 1, 1) == "(") ad = depth; continue }
-        if (c == ")") { depth--; if (depth < 0) depth = 0; if (ad && depth < ad) ad = 0; continue }
+        if (c == ")") {
+          depth--; if (depth < 0) depth = 0; if (ad && depth < ad) ad = 0
+          if (sp > 0 && depth == sv_d[sp]) { q = sv_q[sp]; sp-- }   # back into the double quote
+          continue
+        }
         if (c == "<" && substr(line, i + 1, 1) == "<") {
           if (substr(line, i + 2, 1) == "<") { i += 2; continue }
           if (ad) { i++; continue }
@@ -800,7 +839,7 @@ strip_heredocs() {
     }
     {
       line = $0
-      while (match(line, /\\+$/) && RLENGTH % 2 == 1 && (getline nx) > 0) line = substr(line, 1, length(line) - 1) nx
+      if (jn) while (match(line, /\\+$/) && RLENGTH % 2 == 1 && !(jn == 2 && in_comment(line)) && (getline nx) > 0) line = substr(line, 1, length(line) - 1) nx
       print line
       if (index(line, "<<") > 0) { nw = 0; scan(line); if (nw > 0) { skip = 1; cur = 1; nb = 0 } }
     }
@@ -813,23 +852,46 @@ join_continuations() { # backslash-newline is a line continuation: `git push \` 
   perl -0777 -pe 's/(?<!\\)((?:\\\\)*)\\\n/$1/g'
 }
 
-CMD_ALL=""   # the whole command, after heredoc stripping and line joining (for checks that span segments)
-check_bash() {
-  local cmd seg segs
-  cmd=$(jq -r '.tool_input.command // ""' <<<"$INPUT")
-  [ -n "$cmd" ] || allow
-  cmd=$(printf '%s\n' "$cmd" | strip_heredocs | join_continuations)
-  CMD_ALL=$cmd
+CMD_ALL=""   # the text being scanned (for checks that span segments)
+scan_text() { # scan one text (heredoc bodies already stripped); a deny exits, so this only returns when it is clean
+  local seg segs
+  # every piece of per-scan state starts fresh: the simulated cd, the redirect carry-over; the time ceiling
+  # (SECONDS) keeps counting across scans
+  SIM_CWD=$CWD_PHYS; SIM_UNKNOWN=0; SEG_RAW=""; SEG_AFTER_REDIR=0; NEXT_AFTER_REDIR=0; DEFB=""
+  CMD_ALL=$1
   while IFS= read -r seg; do   # pass 1: per line, for rules that need the whole line (.env readers)
     ceiling
     SEG_RAW=$seg; tokenize "$seg"
     if [ "$NT" -gt 0 ]; then check_env_files; fi
-  done <<<"$cmd"
+  done <<<"$1"
   # A failed splitter must not look like "no segments": capture its output and fail closed if it errs.
-  segs=$(printf '%s\n' "$cmd" | sed -e 's/&&/\n/g' -e 's/||/\n/g' -e 's/[;|&()`]/\n/g') || { echo "GUARD: could not split the command; failing closed" >&2; exit 2; }
+  segs=$(printf '%s\n' "$1" | sed -e 's/&&/\n/g' -e 's/||/\n/g' -e 's/[;|&()`]/\n/g') || { echo "GUARD: could not split the command; failing closed" >&2; exit 2; }
   while IFS= read -r seg; do   # pass 2: per simple command
     scan_segment "$seg"
   done <<<"$segs"
+}
+
+check_bash() {
+  local raw plain joined prev
+  raw=$(jq -r '.tool_input.command // ""' <<<"$INPUT")
+  [ -n "$raw" ] || allow
+  # Up to three views of the command, denied when any one is denied:
+  #  - un-joined: every physical line stands alone (the shell does not continue a comment that ends in a
+  #    backslash, so `ls # note \` + `gh pr close 5` runs both);
+  #  - joined: a backslash-newline continues the line (`git push \` + `origin HEAD:main` is one command);
+  #  - joined except after a comment (the shell's real behaviour; needed for `ls # c \` + `git push \` +
+  #    `origin HEAD:main`, which the other two views each get wrong).
+  # Without a backslash-newline in the command all three are the same text, so only one scan runs.
+  plain=$(printf '%s\n' "$raw" | strip_heredocs 0)
+  scan_text "$plain"
+  case "$raw" in
+    *'\'$'\n'*)
+      prev=$plain
+      joined=$(printf '%s\n' "$raw" | strip_heredocs 1 | join_continuations)
+      if [ "$joined" != "$prev" ]; then scan_text "$joined"; prev=$joined; fi
+      joined=$(printf '%s\n' "$raw" | strip_heredocs 2)   # awk did every join itself: no perl pass, it ignores comments
+      if [ "$joined" != "$prev" ] && [ "$joined" != "$plain" ]; then scan_text "$joined"; fi ;;
+  esac
   allow
 }
 
@@ -893,7 +955,7 @@ check_send_mcp() { # rule 10 (D18): drafts only
   local op=${TOOL_LC##*__}
   case "$op" in *draft*) allow ;; esac
   case "$op" in
-    *send*|reply|*_reply|reply_*|forward|*_forward|forward_*|*post_message*|*schedule_message*|*reply_to*|*reply_all*|*replyall*|*postmessage*|*update_message*|*upload_file*)
+    *send*|reply|*_reply|reply_*|forward|*_forward|forward_*|*post_message*|*schedule_message*|*reply_to*|*reply_all*|*replyall*|*postmessage*|*update_message|*upload_file*)
       emit_deny "rule 10: sessions write drafts and never send (D18). Save it as a draft and notify the user to send it." ;;
   esac
   allow

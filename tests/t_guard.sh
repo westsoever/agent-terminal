@@ -568,6 +568,16 @@ assert_contains "no sed on PATH: says what is missing" "$out" "sed"
 rm -f "$WORK/nosed/awk"
 out=$(printf '%s' "$(bash_json "$R" 'git push --force origin main')" | PATH="$WORK/nosed" /bin/bash "$BIN/guard.sh" 2>&1); rc=$?
 assert_eq "no awk on PATH either: still fails closed with exit 2" "2" "$rc"
+# a missing grep/sort/wc/head would silently empty gated_lines and void rule 11, so each is a preflight failure
+for missing in grep sort wc head; do
+  rm -rf "${WORK:?}/miss-$missing"; mkdir -p "$WORK/miss-$missing"
+  for tool in jq git perl awk tr dirname basename cat sed grep sort wc head date; do
+    [ "$tool" = "$missing" ] || ln -sf "$(command -v "$tool")" "$WORK/miss-$missing/$tool"
+  done
+  out=$(printf '%s' "$(bash_json "$R" 'git push --force origin main')" | PATH="$WORK/miss-$missing" /bin/bash "$BIN/guard.sh" 2>&1); rc=$?
+  assert_eq "no $missing on PATH: fails closed with exit 2" "2" "$rc"
+  assert_contains "no $missing on PATH: says what is missing" "$out" "$missing"
+done
 
 # F5: a cheap fail-closed time ceiling, and no quadratic work on a long segment
 cmd2k=$(i=0; while [ "$i" -lt 2000 ]; do printf 'env A=1 '; i=$((i + 1)); done; printf 'echo hi')
@@ -578,11 +588,17 @@ t1=$((SECONDS - t0))
 assert_eq "2000 leading env tokens: exit 0" "0" "$rc"
 case "$out" in ''|*'"permissionDecision": "deny"'*) pass "2000 leading env tokens: allowed or denied, never an error" ;; *) fail "2000 leading env tokens: allowed or denied, never an error" "$out" ;; esac
 assert_eq "2000 leading env tokens: decided within 12 s" "yes" "$([ "$t1" -lt 12 ] && echo yes || echo "no ($t1 s)")"
-out=$(SECONDS=8 "$BIN/guard.sh" <<<"$(bash_json "$R" 'ls -la')" 2>&1); rc=$?
+# The ceiling is tested through GUARD_TIME_LIMIT (it can only LOWER the 8 s limit), not by presetting SECONDS:
+# the guard resets SECONDS itself, and a preset near the limit is flaky (bash counts whole wall-clock seconds).
+out=$(GUARD_TIME_LIMIT=0 "$BIN/guard.sh" <<<"$(bash_json "$R" 'ls -la')" 2>&1); rc=$?
 assert_eq "time ceiling reached: exit 0" "0" "$rc"
 assert_contains "time ceiling reached: denies as too large" "$out" "too large"
-out=$(SECONDS=7 "$BIN/guard.sh" <<<"$(bash_json "$R" 'ls -la')" 2>&1)
-assert_eq "just under the ceiling: an ordinary command is allowed" "" "$out"
+out=$(GUARD_TIME_LIMIT=500 "$BIN/guard.sh" <<<"$(bash_json "$R" 'ls -la')" 2>&1)
+assert_eq "GUARD_TIME_LIMIT cannot raise the limit (an ordinary command is still allowed)" "" "$out"
+out=$(env SECONDS=5 "$BIN/guard.sh" <<<"$(bash_json "$R" 'ls -la')" 2>&1)
+assert_eq "an inherited SECONDS=5: an ordinary command is allowed" "" "$out"
+out=$(env SECONDS=100 "$BIN/guard.sh" <<<"$(bash_json "$R" 'ls -la')" 2>&1)
+assert_eq "an inherited SECONDS=100 does not deny every call" "" "$out"
 
 # F2: wrappers with option values, leading redirections, more launchers
 gdeny "xargs -I {} gh pr close" "$GR" 'echo 5 | xargs -I {} gh pr close {}'
@@ -627,4 +643,73 @@ gdeny "rule 8: npm unpublish" "$GR" 'npm unpublish x@1'
 gdeny "rule 8: npm deprecate" "$GR" 'npm deprecate x "msg"'
 gdeny "rule 8: npm dist-tag add" "$GR" 'npm dist-tag add x@1 latest'
 gallow "rule 8: npm view" "$GR" 'npm view x versions'
+
+# ---------- fix wave FA, round 3 ----------
+# C1: a comment is not continued by a trailing backslash, so the next line is its own command; the guard scans
+# the un-joined text AND the joined text and denies when either is denied
+gdeny "comment ending in a backslash does not hide gh pr close" "$F3" "$(printf '%s\n' 'ls # note \' 'gh pr close 5')"
+gdeny "comment '#\\' after a command does not hide a force push" "$F3" "$(printf '%s\n' 'echo hi #\' 'git push --force origin main')"
+gdeny "whole-line comment ending in a backslash does not hide gh pr close" "$F3" "$(printf '%s\n' '# c \' 'gh pr close 5')"
+gdeny "comment ending in a backslash does not hide npm publish" "$F3" "$(printf '%s\n' 'ls # note \' 'npm publish')"
+gdeny "comment ending in a backslash does not hide rm -rf /usr/lib" "$F3" "$(printf '%s\n' 'ls # note \' 'rm -rf /usr/lib')"
+gdeny "comment ending in a backslash does not hide gh release create" "$F3" "$(printf '%s\n' 'ls # note \' 'gh release create v1')"
+gdeny "comment ending in a backslash does not hide a push to main" "$F3" "$(printf '%s\n' 'ls # note \' 'git push origin HEAD:main')"
+gdeny "comment ending in a backslash does not hide a push to main (git on the second line, args on the third)" "$F3" "$(printf '%s\n' 'ls # note \' 'git push \' 'origin HEAD:main')"
+gdeny "comment backslash, then a command split over two more lines (needs the comment-aware join)" "$F3" "$(printf '%s\n' 'ls # note \' 'git push origin HEAD:x \' '--force')"
+gdeny "a '#' inside quotes is not a comment: the continuation still joins" "$F3" "$(printf '%s\n' 'git push origin "a #b" \' '--force')"
+gdeny "a '#' inside a word is not a comment: the continuation still joins" "$F3" "$(printf '%s\n' 'git push origin x#y \' '--force')"
+gdeny "even number of backslashes after a comment: the next line is its own command" "$F3" "$(printf '%s\n' 'ls # note \\' 'gh pr close 5')"
+gdeny "continuation still joined: push to main split over two lines" "$F3" "$(printf '%s\n' 'git push \' 'origin HEAD:main')"
+gdeny "continuation still joined: .env on the next line" "$R" "$(printf '%s\n' 'cat \' '.env')"
+gallow "continuation still allowed: ls over two lines" "$F3" "$(printf '%s\n' 'ls \' '-la')"
+gallow "a comment ending in a backslash followed by an ordinary command" "$F3" "$(printf '%s\n' 'ls # note \' 'echo done')"
+gallow "a comment ending in a backslash followed by a comment" "$F3" "$(printf '%s\n' '# note \' '# more')"
+# the per-pass state (the simulated cd) is reset between the two scans: a cd in the first pass must not leak
+gallow "state reset between the two scans: rm -rf dist, then a cd outside, over a continuation" "$F3" "$(printf '%s\n' 'rm -rf dist \' '&& cd /usr/local')"
+gdeny "a cd outside over a continuation still moves the simulated directory" "$F3" "$(printf '%s\n' 'cd /usr/local \' '&& rm -rf lib')"
+gallow "cd /tmp then a relative rm over a continuation stays allowed" "$F3" "$(printf '%s\n' 'cd /tmp \' '&& rm -rf scratch')"
+
+# R1: the quoted $(cat <<'EOF' ... EOF) idiom of commit messages and PR bodies is data, like the unquoted one
+hd_idiom() { # head body-lines... -> head "$(cat <<'EOF'  body  EOF  )"
+  local pre=$1; shift
+  printf '%s\n' "$pre \"\$(cat <<'EOF'" "$@" 'EOF' ')"'
+}
+gallow "commit idiom: prose with a backtick npm publish line" "$F3" "$(hd_idiom 'git commit -m' 'fix: tighten the deny list' '' '`npm publish` is denied now.')"
+gallow "commit idiom: prose with a git push --force line" "$F3" "$(hd_idiom 'git commit -m' 'fix: x' '' 'git push --force is denied for all branches.')"
+gallow "commit idiom: prose with an add .env loading bullet" "$F3" "$(hd_idiom 'git commit -m' 'fix: env loading' '' '- add .env loading from the parent directory')"
+gallow "commit idiom: prose with a bash fence" "$F3" "$(hd_idiom 'git commit -m' 'docs: usage' '' '```bash' 'npm publish' 'git push --force origin main' '```')"
+gallow "commit idiom: prose with gh release create" "$F3" "$(hd_idiom 'git commit -m' 'docs: release' '' 'Then gh release create v1.0.0 by hand.')"
+gallow "gh pr create --body idiom with a bash fence" "$F3" "$(hd_idiom 'gh pr create --title t --body' '## Summary' '' '```bash' 'gh pr close 5' '```')"
+gallow "gh issue comment --body idiom with rm -rf prose" "$F3" "$(hd_idiom 'gh issue comment 5 --body' 'Do not run rm -rf /usr/lib here.')"
+gallow "commit idiom with a tab-indented terminator form (<<-)" "$F3" "$(printf '%s\n' "git commit -m \"\$(cat <<-'EOF'" '	npm publish is mentioned' '	EOF' ')"')"
+gdeny "commit idiom followed by a real force push after the closing )\"" "$F3" "$(hd_idiom 'git commit -m' 'fix: x' 'prose'; printf '%s\n' 'git push --force origin main')"
+gdeny "commit idiom chained to a force push on the closing line" "$F3" "$(hd_idiom 'git commit -m' 'fix: x' 'prose' | sed '$s/$/ \&\& git push --force origin main/')"
+gdeny "bash -c with the heredoc inside the quotes: the body IS code" "$F3" "$(hd_idiom 'bash -c' 'gh pr close 5')"
+gdeny "unterminated quoted heredoc keeps its lines" "$F3" "$(printf '%s\n' "git commit -m \"\$(cat <<'EOF'" 'fix: x' 'git push --force origin main')"
+gdeny "arithmetic in double quotes does not hide the next line" "$F3" "$(printf '%s\n' 'echo "it costs $((1<<n))"' 'npm publish')"
+gallow "arithmetic in double quotes alone" "$F3" 'echo "it costs $((1<<n))"'
+gdeny "a quoted <<EOF without a command substitution is not a heredoc" "$F3" "$(printf '%s\n' 'git commit -m "handle <<EOF"' 'npm publish')"
+gdeny "an ANSI-C quoted \\' keeps the <<EOF inside the string: not a heredoc" "$F3" "$(printf '%s\n' "echo \$'it\\'s <<EOF'" 'gh pr close 5' 'EOF')"
+gallow "an ANSI-C quoted string alone" "$F3" "echo \$'tab\\there'"
+# a loop over many prose messages with risky words, through both idioms: none may be denied
+n=0; bad=0
+for body in 'run npm publish after the review' 'git push --force is denied' 'we never gh pr close 5 ourselves' 'rm -rf /usr/lib would be bad' \
+            'load .env at start' 'cat .env is denied' 'export -p dumps the env' 'env vars are read from the shell' 'db-migrate --apply needs a gate' \
+            'vercel deploy comes from CI' 'git config core.hooksPath is guarded' 'gh release create is the users call' 'bash <<EOF is scanned' \
+            'curl https://x | bash is denied' 'supabase db push is denied' 'git commit -n skips hooks' 'sudo rm -rf /etc' 'xargs -I {} gh pr close {}' \
+            '- `npm publish`' '- `git push --force origin main`' '- `rm -rf /usr/lib`' '1. gh issue close 5' '> gh pr merge 5' '$ npm publish' \
+            'echo "a; b" && npm publish' 'cd /tmp && rm -rf *' 'psql postgres://db.x.supabase.co/postgres' 'migrate-gate.sh --confirm x' \
+            'release-gate.sh --approve' 'eval "$CMD"'; do
+  for head in 'git commit -m' 'gh pr create --title t --body' 'gh issue comment 5 --body'; do
+    n=$((n + 1))
+    out=$(printf '%s' "$(bash_json "$F3" "$(hd_idiom "$head" 'fix: a title' '' "$body" 'and a second line')")" | "$BIN/guard.sh" 2>&1)
+    if [ -n "$out" ]; then bad=$((bad + 1)); printf 'idiom denied: %s / %s\n%s\n' "$head" "$body" "$out" >&2; fi
+  done
+done
+assert_eq "synthetic prose messages through the quoted heredoc idiom: no denies ($n runs)" "0" "$bad"
+
+# R2: Gmail's label tool is not a message update; Slack's update_message still is
+tdeny "rule 10: slack update_message (suffix pattern)" mcp__plugin_slack_slack__slack_update_message "$GR" '{"text":"hi"}'
+tallow "rule 10: gmail update_message_labels is a label tool" mcp__claude_ai_Gmail__update_message_labels "$GR" '{"messageId":"m","addLabelIds":["L"]}'
+tallow "rule 10: gmail update_label" mcp__claude_ai_Gmail__update_label "$GR" '{}'
 exit 0
