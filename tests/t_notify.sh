@@ -2,6 +2,7 @@
 # notify.sh: repo/folder name in title, terminal-notifier -> osascript fallback, idle de-dup.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+export NOTIFY_NOW; NOTIFY_NOW=$(date -j -f '%Y-%m-%d %H:%M:%S' "$(date +%Y-%m-%d) 12:00:00" +%s)
 
 R=$(mk_repo notifyrepo)
 LOG="$AGENT_HOME/notify.log"
@@ -42,11 +43,11 @@ printf '%s\n' "$@" >>"$FAKE_OUT_TN"
 EOS
 chmod +x "$WORK/fake-tn"
 export FAKE_OUT_TN="$WORK/tn.out" NOTIFY_TERMINAL_NOTIFIER="$WORK/fake-tn"
-printf '%s' "$(hook_json Notification "$R" n5)" | "$BIN/notify.sh" done "ok"
+printf '%s' "$(hook_json Notification "$R" n5)" | "$BIN/notify.sh" blocked "ok"
 out=$(cat "$FAKE_OUT_TN")
-assert_contains "terminal-notifier: title has repo name" "$out" "notifyrepo (main): Done"
+assert_contains "terminal-notifier: title has repo name" "$out" "notifyrepo (main): Blocked"
 assert_contains "terminal-notifier: -activate Claude desktop bundle id" "$out" "com.anthropic.claudefordesktop"
-NOTIFY_ACTIVATE=com.microsoft.VSCode bash -c "printf '%s' '$(hook_json Notification "$R" n6)' | '$BIN/notify.sh' done ok"
+NOTIFY_ACTIVATE=com.microsoft.VSCode bash -c "printf '%s' '$(hook_json Notification "$R" n6)' | '$BIN/notify.sh' blocked ok"
 assert_contains "NOTIFY_ACTIVATE overrides the click target" "$(cat "$FAKE_OUT_TN")" "com.microsoft.VSCode"
 
 # idle de-dup: a Stop notification a moment ago suppresses the idle_prompt one
@@ -57,4 +58,45 @@ assert_eq "idle right after done is suppressed" "1" "$(wc -l <"$LOG" | tr -d ' '
 printf '%s' "$(hook_json Notification "$R" dd2)" | "$BIN/notify.sh" idle
 assert_eq "idle for a session with no prior notice is delivered" "2" "$(wc -l <"$LOG" | tr -d ' ')"
 assert_contains "idle label" "$(tail -1 "$LOG")" "Waiting"
+
+# ---------- routing and budget (Phase 1.5) ----------
+export NOTIFY_DRY_RUN=1; : >"$LOG"; rm -rf "$AGENT_HOME/notify"
+NOON=$(date -j -f '%Y-%m-%d %H:%M:%S' "2026-10-05 12:00:00" +%s)
+nt() { printf '%s' "$(hook_json Notification "$R" "$1")" | NOTIFY_NOW=${3:-$NOON} "$BIN/notify.sh" "$2" "m"; }
+nt r1 done
+assert_contains "done goes to the inbox, not a push" "$(tail -1 "$LOG")" $'\tinbox\t'
+nt r2 blocked
+assert_contains "blocked is delivered" "$(tail -1 "$LOG")" $'\tdry-run\t'
+for s in b1 b2 b3 b4; do nt "$s" stall; done
+assert_eq "four budgeted alerts delivered" "4" "$(grep -c $'\tdry-run\t.*Stalled' "$LOG")"
+nt b5 stall
+assert_contains "fifth budgeted alert is suppressed" "$(tail -1 "$LOG")" "suppressed:daily-budget"
+nt b6 input
+assert_contains "urgent bypasses an exhausted budget" "$(tail -1 "$LOG")" $'\tdry-run\t'
+rm -rf "$AGENT_HOME/notify"
+nt q1 stall $((NOON + 10 * 3600))
+assert_contains "budgeted alert at 22:00 waits" "$(tail -1 "$LOG")" "suppressed:quiet-hours"
+nt q2 blocked $((NOON + 10 * 3600))
+assert_contains "urgent alert at 22:00 is delivered" "$(tail -1 "$LOG")" $'\tdry-run\t'
+# Review Focus 2: boundaries
+rm -rf "$AGENT_HOME/notify"
+nt q3 stall $((NOON - 3 * 3600))
+assert_contains "budgeted alert at exactly 09:00 is delivered" "$(tail -1 "$LOG")" $'\tdry-run\t'
+nt q4 stall $((NOON + 9 * 3600))
+assert_contains "budgeted alert at exactly 21:00 waits" "$(tail -1 "$LOG")" "suppressed:quiet-hours"
+rm -rf "$AGENT_HOME/notify"
+nt c1 stall
+nt c1 handoff $((NOON + 600))
+assert_contains "second budgeted alert within 45 min is suppressed" "$(tail -1 "$LOG")" "suppressed:cooldown"
+nt c1 handoff $((NOON + 46 * 60))
+assert_contains "after the cooldown it is delivered" "$(tail -1 "$LOG")" $'\tdry-run\t'
+rm -rf "$AGENT_HOME/notify"; mkdir -p "$AGENT_HOME/notify"; echo garbage >"$AGENT_HOME/notify/budget-2026-10-05"
+nt k1 stall
+assert_contains "corrupt budget file counts as 0" "$(tail -1 "$LOG")" $'\tdry-run\t'
+printf '%s' "$(hook_json Notification "$R" pd1)" | NOTIFY_NOW=$NOON NOTIFY_PUSH_DONE=1 "$BIN/notify.sh" done m
+assert_contains "NOTIFY_PUSH_DONE=1 pushes done" "$(tail -1 "$LOG")" $'\tdry-run\t'
+assert_contains "stall label" "$(grep -m1 Stalled "$LOG")" "notifyrepo (main): Stalled"
+EVF="$AGENT_HOME/events.jsonl"
+assert_contains "events: suppressed alert with reason" "$(jq -r 'select(.kind=="notify" and .data.outcome=="suppressed") | .data.reason' "$EVF")" "daily-budget"
+assert_contains "events: inbox routing" "$(jq -r 'select(.kind=="notify") | .data.reason' "$EVF")" "routed-to-inbox"
 exit 0

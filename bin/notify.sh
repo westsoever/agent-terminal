@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # notify.sh KIND [MESSAGE]
-# KIND: done | input | blocked | ready | idle
+# KIND: done | input | blocked | ready | idle | stall | handoff | tokens
+# Routing (Phase 1.5): input, blocked and ready are urgent and always delivered. done goes to the inbox
+# (dash.sh --inbox) and is not pushed (NOTIFY_PUSH_DONE=1 restores the push). Every other kind is
+# budgeted: delivered only between NOTIFY_QUIET_END (9) and NOTIFY_QUIET_START (21) local time, at most
+# NOTIFY_BUDGET (4) a day, NOTIFY_COOLDOWN_MINS (45) apart per session; otherwise logged as suppressed.
 # Hook usage reads hook JSON on stdin (cwd, session_id); works in any folder, repo or not. The folder /
 # repo name is always in the title. Delivery: terminal-notifier (click activates the Claude app), else
-# osascript. Env: NOTIFY_CWD NOTIFY_SESSION NOTIFY_ACTIVATE NOTIFY_DRY_RUN NOTIFY_LOG
-# NOTIFY_TERMINAL_NOTIFIER NOTIFY_OSASCRIPT NOTIFY_IDLE_SUPPRESS (900 s) AGENT_HOME
+# osascript. Env: NOTIFY_CWD NOTIFY_SESSION NOTIFY_ACTIVATE NOTIFY_DRY_RUN NOTIFY_LOG NOTIFY_NOW (epoch)
+# NOTIFY_TERMINAL_NOTIFIER NOTIFY_OSASCRIPT NOTIFY_IDLE_SUPPRESS (900 s) NOTIFY_PUSH_DONE AGENT_HOME
 set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
@@ -22,15 +26,19 @@ if [ -n "${NOTIFY_CWD:-}" ]; then
   NAME=$(name_for "$CWD" "$ROOT")
 fi
 SESSION=${NOTIFY_SESSION:-$SID}
+SID=$SESSION
 BRANCH=$(git -C "$CWD" symbolic-ref --short -q HEAD 2>/dev/null || true)
 
 case "$KIND" in
-  done)    LABEL="Done";           DEFAULT="Session finished." ;;
-  input)   LABEL="Needs input";    DEFAULT="Waiting for your answer." ;;
-  blocked) LABEL="Blocked";        DEFAULT="Stopped and needs you." ;;
-  ready)   LABEL="Ready to push";  DEFAULT="Release gate passed; waiting for your approval." ;;
-  idle)    LABEL="Waiting";        DEFAULT="Idle, waiting for you." ;;
-  *)       LABEL="$KIND";          DEFAULT="" ;;
+  done)    LABEL="Done";                DEFAULT="Session finished." ;;
+  input)   LABEL="Needs input";         DEFAULT="Waiting for your answer." ;;
+  blocked) LABEL="Blocked";             DEFAULT="Stopped and needs you." ;;
+  ready)   LABEL="Ready to push";       DEFAULT="Release gate passed; waiting for your approval." ;;
+  idle)    LABEL="Waiting";             DEFAULT="Idle, waiting for you." ;;
+  stall)   LABEL="Stalled";             DEFAULT="No progress for a while." ;;
+  handoff) LABEL="Context almost full"; DEFAULT="Run /handoff and continue in a fresh session." ;;
+  tokens)  LABEL="Token budget";        DEFAULT="Token use crossed a daily budget mark." ;;
+  *)       LABEL="$KIND";               DEFAULT="" ;;
 esac
 [ -n "$MSG" ] || MSG=$DEFAULT
 
@@ -44,7 +52,7 @@ MSG=$(clean "$MSG")
 
 mkdir -p "$AGENT_HOME/notify"
 LAST="$AGENT_HOME/notify/$SESSION.last"
-NOW=$(date +%s)
+NOW=${NOTIFY_NOW:-$(date +%s)}
 
 # idle_prompt fires ~60s after a response. Skip it when we already notified this session recently.
 if [ "$KIND" = idle ] && [ -f "$LAST" ]; then
@@ -65,7 +73,36 @@ elif command -v "$TN" >/dev/null 2>&1; then
 else
   METHOD=osascript
 fi
-printf '%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$METHOD" "$TITLE" "$MSG" >>"$LOG"
+
+case "$KIND" in
+  input|blocked|ready) CLASS=urgent ;;
+  done) if [ -n "${NOTIFY_PUSH_DONE:-}" ]; then CLASS=urgent; else CLASS=inbox; fi ;;
+  *) CLASS=budgeted ;;
+esac
+
+WHY=""
+budget_ok() { # 0 when a budgeted alert may go out now (and books it); else sets WHY
+  local hour used last file
+  hour=$(date -r "$NOW" +%H); hour=${hour#0}
+  if [ "$hour" -lt "${NOTIFY_QUIET_END:-9}" ] || [ "$hour" -ge "${NOTIFY_QUIET_START:-21}" ]; then WHY=quiet-hours; return 1; fi
+  file="$AGENT_HOME/notify/budget-$(date -r "$NOW" +%Y-%m-%d)"
+  used=$(cat "$file" 2>/dev/null || echo 0); case "$used" in ''|*[!0-9]*) used=0 ;; esac
+  if [ "$used" -ge "${NOTIFY_BUDGET:-4}" ]; then WHY=daily-budget; return 1; fi
+  last=$(cat "$AGENT_HOME/notify/$SESSION.budgeted" 2>/dev/null || echo 0); case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  if [ $((NOW - last)) -lt $(( ${NOTIFY_COOLDOWN_MINS:-45} * 60 )) ]; then WHY=cooldown; return 1; fi
+  printf '%s\n' $((used + 1)) >"$file"
+  printf '%s\n' "$NOW" >"$AGENT_HOME/notify/$SESSION.budgeted"
+  return 0
+}
+
+OUTCOME=delivered
+case "$CLASS" in
+  inbox) METHOD=inbox; OUTCOME=suppressed; WHY=routed-to-inbox ;;
+  budgeted) if ! budget_ok; then METHOD="suppressed:$WHY"; OUTCOME=suppressed; fi ;;
+esac
+
+printf '%s\t%s\t%s\t%s\n' "$(date -r "$NOW" '+%Y-%m-%d %H:%M:%S')" "$METHOD" "$TITLE" "$MSG" >>"$LOG"
+ev notify "$(jq -nc --arg k "$KIND" --arg o "$OUTCOME" --arg w "$WHY" '{kind:$k,outcome:$o,reason:$w}')"
 
 case "$METHOD" in
   terminal-notifier)
