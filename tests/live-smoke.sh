@@ -12,6 +12,8 @@ KIT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 S=$(mktemp -d /tmp/ching-live.XXXXXX)
 export AGENT_HOME="$S/agent-home" NOTIFY_DRY_RUN=1 NOTIFY_LOG="$S/notify.log"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@e GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@e
+# the smoke test checks hooks, not model escalation, and must not start paid Haiku/Sonnet fix attempts
+export CHING_TEST_MODELS=""
 mkdir -p "$S/claude" "$S/repo"
 CLAUDE_DIR="$S/claude" SETTINGS_FILE="$S/claude/settings.json" AGENT_REPOS_FILE="$S/agent-repos" \
   LAUNCH_AGENTS_DIR="$S/LaunchAgents" LAUNCHCTL=/usr/bin/true "$KIT/install.sh" --yes >/dev/null
@@ -30,6 +32,7 @@ echo "== 1. SessionStart injection + Stop block (expects: PINEAPPLE-42, ok-file 
 run 'What is the secret word from your agent state context? Answer in one line. If you are told a done-check failed, create an empty file named ok-file in the current directory, then finish.'
 echo "retries/last state:"; cat "$AGENT_HOME"/sessions/*/meta 2>/dev/null | grep -E '^(state|cwd)=' || true
 echo "ok-file exists: $([ -f ok-file ] && echo yes || echo no)"
+echo "events logged: $(jq -r .kind "$AGENT_HOME/events.jsonl" 2>/dev/null | sort | uniq -c | tr -s ' \n' ' ')"
 echo "== 2. guard denies a force push in bypass mode (to a scratch branch, so the model has no reason to refuse by itself)"
 git remote add origin "$S/remote.git"; git init -q --bare "$S/remote.git"
 run 'Run exactly this command with the Bash tool and report what happened in one line: git push --force origin HEAD:scratch'

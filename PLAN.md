@@ -227,18 +227,18 @@ Work in `/tmp/agent-sandbox` (a fresh git repo). Back up `~/.claude/settings.jso
 
 Built per D10: the shared contracts land first, then parallel implementers on disjoint files, then a separate verifier. TDD in the existing harness. The detailed task list lives in the implementation plan under `docs/superpowers/plans/`.
 
-- [ ] **1.5.1** Contracts: `ev` and `checkpoint_get` in `lib.sh`; checkpoint block in `templates/STATE.md` and `/handoff`; `t_events.sh`.
-- [ ] **1.5.2** Events from every hook and gate (session-start, pre-compact, stop-check, guard after its decision, release/migrate/post-release).
-- [ ] **1.5.3** `notify.sh`: `done` goes to the inbox instead of a push; budget of 4 non-urgent alerts a day, 09:00-21:00, 45-minute cooldown; `input`/`blocked`/`ready` always delivered.
-- [ ] **1.5.4** `ching-watch.sh` + launchd plist via `install.sh`: stall after 20 minutes, context levels (healthy under 60%, watch, handoff over 80%), daily token totals with optional `TOKEN_BUDGET_DAILY`, event-log rotation.
-- [ ] **1.5.5** `dash.sh`: `ctx` and `tok` columns, `--inbox`, `--next` (U×I×R), new `--speak` wording; dispatcher policy uses the inbox.
-- [ ] **1.5.6** `stop-check.sh`: in repo mode, block once per prompt when the checkpoint is missing or stale. (Sequence after the in-flight `test-escalate` edits to this file.)
-- [ ] **1.5.7** Review hardening: `## not examined` in VERIFY.md, `templates/REVIEW.md`, three lens prompts, review checks in `release-gate.sh`, `review: required` in the defaults `GOAL.md`.
-- [ ] **1.5.8** Guard rules 8-11 with deny and allow tests; wider guard matcher in `install.sh`.
-- [ ] **1.5.9** Autonomy block: checkpoint every turn, name the exact missing piece, the review step, drafts only.
-- [ ] **1.5.10** Verification agent: full suite plus shellcheck, `live-smoke.sh` shows events, and the error-resilience lens run over `guard.sh` and `stop-check.sh` (findings fixed or logged).
+- [x] **1.5.1** Contracts: `ev` and `checkpoint_get` in `lib.sh`; checkpoint block in `templates/STATE.md` and `/handoff`; `t_events.sh`.
+- [x] **1.5.2** Events from every hook and gate (session-start, pre-compact, stop-check, guard after its decision, release/migrate/post-release).
+- [x] **1.5.3** `notify.sh`: `done` goes to the inbox instead of a push; budget of 4 non-urgent alerts a day, 09:00-21:00, 45-minute cooldown; `input`/`blocked`/`ready` always delivered.
+- [x] **1.5.4** `ching-watch.sh` + launchd plist via `install.sh`: stall after 20 minutes, context levels (healthy under 60%, watch, handoff over 80%), daily token totals with optional `TOKEN_BUDGET_DAILY`, event-log rotation.
+- [x] **1.5.5** `dash.sh`: `ctx` and `tok` columns, `--inbox`, `--next` (U×I×R), new `--speak` wording; dispatcher policy uses the inbox.
+- [x] **1.5.6** `stop-check.sh`: in repo mode, block once per prompt when the checkpoint is missing or stale. (Sequence after the in-flight `test-escalate` edits to this file.)
+- [x] **1.5.7** Review hardening: `## not examined` in VERIFY.md, `templates/REVIEW.md`, three lens prompts, review checks in `release-gate.sh`, `review: required` in the defaults `GOAL.md`.
+- [x] **1.5.8** Guard rules 8-11 with deny and allow tests; wider guard matcher in `install.sh`.
+- [x] **1.5.9** Autonomy block: checkpoint every turn, name the exact missing piece, the review step, drafts only.
+- [x] **1.5.10** Verification agent: full suite plus shellcheck, `live-smoke.sh` shows events, and the error-resilience lens run over `guard.sh` and `stop-check.sh` (findings fixed or logged).
 
-**Checkpoint 1.5:** test output, the `settings.json` and launchd diff, and the lens findings. You approve before `install.sh` re-runs on your real settings.
+**Checkpoint 1.5:** test output, the `settings.json` and launchd diff, and the lens findings. You approve before `install.sh` re-runs on your real settings. Report: CHECKPOINT-1.5.md.
 
 ### Phase 2: Pilot on a couple of real sessions across different folders (2-3 days of real use)
 
