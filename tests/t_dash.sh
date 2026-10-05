@@ -77,4 +77,35 @@ assert_contains "no sessions: spoken line" "$out" "No Claude sessions"
 out=$(AGENT_HOME="$WORK/empty-ah" CLAUDE_DIR="$CLAUDE_DIR" AGENT_REPOS_FILE="$WORK/none" "$BIN/dash.sh")
 assert_contains "transcript-only discovery: repoC" "$out" "repoC"
 assert_contains "transcript-only discovery: repoD" "$out" "repoD"
+
+# ---------- Phase 1.5: columns, checkpoint, inbox, next ----------
+DAY=$(date -u +%Y-%m-%d)
+printf 'ctx_level=handoff\n' >>"$AGENT_HOME/sessions/sidA/meta"
+mkdir -p "$AGENT_HOME/tokens"; printf 'sidA 1234567\n' >"$AGENT_HOME/tokens/$DAY"
+out=$("$BIN/dash.sh")
+assert_contains "ctx column: handoff shows ○" "$(printf '%s\n' "$out" | grep 'repoA \[main\] sidA')" "○"
+assert_contains "tok column: 1.2M" "$(printf '%s\n' "$out" | grep 'repoA \[main\] sidA')" "1.2M"
+printf '# State\nstatus: blocked\n<!-- ching:checkpoint -->\nblocker: need the Supabase token\nnext_action: rerun the gate\n<!-- /ching:checkpoint -->\n\n## Blocked\n- old bullet\n' >"$AGENT_HOME/sessions/sidB/STATE.md"
+reg sidB "$B" blocked
+assert_contains "checkpoint blocker wins over the Blocked list" "$(printf '%s\n' "$("$BIN/dash.sh")" | grep repoB)" "need the Supabase token"
+# Review Focus 1: "blocker: none" with a stale bullet is not blocked
+mkdir -p "$AGENT_HOME/sessions/sidH"
+printf '# State\nstatus: working\n<!-- ching:checkpoint -->\nblocker: none\n<!-- /ching:checkpoint -->\n\n## Blocked\n- stale bullet from yesterday\n' >"$AGENT_HOME/sessions/sidH/STATE.md"
+assert_not_contains "blocker: none is not blocked" "$(printf '%s\n' "$("$BIN/dash.sh")" | grep '^~ ')" "blocked"
+reg sidP "$PLAIN" done
+mkdir -p "$C/.agent"; printf 'kind=release-ready\n' >"$C/.agent/release-ready"
+ib=$("$BIN/dash.sh" --inbox)
+assert_contains "inbox: needs-you lane" "$ib" "repoB [main]: blocked -- need the Supabase token"
+assert_contains "inbox: ready lane from a release-ready marker" "$(printf '%s\n' "$ib" | sed -n '/^READY/,/^FINISHED/p')" "repoC"
+assert_contains "inbox: finished lane" "$(printf '%s\n' "$ib" | sed -n '/^FINISHED/,$p')" "plainf"
+ib2=$("$BIN/dash.sh" --inbox)
+assert_not_contains "inbox: finished clears after a look" "$(printf '%s\n' "$ib2" | sed -n '/^FINISHED/,$p')" "plainf"
+nx=$("$BIN/dash.sh" --next)
+assert_contains "next: blocked session ranks first" "$(printf '%s\n' "$nx" | head -1)" "repoB"
+assert_contains "next: shows the checkpoint next action" "$nx" "rerun the gate"
+assert_eq "next: at most 5 lines" "yes" "$([ "$(printf '%s\n' "$nx" | wc -l | tr -d ' ')" -le 5 ] && echo yes || echo no)"
+assert_contains "speak: leads with how many need you" "$("$BIN/dash.sh" --speak)" "needs you."
+# --inbox on a machine where ~/.agent does not exist yet must not die writing the marker
+assert_ok "inbox: fresh machine (no AGENT_HOME yet) exits 0" env AGENT_HOME="$WORK/fresh-ah" CLAUDE_DIR="$WORK/empty-claude" AGENT_REPOS_FILE="$WORK/none" "$BIN/dash.sh" --inbox
+assert_file "inbox: fresh machine gets its inbox.seen" "$WORK/fresh-ah/inbox.seen"
 exit 0
