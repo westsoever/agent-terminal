@@ -249,3 +249,16 @@ These are design inputs for the D11 learning-loop spec, written after the pilot.
 ## 11. Out of scope
 
 Running Hermes or any of the four repos. A GUI. Cloud schedulers. Any AI call in Phase 1.5. Track B implementation. Service-control guard rules. Phone or remote notification channels.
+
+## 12. Amendments made while writing the implementation plan (2026-10-05)
+
+These came from reading the code. The plan follows this section wherever it differs from the text above.
+
+1. **Review location (6.2, D14).** `release-gate.sh` only runs in a repo that has `.agent/GOAL.md`. In a repo without one, guard already denies pushes to protected branches. So "review required in every repo" holds as is. The review file always lives at `<repo>/.agent/review/<sha>.md`, and `install.sh` writes no defaults `GOAL.md`. A missing `review:` key means required, and so does any value other than exactly `off`.
+2. **Rule 11 also covers new files.** A session creating a `GOAL.md` may only set `review: required` and `release_mode: confirm`. Otherwise it could opt a repo into autonomous pushes. Bash writes to any `GOAL.md` are denied, because only the Edit and Write tools can be checked line by line.
+3. **The checkpoint rule (4.2)** applies only when the session has a recorded prompt (`prompted` in meta). Without one, freshness can't be judged.
+4. **The inbox READY lane (5.3)** reads the repo's release-ready marker file, which is the gate's own source of truth, instead of `ready` notify events.
+5. **Tokens (5.2)** are counted per UTC day from each message's `timestamp`. They are de-duplicated by `message.id`, because Claude Code writes one transcript line per content block with the same usage. The context window is 200k unless the observed context already exceeds it, in which case it is 1M.
+6. **`--speak` (5.3)** puts "N need(s) you." in front and keeps the existing sentences, so the spoken output can run longer than the two sentences in 5.3.
+7. **`vendor-eval/`** is deleted at the end of Phase 1.5 rather than after plan approval, because the review lenses are copied from it in Task 8.
+8. **Found while planning:** Ching's own guard denies any Bash command whose text mentions token file names, even inside a heredoc for an interpreter. Implementers should write such scripts to a file first.
