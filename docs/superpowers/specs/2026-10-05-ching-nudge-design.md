@@ -73,7 +73,7 @@ The Phase 1.5 watcher runs every 300 seconds (`StartInterval` 300). Stage 2 need
 | `bin/ching-watch.sh` | waiting check, stage 1 and 2, heavy-work gate |
 | `bin/speak.sh` | new |
 | `bin/notify.sh` | `waiting` kind, nudge cap |
-| `bin/install.sh` | plist `StartInterval` 60, install `speak.sh` |
+| `install.sh` | plist `StartInterval` 60, install `speak.sh` |
 | `tests/t_watch.sh` | waiting cases below |
 | `tests/t_notify.sh` | `waiting` cases below |
 | `tests/t_speak.sh` | new |
