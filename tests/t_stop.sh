@@ -125,6 +125,8 @@ assert_eq "checkpoint missing: blocks" "block" "$(printf '%s' "$out" | jq -r .de
 assert_contains "checkpoint missing: reason names /handoff" "$(printf '%s' "$out" | jq -r .reason)" "/handoff"
 out=$(stop "$CR" cp-1)
 assert_eq "checkpoint: asked only once per prompt" "" "$out"
+# the first cp-1 stop exited at the block, so the only stop_ok for cp-1 comes from this second stop reaching its normal end
+assert_eq "checkpoint: second stop ran to the end (one stop_ok, not a dead hook)" "cp-1" "$(jq -r 'select(.kind=="stop_ok" and .sid=="cp-1") | .sid' "$EVF")"
 touch_prompt "$CR" cp-2
 printf '# State\nstatus: done\n<!-- ching:checkpoint -->\nresult: ok\nblocker: none\nnext_action: none\n<!-- /ching:checkpoint -->\n' >"$CR/.agent/STATE.md"
 out=$(stop "$CR" cp-2)
@@ -138,7 +140,19 @@ CP="$WORK/cp plain"; mkdir -p "$CP"
 touch_prompt "$CP" cp-3
 out=$(stop "$CP" cp-3)
 assert_eq "plain folder: never blocks for a checkpoint" "" "$out"
+assert_eq "plain folder: stop ran to the end (stop_ok logged)" "cp-3" "$(jq -r 'select(.kind=="stop_ok" and .sid=="cp-3") | .sid' "$EVF")"
 NR=$(mk_repo cpnoprompt); write_goal "$NR" "true"
 out=$(stop "$NR" cp-4)
 assert_eq "no recorded prompt: never blocks for a checkpoint" "" "$out"
+assert_eq "no recorded prompt: stop ran to the end (stop_ok logged)" "cp-4" "$(jq -r 'select(.kind=="stop_ok" and .sid=="cp-4") | .sid' "$EVF")"
+# block once, the model then writes the checkpoint: the next stop passes AND the checkpoint event is logged
+touch_prompt "$CR" cp-5
+out=$(stop "$CR" cp-5)
+assert_eq "block-then-comply: first stop blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+assert_eq "block-then-comply: no checkpoint event yet" "" "$(jq -r 'select(.kind=="checkpoint" and .sid=="cp-5") | .sid' "$EVF")"
+printf '# State\nstatus: done\n<!-- ching:checkpoint -->\nresult: ok\nblocker: none\nnext_action: none\n<!-- /ching:checkpoint -->\n' >"$CR/.agent/STATE.md"
+out=$(stop "$CR" cp-5)
+assert_eq "block-then-comply: second stop passes" "" "$out"
+assert_eq "block-then-comply: checkpoint event logged after the block" "cp-5" "$(jq -r 'select(.kind=="checkpoint" and .sid=="cp-5") | .sid' "$EVF")"
+assert_eq "block-then-comply: second stop ran to the end (stop_ok logged)" "cp-5" "$(jq -r 'select(.kind=="stop_ok" and .sid=="cp-5") | .sid' "$EVF")"
 exit 0
