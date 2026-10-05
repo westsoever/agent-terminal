@@ -68,15 +68,24 @@ first_blocker() { # STATE.md -> first bullet under "## Blocked" that is not "(no
       if (tolower(l) !~ /^\(?none\)?\.?$/ && l != "") { print l; exit }
     }' "$1"
 }
+is_none() { # true for an empty value or a "nothing here" sentinel: none, (none), none. (any case)
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in ''|none|'(none)'|none.) return 0 ;; esac
+  return 1
+}
 state_note() { # STATE.md -> checkpoint blocker unless none; without a checkpoint block, the first bullet
   [ -f "$1" ] || return 0
   if grep -qF '<!-- ching:checkpoint -->' "$1"; then
     local b; b=$(checkpoint_get "$1" blocker)
-    case "$(printf '%s' "$b" | tr '[:upper:]' '[:lower:]')" in ''|none|'(none)'|none.) return 0 ;; esac
+    if is_none "$b"; then return 0; fi
     printf '%s\n' "$b"
   else
     first_blocker "$1"
   fi
+}
+next_of() { # STATE.md -> checkpoint next_action unless empty or a sentinel (the template ships "(none)")
+  local a; a=$(checkpoint_get "$1" next_action)
+  if is_none "$a"; then return 0; fi
+  printf '%s\n' "$a"
 }
 importance() { if [ -n "$1" ] && [ -f "$1/.agent/GOAL.md" ]; then echo 3; else echo 1; fi; }
 tok_for() { [ -f "$TOKDAY" ] || return 0; awk -v s="$1" '$1 == s { print $2; exit }' "$TOKDAY"; }
@@ -103,7 +112,7 @@ if [ -d "$AGENT_HOME/sessions" ]; then
     [ -z "$note" ] || [ "$state" = blocked ] || [ "$state" = input ] || state=blocked
     row "$upd" "$sid" "${cwd:-?}" "$(display_name "${cwd:-?}" "$root")" "$(meta_get "$m" branch)" "$state" "$note" registry \
       "$(meta_get "$m" ctx_level)" "$(tok_for "$sid")" "$(meta_get "$m" stalled_at)" "$(importance "$root")" \
-      "$(checkpoint_get "$sdir/STATE.md" next_action)"
+      "$(next_of "$sdir/STATE.md")"
   done
 fi
 
@@ -154,7 +163,7 @@ while IFS= read -r repo; do
     note=$(state_note "$wt/.agent/STATE.md")
     [ -z "$note" ] || st=blocked
     row "$upd" "worktree" "$wt_phys" "$(basename "$wt")" "$(git -C "$wt" symbolic-ref --short -q HEAD 2>/dev/null || true)" \
-      "$st" "$note" worktree "" "" "" "$(importance "$wt_phys")" "$(checkpoint_get "$wt/.agent/STATE.md" next_action)"
+      "$st" "$note" worktree "" "" "" "$(importance "$wt_phys")" "$(next_of "$wt/.agent/STATE.md")"
   done
 done <"$TMP/repos"
 

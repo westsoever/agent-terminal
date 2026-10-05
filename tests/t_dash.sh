@@ -105,6 +105,24 @@ assert_contains "next: blocked session ranks first" "$(printf '%s\n' "$nx" | hea
 assert_contains "next: shows the checkpoint next action" "$nx" "rerun the gate"
 assert_eq "next: at most 5 lines" "yes" "$([ "$(printf '%s\n' "$nx" | wc -l | tr -d ' ')" -le 5 ] && echo yes || echo no)"
 assert_contains "speak: leads with how many need you" "$("$BIN/dash.sh" --speak)" "needs you."
+# next_action sentinels ("(none)" from the template, "none" from finished sessions) are not real next actions.
+# New sessions only, added after every ranking/lane assertion above so those keep their meaning.
+BLK="$WORK/blockf"; DNF="$WORK/donef"; mkdir -p "$BLK" "$DNF"
+reg sidK "$BLK" blocked; mkdir -p "$AGENT_HOME/sessions/sidK"
+printf '# State\nstatus: blocked\n<!-- ching:checkpoint -->\nblocker: need the X token\nnext_action: (none)\n<!-- /ching:checkpoint -->\n' >"$AGENT_HOME/sessions/sidK/STATE.md"
+reg sidF "$DNF" done; mkdir -p "$AGENT_HOME/sessions/sidF"
+printf '# State\nstatus: done\n<!-- ching:checkpoint -->\nblocker: none\nnext_action: none\n<!-- /ching:checkpoint -->\n' >"$AGENT_HOME/sessions/sidF/STATE.md"
+# a worktree-only row (repoE has no session) goes through the other row producer
+printf '# State\nstatus: blocked\n<!-- ching:checkpoint -->\nblocker: need the Y key\nnext_action: (None)\n<!-- /ching:checkpoint -->\n' >"$E/.agent/STATE.md"
+nx2=$("$BIN/dash.sh" --next)
+assert_contains "next: sentinel next_action falls back to the blocker" "$(printf '%s\n' "$nx2" | grep blockf)" "need the X token"
+assert_not_contains "next: (none) next_action is not shown" "$(printf '%s\n' "$nx2" | grep blockf)" "(none)"
+assert_contains "next: worktree row falls back to its blocker" "$(printf '%s\n' "$nx2" | grep repoE)" "need the Y key"
+assert_not_contains "next: worktree row hides a (None) next_action" "$(printf '%s\n' "$nx2" | grep repoE)" "(None)"
+rm -f "$AGENT_HOME/inbox.seen"
+fin=$("$BIN/dash.sh" --inbox | sed -n '/^FINISHED/,$p')
+assert_contains "inbox: done session with next_action none is listed" "$fin" "donef"
+assert_not_contains "inbox: FINISHED omits a none next_action" "$(printf '%s\n' "$fin" | grep donef)" "next:"
 # --inbox on a machine where ~/.agent does not exist yet must not die writing the marker
 assert_ok "inbox: fresh machine (no AGENT_HOME yet) exits 0" env AGENT_HOME="$WORK/fresh-ah" CLAUDE_DIR="$WORK/empty-claude" AGENT_REPOS_FILE="$WORK/none" "$BIN/dash.sh" --inbox
 assert_file "inbox: fresh machine gets its inbox.seen" "$WORK/fresh-ah/inbox.seen"
