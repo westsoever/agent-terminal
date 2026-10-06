@@ -152,14 +152,16 @@ if [ -d "$AGENT_HOME/sessions" ]; then
 fi
 
 # ---- 2. transcripts (sessions not in the registry) ----
-seen=$(cut -d$'\037' -f2 "$ROWS" | sort -u)
+# Ids are matched with case, not `printf ids | grep -q`: grep stops at its first hit, a long list makes printf die
+# of SIGPIPE, and under pipefail that reads as "not found" (a registered session listed again from its transcript).
+nl=$'\n'; seen="$nl$(cut -d$'\037' -f2 "$ROWS")$nl"
 if [ -d "$CLAUDE_DIR/projects" ]; then
   for t in "$CLAUDE_DIR"/projects/*/*.jsonl; do
     [ -f "$t" ] || continue
     tm=$(file_mtime "$t")
     [ "$tm" -ge "$CUTOFF" ] || continue
     sid=$(basename "$t" .jsonl)
-    if printf '%s\n' "$seen" | grep -qxF "$sid"; then continue; fi
+    case "$seen" in *"$nl$sid$nl"*) continue ;; esac
     cwd=$(grep -m1 -o '"cwd": *"[^"]*"' "$t" 2>/dev/null | head -1 | sed 's/^"cwd": *"//; s/"$//' || true)
     [ -n "$cwd" ] || cwd="?"
     root=""; branch=""
@@ -190,10 +192,11 @@ while IFS= read -r repo; do
   git -C "$repo" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | while IFS= read -r wt; do
     [ -f "$wt/.agent/STATE.md" ] || continue
     wt_phys=$(cd "$wt" && pwd -P)
-    if cut -d$'\037' -f3 "$ROWS" | grep -qxF "$wt_phys"; then continue; fi
+    # awk reads the whole file (a `cut | grep -q` would stop early and die of SIGPIPE on a big column)
+    if WT="$wt_phys" awk -F'\037' '$3 == ENVIRON["WT"] { f = 1 } END { exit !f }' "$ROWS"; then continue; fi
     upd=$(file_mtime "$wt/.agent/STATE.md")
     [ "$upd" -ge "$CUTOFF" ] || continue
-    st=$(sed -n 's/^status:[[:space:]]*//p' "$wt/.agent/STATE.md" | head -1)
+    st=$(sed -n '/^status:/{s/^status:[[:space:]]*//;p;q;}' "$wt/.agent/STATE.md")
     [ -n "$st" ] || st=idle
     note=$(state_note "$wt/.agent/STATE.md")
     [ -z "$note" ] || st=blocked

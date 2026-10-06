@@ -255,4 +255,28 @@ printf 'kind=release-ready\ntime=1\nsig=x\n' >"$RR/.agent/release-ready"
 assert_eq "inbox: a marker without a sha is not READY" "0" "$(lane_of "$(ibrun)" "READY" | grep -c ibready)"
 printf 'kind=release-ready\nsha=%s\ntime=1\nsig=x\n' "$(head_of "$RR")" >"$RR/.agent/release-ready"
 assert_eq "inbox: a marker for the new HEAD is READY again" "1" "$(lane_of "$(ibrun)" "READY" | grep -c ibready)"
+
+# ---------- fix wave FD-4: an early-exit reader (grep -q, head) must not turn into a wrong answer under pipefail ----------
+# 450 sessions with 235-char ids and cwds make the id list and the cwd column far larger than a pipe buffer.
+# `printf ids | grep -q` and `cut cwd | grep -q` then die of SIGPIPE when grep stops at an early match, pipefail
+# reports 141, and the membership test says "not found": a registered session listed again from its transcript,
+# a worktree listed again next to the session that already sits in it.
+SPA="$WORK/sp-ah"; SPC="$WORK/sp-claude"; mkdir -p "$SPA/sessions" "$SPC/projects/-enc-sp"
+SPL=$(head -c 235 /dev/zero | tr '\0' 's')
+SPW="$WORK/spwt"; git init -q -b main "$SPW"; mkdir -p "$SPW/.agent"; printf '# State\nstatus: idle\n' >"$SPW/.agent/STATE.md"
+SPW=$(cd "$SPW" && pwd -P)
+i=0
+while [ "$i" -lt 450 ]; do
+  sid="$SPL$(printf '%04d' "$i")"; mkdir -p "$SPA/sessions/$sid"
+  cwd="$WORK/$SPL-c$i"; [ "$i" -gt 0 ] || cwd="$SPW"   # the first row sits in the worktree
+  printf 'cwd=%s\nroot=\nbranch=main\nstate=working\nupdated=%s\n' "$cwd" "$NOW" >"$SPA/sessions/$sid/meta"
+  i=$((i + 1))
+done
+for i in 0000 0001 0449; do printf '{"cwd":"%s"}\n' "$WORK/x" >"$SPC/projects/-enc-sp/$SPL$i.jsonl"; done
+spdash() { AGENT_HOME="$SPA" CLAUDE_DIR="$SPC" AGENT_REPOS_FILE="$WORK/none" "$BIN/dash.sh" "$@"; }
+rc=0; out=$(spdash 2>"$WORK/sp.err") || rc=$?
+assert_eq "pipefail: 450 long rows exit 0" "0" "$rc"
+assert_eq "pipefail: a registered session is not listed again from its transcript" "-- 450 session(s), 450 active" "$(printf '%s\n' "$out" | grep '^-- ')"
+assert_eq "pipefail: the worktree holding a session gets no row of its own" "0" "$(printf '%s\n' "$out" | grep -c '^spwt .* idle ')"
+assert_eq "pipefail: no broken-pipe noise on stderr" "" "$(cat "$WORK/sp.err")"
 exit 0
