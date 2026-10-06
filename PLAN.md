@@ -155,9 +155,11 @@ What exists today (read from the repos):
 
 | Repo | Gate in CI | What a push to `main` does |
 |------|-----------|-----------------------------|
-| miso | lint, format check, registry validate, typecheck, `bun test` (on pull requests) | Release path not yet read; `release.yml` to be read in Phase 2. |
+| miso | lint, format check, registry validate, typecheck, `bun test` (`ci.yml`, on pull requests and on pushes to `main`) | Nothing ships. miso is an npm package (`miso-dto`): a release is a **`v*` tag push** (or `workflow_dispatch` with an existing tag), which runs `release.yml`: `verify` (the same checks plus `bun pm pack` and a tarball inspection for `dist/` and secrets), then `publish`, which waits for the `release` environment's required reviewer and publishes to npm with OIDC trusted publishing (tag must equal `package.json` version; a `-` in the version publishes to `next`, otherwise `latest`). The reviewer approval is the only human gate. *(read 2026-10-06, Phase 2.4)* |
 | miso-app | `bun run build`, `typecheck`, `bun test app`, then a smoke test of `/api/config` after deploy | Deploys to production. A pull request builds a **preview that uses the real data**. |
 | miso-workspace | `bun test packages` (local) | Triggers miso-app's Deploy, which moves `spaces.lock`, runs miso-app's gate, deploys. No pull request, no preview. |
+
+**miso differs from the steps below (found in Phase 2.4):** a push to `main` is not a release, so the token flow in steps 4-5 gates only the merge. The release itself is a tag push, and `guard.sh` does not deny `git push origin v*` or `--tags` (probed 2026-10-06; rule 8 denies `gh release create` and package publishing commands, not tags). What stops a bad publish is the `release` environment's required reviewer on GitHub. Open decision for the user: keep it that way, or add a guard rule that denies tag pushes matching `v*` so a session can only prepare the tag. Until decided, a session in miso must not push a release tag; `GOAL.md` for miso should say so.
 
 The steps a session follows before shipping:
 
@@ -242,10 +244,10 @@ Built per D10: the shared contracts land first, then parallel implementers on di
 
 ### Phase 2: Pilot on a couple of real sessions across different folders (2-3 days of real use)
 
-- [ ] **2.1** Run `install.sh` on your real `~/.claude/settings.json` (machine-wide from this point; no per-repo setup is needed for hooks, state, notifications, `dash.sh` or the guardrails).
+- [x] **2.1** Run `install.sh` on your real `~/.claude/settings.json` (machine-wide from this point; no per-repo setup is needed for hooks, state, notifications, `dash.sh` or the guardrails). *Done 2026-10-06 10:01 after the user chose "install as designed" (rule 10 denies Telegram/Discord/Gmail/Slack reply and send tools for sessions). Backup `~/.claude/settings.json.bak.ching.20261006-100147`; launchd job `org.ching.watch` loaded; a second run changed nothing; the watcher logged `context` events.*
 - [ ] **2.2** Pick two or three real sessions in different folders (for example one repo, one worktree, one non-repo folder). Optionally, in one repo on a branch: add the autonomy block to `AGENTS.md`, add gitignore lines, write `.agent/GOAL.md` with the real test command (from `package.json`) to opt that repo into the Stop check and the release/migrate gates.
 - [ ] **2.3** Work normally with those sessions. Record the three metrics in section 7.
-- [ ] **2.4** Read miso's `release.yml` and fill in its release path in 5.2. Run the browser verification step for real on one change.
+- [ ] **2.4** Read miso's `release.yml` and fill in its release path in 5.2 *(done 2026-10-06; it is a tag-triggered npm publish, see 5.2)*. Run the browser verification step for real on one change *(open: needs a real change)*.
 - [ ] **2.5** If a migration is needed during the pilot, run it through `migrate-gate.sh` with you watching the first one.
 - [ ] **2.6** *(v4)* Tune the notification budget, stall threshold and context levels from what the pilot shows (`notify` and `stall` events). The first real release goes through the review step with you watching.
 
