@@ -311,6 +311,14 @@ Four parallel agents, then an independent review of the merged result. Details a
   - Rule 8 reads the package manager's subcommand (`npm publish --dry-run`, `npm view publish` and similar are allowed).
   - Rule 5 does not take a grep/rg pattern such as `ching.env` for a file.
   - The "internal error (exit 1)" reports are traced to the `export` bug fixed in `5fd969f`, with regression tests.
+  - Follow-up after a differential probe of about 170 commands (old guard against new; no regressions found):
+    - npm abbreviations (`npm pub`, `unp`, `dep`) are denied.
+    - A quoted value before the command word (`FOO="a; b" npm publish`, `FOO="a b" gh pr close 5`) no longer hides the command.
+    - A redirect writes only its own target, so `dash.sh 2>&1` is not a tamper deny, while `>& settings.json` now is.
+  - Still open:
+    - When `quote-data.pl` cannot read a command safely (heredoc, backtick, `case`, unterminated quote), the old splitting applies, including the quoted-value hole.
+    - pnpm and yarn abbreviations are unchecked (not installed).
+    - Git aliases still bypass the push rules.
 
 ### Fixed in the fix wave (listed as gaps before)
 
