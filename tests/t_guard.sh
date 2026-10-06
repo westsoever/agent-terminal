@@ -875,4 +875,63 @@ EOF
 gdeny "quoted code: a double quote spanning lines, then a real command" "$QD" "$(printf '%s\n' 'git commit -m "msg' "echo 'a\" ; npm publish ; echo '" "'")"
 gdeny "quoted code: an interpreter heredoc body with an apostrophe" "$QD" "$(printf '%s\n' 'cat <<EOF | python3' "it's" 'EOF' "echo x; npm publish; echo '" "'")"
 gdeny "quoted code: a multi-line single quote is not neutralised" "$QD" "$(printf '%s\n' "echo 'a" "b' ; npm publish")"
+
+# ---------- rule 8: the package manager's subcommand decides, not any `publish` word (CHECKPOINT-1.5 Task 9) ----------
+while IFS= read -r c; do
+  [ -n "$c" ] && gallow "rule 8 subcommand: $c" "$QD" "$c"
+done <<'EOF'
+npm publish --dry-run
+pnpm publish --dry-run --no-git-checks
+bun publish --dry-run
+yarn npm publish --dry-run
+bun test publish
+npm test -- publish
+npm t publish
+npm view publish
+npm info publish versions
+npm help publish
+npm search publish
+npm run test -- publish
+bun run lint publish
+yarn npm info publish
+EOF
+while IFS= read -r c; do
+  [ -n "$c" ] && gdeny_why "publish: $c" "$QD" "$c" "rule 8"
+done <<'EOF'
+npm publish
+bun publish
+pnpm publish
+yarn publish
+yarn npm publish
+npm publish --tag next
+npm publish --dry-run false
+npm publish --dry-run=false
+npm publish --no-dry-run
+npm publish --dry-run --no-dry-run
+npm --registry https://r.example publish
+npm --prefix test publish
+npm -w test publish
+pnpm -r publish
+pnpm --filter web publish
+npm run publish
+bun run publish:npm
+npm run-script prepublishOnly
+npm run --workspace x publish
+npx npm publish
+bunx npm publish
+npm exec npm publish
+bun x npm publish
+yarn workspace web publish
+sudo npm publish
+env NODE_ENV=production npm publish
+cd packages/x && npm publish
+bash -c "npm publish"
+npm test && npm publish
+bun test publish; bun publish
+npm unpublish x@1
+npm dist-tag add x@1 latest
+npm deprecate x "old"
+gh release create v1.0.0
+GH_REPO=o/r gh release create v1.0.0
+EOF
 exit 0

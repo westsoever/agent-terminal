@@ -502,8 +502,23 @@ check_gh() { # $1 = index of gh
   esac
 }
 
-check_publish() { # $1 = index of npm/pnpm/bun/yarn: any `publish` word in the command is denied
-  if seg_matches publish || seg_matches unpublish || seg_matches deprecate || seg_matches dist-tag; then
+check_publish() { # $1 = index of npm/pnpm/bun/yarn
+  # The word right after the package manager is the subcommand. A read-only or test subcommand there makes a
+  # later `publish` an argument (bun test publish, npm view publish); a dry run publishes nothing. Anything else
+  # (an option first, whose value could be taken for the subcommand: npm --prefix test publish) keeps the old
+  # rule: any `publish` word in the command is denied.
+  local sub scr=""
+  sub=${TOKS[$(( $1 + 1 ))]:-}
+  case "$sub" in
+    npm|pnpm|bun|yarn) return 0 ;;   # yarn npm ...: that word is in command position and is checked itself
+    test|t|tst|view|v|info|show|help|help-search|search|s|find|ls|list|outdated|why|explain|audit|pack) return 0 ;;
+    publish)   # a dry run, unless anything could switch it back off (--dry-run false, --no-dry-run, =false)
+      if seg_matches --dry-run && ! seg_matches '--dry-run=*' && ! seg_matches '--no-dry-run*' && ! seg_matches false && ! seg_matches 0; then return 0; fi ;;
+    run|run-script)   # the script name right after it decides: a script named like a publish is one
+      scr=${TOKS[$(( $1 + 2 ))]:-}
+      case "$scr" in -*|'') scr="" ;; *publish*|*dist-tag*|*deprecate*) ;; *) return 0 ;; esac ;;
+  esac
+  if seg_matches publish || seg_matches unpublish || seg_matches deprecate || seg_matches dist-tag || [ -n "$scr" ]; then
     emit_deny "rule 8: publishing a package is the user's call. Run '${TOKS[$1]##*/} pack' to check the tarball, then notify that it is ready."
   fi
 }
