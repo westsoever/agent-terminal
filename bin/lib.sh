@@ -29,6 +29,10 @@ hook_init() {
   if [ -d "$CWD" ]; then CWD=$(cd "$CWD" && pwd -P); fi
   SID=$(jget session_id)
   [ -n "$SID" ] || SID="nosession-$(printf '%s' "$CWD" | shasum | cut -c1-8)"
+  # SID names a directory under sessions/: one that could leave it ("..", "/", a leading dot, odd bytes,
+  # very long) becomes sid-<hash of the raw id>, stable per id and distinct from other ids.
+  case "$SID" in .*|*..*|*[!A-Za-z0-9._-]*) SID="sid-$(printf '%s' "$SID" | shasum | cut -c1-16)" ;; esac
+  [ "${#SID}" -le 128 ] || SID="sid-$(printf '%s' "$SID" | shasum | cut -c1-16)"
   ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null || true)
   NAME=$(name_for "$CWD" "$ROOT")
   WORK_DIR=${ROOT:-$CWD}
@@ -47,12 +51,29 @@ resolve_state() {
   fi
 }
 
-meta_set() { # key value : single-line key=value registry for the current session
-  local f="$SESS_DIR/meta" tmp
-  mkdir -p "$SESS_DIR"
-  tmp=$(mktemp "$SESS_DIR/.meta.XXXXXX")
-  { if [ -f "$f" ]; then grep -v "^$1=" "$f" || true; fi; printf '%s=%s\n' "$1" "$2"; } >"$tmp"
-  mv "$tmp" "$f"
+# meta_set key value : single-line key=value registry for the current session. The hooks and the watcher
+# write the same file, so each read-modify-write holds a mkdir lock (portable: macOS has no flock). A lock
+# older than 5 s belongs to a writer that died and is taken over; after about 10 s of waiting the write goes
+# ahead anyway, so a hook never hangs here. Fails (non-zero) when the session dir cannot be written.
+meta_set() {
+  local f="$SESS_DIR/meta" lock="$SESS_DIR/.meta.lock" tmp m i=0 rc=0
+  mkdir -p "$SESS_DIR" || return 1
+  until mkdir "$lock" 2>/dev/null; do
+    [ -w "$SESS_DIR" ] || return 1
+    i=$((i + 1))
+    if [ $((i % 20)) -eq 0 ]; then
+      m=$(file_mtime "$lock")
+      if [ "$m" -gt 0 ] && [ $(($(date +%s) - m)) -gt 5 ]; then rmdir "$lock" 2>/dev/null || true; continue; fi
+    fi
+    [ "$i" -lt 500 ] || { lock=""; break; }
+    sleep 0.01
+  done
+  tmp=$(mktemp "$SESS_DIR/.meta.XXXXXX") || rc=1
+  if [ "$rc" -eq 0 ]; then
+    { { if [ -f "$f" ]; then grep -v "^$1=" "$f" || true; fi; printf '%s=%s\n' "$1" "$2"; } >"$tmp" && mv "$tmp" "$f"; } || { rc=1; rm -f "$tmp"; }
+  fi
+  if [ -n "$lock" ]; then rmdir "$lock" 2>/dev/null || true; fi
+  return "$rc"
 }
 
 meta_get() { # file key

@@ -53,6 +53,21 @@ echo change >>"$R/README.md"
 stop "$R" sess-D >/dev/null
 assert_eq "changed tree: tests ran again" "2" "$(wc -l <"$CNT" | tr -d ' ')"
 git -C "$R" checkout -q README.md
+assert_contains "unchanged tree: a check_skipped event is logged" "$(jq -r 'select(.kind=="check_skipped" and .sid=="sess-D") | .data.reason' "$AGENT_HOME/events.jsonl")" "unchanged"
+# F8: the skip has a time limit (STOP_CHECK_SKIP_TTL, default 1800 s): an older green run is not trusted
+: >"$CNT"
+STOP_CHECK_SKIP_TTL=1 stop "$R" sess-TTL >/dev/null; sleep 2
+STOP_CHECK_SKIP_TTL=1 stop "$R" sess-TTL >/dev/null
+assert_eq "skip TTL: a green run older than the TTL is run again" "2" "$(wc -l <"$CNT" | tr -d ' ')"
+STOP_CHECK_SKIP_TTL=0 stop "$R" sess-TTL >/dev/null
+assert_eq "skip TTL 0: never skipped" "3" "$(wc -l <"$CNT" | tr -d ' ')"
+# F8: the green fingerprint is the tree as it was before the run, kept only when the run left the tree as it
+# found it. A check that writes into the tree is run again next time; once it writes nothing new, it is skipped.
+: >"$CNT"
+write_goal "$R" "echo run >>$CNT; echo gen >$R/gen.out"
+stop "$R" sess-PRE >/dev/null; stop "$R" sess-PRE >/dev/null; stop "$R" sess-PRE >/dev/null
+assert_eq "pre-run fingerprint: the run that changed the tree is not trusted, the next one is" "2" "$(wc -l <"$CNT" | tr -d ' ')"
+rm -f "$R/gen.out"
 
 # placeholder test_command means "no check"
 write_goal "$R" "<the repo's own check>"
@@ -148,7 +163,9 @@ EOS
 chmod +x "$WORK/fake-claude-nofix"
 export NOFIX_CALLS="$WORK/nofix-calls"; : >"$NOFIX_CALLS"
 write_goal "$R" "test -f $WORK/never-exists"
+# every stop below changes the tree first: the ladder is skipped for a tree it already failed on (tested below)
 for i in 1 2 3; do
+  echo "cap $i" >>"$R/churn.txt"
   # LADDER_DAILY=100: this test counts the calls per stop, the daily ceiling (default 6) has its own test below
   out=$(CHING_TEST_LADDER_DAILY=100 CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-CAPLADDER)
   assert_eq "cap ladder: stop $i blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
@@ -166,6 +183,7 @@ assert_eq "cap ladder: the cap stop is still recorded in STATE.md" "$((GAVE_UP_B
 rm -rf "$AGENT_HOME/ladder"; : >"$NOFIX_CALLS"
 for p in 1 2 3; do
   for i in 1 2 3; do
+    echo "daily $p $i" >>"$R/churn.txt"
     out=$(CHING_TEST_LADDER_DAILY=4 CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-DAILY)
     assert_eq "daily ceiling: prompt $p stop $i still blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
   done
@@ -175,6 +193,30 @@ done
 assert_eq "daily ceiling 4: 3 prompts x 4 stops make exactly 4 model calls" "4" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
 assert_eq "daily ceiling 4: the counter says 4" "4" "$(cat "$AGENT_HOME/ladder/$(date -u +%Y-%m-%d)")"
 assert_contains "daily ceiling 4: the cap is in the escalation log" "$(cat "$AGENT_HOME/test-escalation.log")" "ladder-cap"
+
+# Same failing tree, same ladder result: a tree the ladder already failed on is not sent to it again.
+LR=$(mk_repo ladderrepo); write_goal "$LR" "test -f $WORK/never-exists"
+cat >"$WORK/fake-claude-try" <<'EOS'
+#!/usr/bin/env bash
+while [ $# -gt 0 ]; do [ "$1" = --model ] && echo "$2" >>"$NOFIX_CALLS"; shift; done
+echo "attempted fix" >"$TRY_FILE"   # edits the tree without fixing anything
+EOS
+chmod +x "$WORK/fake-claude-try"
+export TRY_FILE="$LR/attempt.txt"
+lstop() { CHING_TEST_LADDER_DAILY=100 CHING_CLAUDE_BIN="$WORK/fake-claude-try" CHING_TEST_MODELS="cheap strong" stop "$LR" "$1"; }
+: >"$NOFIX_CALLS"
+out=$(lstop sess-SAME)
+assert_eq "same tree: first stop runs the ladder (2 calls)" "2" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+out=$(lstop sess-SAME)
+assert_eq "same tree: the tree the ladder left behind is not sent again" "2" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+assert_eq "same tree: the stop still blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+assert_contains "same tree: a ladder_skipped event says why" "$(jq -r 'select(.kind=="ladder_skipped" and .sid=="sess-SAME") | .data.reason' "$AGENT_HOME/events.jsonl")" "same-tree"
+out=$(lstop sess-OTHER)
+assert_eq "same tree: another session on that tree does not pay either" "2" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+echo "real change" >>"$LR/README.md"
+out=$(lstop sess-SAME)
+assert_eq "changed tree: the ladder runs again" "4" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+git -C "$LR" checkout -q README.md
 
 # F6: a non-numeric or zero cap must not switch the safety limit off.
 for i in 1 2 3; do
@@ -192,6 +234,49 @@ assert_eq "MAX=0 behaves like 1: second stop is allowed" "" "$out"
 write_goal "$R" "sleep 3; exit 1"
 out=$(STOP_CHECK_TIMEOUT=0 stop "$R" sess-TMOZERO)
 assert_contains "TIMEOUT=0 behaves like 1: timed out after 1s" "$(printf '%s' "$out" | jq -r .reason)" "timed out after 1s"
+# F4: a timed-out test_command is killed with its whole process group, not only the top bash. The forked
+# sleeper ignores TERM, so only the KILL that follows reaches it.
+cat >"$WORK/forker.sh" <<'EOS'
+#!/usr/bin/env bash
+( trap '' TERM; exec sleep 300 ) &
+echo "$!" >"$1"
+wait
+EOS
+gone() { # pid : 0 when the process is gone within 3 s
+  local i; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do kill -0 "$1" 2>/dev/null || return 0; sleep 0.2; done; return 1
+}
+PGF="$WORK/pg-sleeper"; rm -f "$PGF"
+write_goal "$R" "bash $WORK/forker.sh $PGF"
+out=$(STOP_CHECK_TIMEOUT=1 stop "$R" sess-PGKILL)
+assert_contains "process group: the timeout still blocks with timed out" "$(printf '%s' "$out" | jq -r .reason)" "timed out after 1s"
+pg_pid=$(cat "$PGF" 2>/dev/null || echo 0)
+if [ "$pg_pid" -gt 0 ] && gone "$pg_pid"; then pass "process group: the forked sleeper is gone"; else fail "process group: the forked sleeper is gone" "  pid $pg_pid still alive"; fi
+[ "$pg_pid" -gt 0 ] && kill -9 "$pg_pid" 2>/dev/null
+
+# F3: one deadline for the whole hook (STOP_CHECK_DEADLINE, default 780 s, under the 900 s hook timeout).
+# A check that outlives it is killed at the deadline, and the stop blocks with "out of time" plus an event.
+write_goal "$R" "sleep 30"
+s=$(date +%s)
+out=$(STOP_CHECK_DEADLINE=2 stop "$R" sess-DEADLINE)
+e=$(date +%s)
+assert_eq "deadline: the hook ends near its deadline, not after the 30 s check" "1" "$([ $((e - s)) -le 6 ] && echo 1 || echo 0)"
+assert_eq "deadline: still a block (a check with no result is not a pass)" "block" "$(printf '%s' "$out" | jq -r .decision)"
+assert_contains "deadline: the reason says the hook ran out of time" "$(printf '%s' "$out" | jq -r .reason)" "out of time"
+assert_eq "deadline: a stop_deadline event is logged" "2" "$(jq -r 'select(.kind=="stop_deadline" and .sid=="sess-DEADLINE") | .data.budget' "$AGENT_HOME/events.jsonl")"
+out=$(STOP_CHECK_DEADLINE=abc STOP_CHECK_TIMEOUT=1 stop "$R" sess-DEADLINE-BAD)
+assert_contains "deadline: a non-number falls back to the default (the 1 s timeout applies)" "$(printf '%s' "$out" | jq -r .reason)" "timed out after 1s"
+# the ladder only starts a model call when the budget leaves room for it and for the re-check after it
+cat >"$WORK/fake-claude-count" <<'EOS'
+#!/usr/bin/env bash
+echo call >>"$COUNT_CALLS"
+EOS
+chmod +x "$WORK/fake-claude-count"
+export COUNT_CALLS="$WORK/count-calls"; : >"$COUNT_CALLS"
+write_goal "$R" "false"
+out=$(STOP_CHECK_DEADLINE=20 CHING_TEST_LADDER_DAILY=100 CHING_CLAUDE_BIN="$WORK/fake-claude-count" CHING_TEST_MODELS="cheap strong" stop "$R" sess-DLLADDER)
+assert_eq "deadline: too little budget left, no model call" "0" "$(wc -l <"$COUNT_CALLS" | tr -d ' ')"
+assert_eq "deadline: the failing check still blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+assert_contains "deadline: the ladder skip is in the escalation log" "$(cat "$AGENT_HOME/test-escalation.log")" "reason=deadline"
 
 # ---------- events (Phase 1.5) ----------
 EVF="$AGENT_HOME/events.jsonl"
@@ -202,10 +287,14 @@ assert_contains "events: a green stop logs stop_ok" "$(jq -r 'select(.kind=="sto
 # ---------- checkpoint rule (Phase 1.5) ----------
 CR=$(mk_repo cprepo); write_goal "$CR" "true"
 touch_prompt() { printf '%s' "$(hook_json UserPromptSubmit "$1" "$2")" | "$BIN/session-start.sh" touch; }
-touch_prompt "$CR" cp-1
+work() { echo "$2" >>"$1/work.txt"; }   # repo text : the turn changes the tree (the gate only asks after a change)
+touch_prompt "$CR" cp-1; work "$CR" cp-1
 out=$(stop "$CR" cp-1)
 assert_eq "checkpoint missing: blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
-assert_contains "checkpoint missing: reason names /handoff" "$(printf '%s' "$out" | jq -r .reason)" "/handoff"
+r=$(printf '%s' "$out" | jq -r .reason)
+assert_contains "checkpoint reason: asks only for the checkpoint block" "$r" "Edit only the six lines"
+assert_contains "checkpoint reason: names the six keys" "$r" "result, blocker, next_action, files_changed, examined, not_examined"
+assert_not_contains "checkpoint reason: no /handoff (a full handoff is not needed)" "$r" "/handoff"
 out=$(stop "$CR" cp-1)
 assert_eq "checkpoint: asked only once per prompt" "" "$out"
 # the first cp-1 stop exited at the block, so the only stop_ok for cp-1 comes from this second stop reaching its normal end
@@ -216,7 +305,7 @@ out=$(stop "$CR" cp-2)
 assert_eq "fresh checkpoint: no block" "" "$out"
 assert_contains "fresh checkpoint: checkpoint event" "$(jq -r 'select(.kind=="checkpoint") | .sid' "$AGENT_HOME/events.jsonl")" "cp-2"
 touch -t 202001010000 "$CR/.agent/STATE.md"
-touch_prompt "$CR" cp-2
+touch_prompt "$CR" cp-2; work "$CR" cp-2
 out=$(stop "$CR" cp-2)
 assert_eq "stale checkpoint (older than the prompt): blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
 CP="$WORK/cp plain"; mkdir -p "$CP"
@@ -229,7 +318,7 @@ out=$(stop "$NR" cp-4)
 assert_eq "no recorded prompt: never blocks for a checkpoint" "" "$out"
 assert_eq "no recorded prompt: stop ran to the end (stop_ok logged)" "cp-4" "$(jq -r 'select(.kind=="stop_ok" and .sid=="cp-4") | .sid' "$EVF")"
 # block once, the model then writes the checkpoint: the next stop passes AND the checkpoint event is logged
-touch_prompt "$CR" cp-5
+touch_prompt "$CR" cp-5; work "$CR" cp-5
 out=$(stop "$CR" cp-5)
 assert_eq "block-then-comply: first stop blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
 assert_eq "block-then-comply: no checkpoint event yet" "" "$(jq -r 'select(.kind=="checkpoint" and .sid=="cp-5") | .sid' "$EVF")"
@@ -238,4 +327,111 @@ out=$(stop "$CR" cp-5)
 assert_eq "block-then-comply: second stop passes" "" "$out"
 assert_eq "block-then-comply: checkpoint event logged after the block" "cp-5" "$(jq -r 'select(.kind=="checkpoint" and .sid=="cp-5") | .sid' "$EVF")"
 assert_eq "block-then-comply: second stop ran to the end (stop_ok logged)" "cp-5" "$(jq -r 'select(.kind=="stop_ok" and .sid=="cp-5") | .sid' "$EVF")"
+# a turn that changed nothing in the tree (a question answered, a plan explained) is not asked for a checkpoint
+CU=$(mk_repo cpunchanged); write_goal "$CU" "true"
+echo old >"$CU/old.txt"   # dirty, but from before the prompt
+age_tree() { touch -t 202001010000 "$CU/.git/logs/HEAD" "$CU/old.txt" "$CU/README.md"; }
+age_tree; touch_prompt "$CU" cu-1
+out=$(stop "$CU" cu-1)
+assert_eq "unchanged since the prompt: no checkpoint block" "" "$out"
+assert_eq "unchanged since the prompt: stop ran to the end (stop_ok logged)" "cu-1" "$(jq -r 'select(.kind=="stop_ok" and .sid=="cu-1") | .sid' "$EVF")"
+age_tree; touch_prompt "$CU" cu-2; echo edit >>"$CU/README.md"
+out=$(stop "$CU" cu-2)
+assert_eq "a tracked file edited after the prompt: blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+git -C "$CU" checkout -q README.md
+age_tree; touch_prompt "$CU" cu-3; commit_file "$CU" new.txt x
+out=$(stop "$CU" cu-3)
+assert_eq "a commit after the prompt (clean tree): blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+age_tree; touch -t 202001010000 "$CU/new.txt"; touch_prompt "$CU" cu-4; rm "$CU/new.txt"
+out=$(stop "$CU" cu-4)
+assert_eq "a tracked file deleted after the prompt: blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+# scripted runs opt out: CHING_NO_CHECKPOINT=1, or a non-interactive Claude Code run (claude -p sets
+# CLAUDE_CODE_ENTRYPOINT=sdk-cli; the Agent SDK sets sdk-ts / sdk-py)
+touch_prompt "$CR" cp-6; work "$CR" cp-6
+out=$(CHING_NO_CHECKPOINT=1 stop "$CR" cp-6)
+assert_eq "CHING_NO_CHECKPOINT=1: no checkpoint block" "" "$out"
+touch_prompt "$CR" cp-7; work "$CR" cp-7
+out=$(CLAUDE_CODE_ENTRYPOINT=sdk-cli stop "$CR" cp-7)
+assert_eq "claude -p (CLAUDE_CODE_ENTRYPOINT=sdk-cli): no checkpoint block" "" "$out"
+touch_prompt "$CR" cp-8; work "$CR" cp-8
+out=$(CLAUDE_CODE_ENTRYPOINT=cli stop "$CR" cp-8)
+assert_eq "interactive claude (CLAUDE_CODE_ENTRYPOINT=cli): still asked" "block" "$(printf '%s' "$out" | jq -r .decision)"
+# ---------- no verdict (F5, F9) ----------
+# When the hook cannot do its own bookkeeping it has no verdict: it allows the stop, says why on stderr,
+# exits 3 (a non-blocking hook error, so Claude Code shows the message) and logs stop_no_verdict when it can.
+# It never blocks with a misleading "done-check failed".
+stopx() { # cwd sid : run the hook with stdout in $WORK/nv.out, stderr in $WORK/nv.err; print the exit code
+  local rc=0
+  printf '%s' "$(hook_json Stop "$1" "$2" '{"stop_hook_active":false,"last_assistant_message":"x"}')" \
+    | "$BIN/stop-check.sh" >"$WORK/nv.out" 2>"$WORK/nv.err" || rc=$?
+  echo "$rc"
+}
+nv_event() { jq -r --arg s "$1" 'select(.kind=="stop_no_verdict" and .sid==$s) | .data.reason' "$EVF" 2>/dev/null; }
+NV=$(mk_repo nvrepo); write_goal "$NV" "false"
+mkdir -p "$AGENT_HOME/sessions"; chmod 500 "$AGENT_HOME/sessions"
+rc=$(stopx "$NV" nv-1)
+chmod 700 "$AGENT_HOME/sessions"
+assert_eq "unwritable sessions dir: exit 3 (no verdict)" "3" "$rc"
+assert_eq "unwritable sessions dir: no block" "" "$(cat "$WORK/nv.out")"
+assert_contains "unwritable sessions dir: stderr says no verdict" "$(cat "$WORK/nv.err")" "no verdict"
+assert_contains "unwritable sessions dir: stderr names the session dir" "$(cat "$WORK/nv.err")" "$AGENT_HOME/sessions/nv-1"
+assert_contains "unwritable sessions dir: stop_no_verdict event" "$(nv_event nv-1)" "session record"
+ROH="$WORK/ro-agent-home"; mkdir -p "$ROH"; chmod 500 "$ROH"
+rc=$(AGENT_HOME="$ROH" stopx "$NV" nv-2)
+chmod 700 "$ROH"
+assert_eq "unwritable AGENT_HOME: exit 3 (no verdict)" "3" "$rc"
+assert_eq "unwritable AGENT_HOME: no block" "" "$(cat "$WORK/nv.out")"
+assert_contains "unwritable AGENT_HOME: stderr says no verdict" "$(cat "$WORK/nv.err")" "no verdict"
+# a read-only escalation log costs log lines, never the verdict: a green check is still green
+write_goal "$NV" "true"
+touch "$AGENT_HOME/test-escalation.log"; chmod 400 "$AGENT_HOME/test-escalation.log"
+rc=$(stopx "$NV" nv-3)
+assert_eq "read-only escalation log, green check: allowed normally (exit 0)" "0" "$rc"
+assert_eq "read-only escalation log, green check: no false block" "" "$(cat "$WORK/nv.out")"
+write_goal "$NV" "exit 4"
+rc=$(stopx "$NV" nv-3b)
+chmod 600 "$AGENT_HOME/test-escalation.log"
+assert_contains "read-only escalation log, red check: blocks with the check's own exit code" "$(jq -r .reason "$WORK/nv.out")" "exit code 4"
+# a cwd that was deleted: the check cannot run there
+mkdir -p "$AGENT_HOME/defaults" "$WORK/gone-dir"
+printf 'test_command: true\n' >"$AGENT_HOME/defaults/GOAL.md"
+rmdir "$WORK/gone-dir"
+rc=$(stopx "$WORK/gone-dir" nv-4)
+rm -rf "$AGENT_HOME/defaults"
+assert_eq "deleted cwd: exit 3 (no verdict)" "3" "$rc"
+assert_eq "deleted cwd: no block" "" "$(cat "$WORK/nv.out")"
+assert_contains "deleted cwd: stderr says the folder is gone" "$(cat "$WORK/nv.err")" "no longer exists"
+assert_contains "deleted cwd: stop_no_verdict event" "$(nv_event nv-4)" "no longer exists"
+# any other failure of the hook itself (here: the retry counter is a directory) is a no verdict too
+write_goal "$NV" "false"
+mkdir -p "$AGENT_HOME/sessions/nv-6/retries"
+rc=$(stopx "$NV" nv-6)
+assert_eq "unexpected hook failure: exit 3 (no verdict)" "3" "$rc"
+assert_eq "unexpected hook failure: no block" "" "$(cat "$WORK/nv.out")"
+assert_contains "unexpected hook failure: stderr says no verdict" "$(cat "$WORK/nv.err")" "no verdict (unexpected failure"
+assert_contains "unexpected hook failure: stop_no_verdict event" "$(nv_event nv-6)" "unexpected failure"
+# F9: jq missing from the hook PATH: loud, and no shared nosession-<hash> record
+NOJQ="$WORK/nojq-bin"; mkdir -p "$NOJQ"
+ln -s /usr/bin/* "$NOJQ"/ 2>/dev/null; ln -s /bin/* "$NOJQ"/ 2>/dev/null; rm -f "$NOJQ/jq"
+write_goal "$NV" "false"
+J=$(hook_json Stop "$NV" nv-5 '{"stop_hook_active":false}')
+rc=0; printf '%s' "$J" | PATH="$NOJQ" "$BIN/stop-check.sh" >"$WORK/nv.out" 2>"$WORK/nv.err" || rc=$?
+assert_eq "no jq: exit 3 (no verdict)" "3" "$rc"
+assert_eq "no jq: no block" "" "$(cat "$WORK/nv.out")"
+assert_contains "no jq: stderr names jq" "$(cat "$WORK/nv.err")" "jq is not on the hook PATH"
+assert_eq "no jq: no shared nosession-<hash> record" "" "$(ls "$AGENT_HOME/sessions" | grep '^nosession-' || true)"
+
+# ---------- session ids (F12) ----------
+# a session id is a directory name under sessions/: one with ".." or "/" must not reach outside it
+SR=$(mk_repo sidrepo); write_goal "$SR" "false"
+out=$(stop "$SR" "../escape-a")
+assert_eq "sid with ..: still blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+assert_no_file "sid with ..: nothing written outside sessions/" "$AGENT_HOME/escape-a"
+out=$(stop "$SR" "nest/ed")
+assert_no_file "sid with /: no nested directory" "$AGENT_HOME/sessions/nest"
+out=$(stop "$SR" "..")
+assert_no_file "sid '..': no retries file in AGENT_HOME" "$AGENT_HOME/retries"
+assert_eq "unsafe sids map to their own sid-<hash> dirs" "3" "$(ls "$AGENT_HOME/sessions" | grep -c '^sid-')"
+out=$(stop "$SR" "../escape-a")
+assert_contains "the same unsafe sid keeps its own counter" "$(printf '%s' "$out" | jq -r .reason)" "attempt 2 of 3"
 exit 0

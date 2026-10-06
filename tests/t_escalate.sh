@@ -134,4 +134,61 @@ touch "$R/fixed"; : >"$CALLS"
 ladder_run 6
 assert_eq "green tests: no model call" "0" "$(ncalls)"
 assert_no_file "green tests: the counter is not created" "$LD"
+
+# ---------- time limit per test run (F4) ----------
+# --timeout N kills the test run's whole process group after N s and reports 142, as an alarm would
+cat >"$WORK/forker.sh" <<'EOS'
+#!/usr/bin/env bash
+( trap '' TERM; exec sleep 300 ) &
+echo "$!" >"$1"
+wait
+EOS
+gone() { local i; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do kill -0 "$1" 2>/dev/null || return 0; sleep 0.2; done; return 1; }
+PGF="$WORK/pg-sleeper"; rm -f "$PGF"; : >"$CALLS"
+s=$(date +%s)
+out=$(CHING_TEST_MODELS="" "$BIN/test-escalate.sh" -C "$R" --timeout 1 -- bash "$WORK/forker.sh" "$PGF" 2>&1); rc=$?
+e=$(date +%s)
+assert_eq "timeout: exit code 142" "142" "$rc"
+assert_eq "timeout: ends within a few seconds" "1" "$([ $((e - s)) -le 5 ] && echo 1 || echo 0)"
+pg_pid=$(cat "$PGF" 2>/dev/null || echo 0)
+if [ "$pg_pid" -gt 0 ] && gone "$pg_pid"; then pass "timeout: the forked TERM-ignoring sleeper is gone"; else fail "timeout: the forked TERM-ignoring sleeper is gone" "  pid $pg_pid"; fi
+[ "$pg_pid" -gt 0 ] && kill -9 "$pg_pid" 2>/dev/null
+assert_ok "timeout: a fast command is not affected" "$BIN/test-escalate.sh" -C "$R" --timeout 5 -- true
+out=$("$BIN/test-escalate.sh" -C "$R" --timeout 5 -- bash -c 'exit 7' 2>&1); rc=$?
+assert_eq "timeout: the command's own exit code is kept" "7" "$rc"
+
+# ---------- model calls: time limit, --max-turns, deadline (F3) ----------
+cat >"$WORK/slow-claude" <<'EOS'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$SLOW_ARGS"
+( trap '' TERM; exec sleep 300 ) &
+echo "$!" >>"$SLOW_PIDS"
+sleep 300
+EOS
+chmod +x "$WORK/slow-claude"
+export SLOW_ARGS="$WORK/slow-args" SLOW_PIDS="$WORK/slow-pids"; : >"$SLOW_ARGS"; : >"$SLOW_PIDS"; rm -f "$R/fixed"
+s=$(date +%s)
+out=$(CHING_CLAUDE_BIN="$WORK/slow-claude" CHING_TEST_CALL_TIMEOUT=1 CHING_TEST_LADDER_DAILY=100 "$BIN/test-escalate.sh" -C "$R" -- "${T[@]}" 2>&1); rc=$?
+e=$(date +%s)
+assert_eq "call limit: two hanging calls end in seconds" "1" "$([ $((e - s)) -le 8 ] && echo 1 || echo 0)"
+assert_eq "call limit: the tests' exit code is kept" "1" "$rc"
+assert_eq "call limit: both models were tried" "2" "$(grep -c '^-p --model' "$SLOW_ARGS")"
+assert_contains "call limit: model-timeout logged" "$(cat "$CHING_TEST_LOG")" "model-timeout model=cheap limit=1s"
+left_alive=0
+while read -r p; do gone "$p" || { left_alive=$((left_alive + 1)); kill -9 "$p" 2>/dev/null; }; done <"$SLOW_PIDS"
+assert_eq "call limit: no child of a timed-out call is left" "0" "$left_alive"
+assert_contains "every call gets --max-turns (default 30)" "$(head -1 "$SLOW_ARGS")" "--max-turns 30"
+: >"$SLOW_ARGS"
+CHING_CLAUDE_BIN="$WORK/slow-claude" CHING_TEST_CALL_TIMEOUT=1 CHING_TEST_MAX_TURNS=7 CHING_TEST_MODELS=cheap CHING_TEST_LADDER_DAILY=100 \
+  "$BIN/test-escalate.sh" -C "$R" -- "${T[@]}" >/dev/null 2>&1
+assert_contains "CHING_TEST_MAX_TURNS sets --max-turns" "$(head -1 "$SLOW_ARGS")" "--max-turns 7"
+# --deadline: no call starts unless it has 30 s plus the time of one more check run before the deadline
+: >"$CALLS"
+out=$(CHING_TEST_LADDER_DAILY=100 "$BIN/test-escalate.sh" -C "$R" --deadline $(($(date +%s) + 20)) -- "${T[@]}" 2>&1); rc=$?
+assert_eq "deadline near: no model call" "0" "$(ncalls)"
+assert_eq "deadline near: the tests' exit code" "1" "$rc"
+assert_contains "deadline near: ladder-skip logged" "$(cat "$CHING_TEST_LOG")" "ladder-skip model=cheap reason=deadline"
+out=$(CHING_TEST_LADDER_DAILY=100 "$BIN/test-escalate.sh" -C "$R" --deadline $(($(date +%s) - 1)) -- "${T[@]}" 2>&1); rc=$?
+assert_eq "deadline passed: nothing runs, exit 142" "142" "$rc"
+assert_contains "deadline passed: logged" "$(cat "$CHING_TEST_LOG")" "deadline step=check"
 exit 0
