@@ -229,8 +229,8 @@ out=$(STOP_CHECK_MAX_RETRIES=0 stop "$R" sess-MAXZERO)
 assert_contains "MAX=0 behaves like 1: first stop blocks, attempt 1 of 1" "$(printf '%s' "$out" | jq -r .reason)" "attempt 1 of 1"
 out=$(STOP_CHECK_MAX_RETRIES=0 stop "$R" sess-MAXZERO)
 assert_eq "MAX=0 behaves like 1: second stop is allowed" "" "$out"
-# TIMEOUT=0 is perl `alarm 0` (no alarm): it behaves like 1 second. (A non-number falls back to 900 s, which
-# cannot be observed without a 900 s test, so only the zero case is tested.)
+# TIMEOUT=0 would mean no limit: it behaves like 1 second. (A non-number falls back to 600 s, which
+# cannot be observed without a 600 s test, so only the zero case is tested.)
 write_goal "$R" "sleep 3; exit 1"
 out=$(STOP_CHECK_TIMEOUT=0 stop "$R" sess-TMOZERO)
 assert_contains "TIMEOUT=0 behaves like 1: timed out after 1s" "$(printf '%s' "$out" | jq -r .reason)" "timed out after 1s"
@@ -254,15 +254,21 @@ if [ "$pg_pid" -gt 0 ] && gone "$pg_pid"; then pass "process group: the forked s
 [ "$pg_pid" -gt 0 ] && kill -9 "$pg_pid" 2>/dev/null
 
 # F3: one deadline for the whole hook (STOP_CHECK_DEADLINE, default 780 s, under the 900 s hook timeout).
-# A check that outlives it is killed at the deadline, and the stop blocks with "out of time" plus an event.
+# A check cut off at the deadline has no verdict: the model is not told to fix anything. The stop is allowed
+# (exit 3, "out of time" on stderr), stop_deadline is logged, the user is notified once, no retry is counted.
 write_goal "$R" "sleep 30"
-s=$(date +%s)
-out=$(STOP_CHECK_DEADLINE=2 stop "$R" sess-DEADLINE)
+: >"$AGENT_HOME/notify.log"
+s=$(date +%s); rc=0
+out=$(printf '%s' "$(hook_json Stop "$R" sess-DEADLINE '{"stop_hook_active":false}')" | STOP_CHECK_DEADLINE=2 STOP_CHECK_TIMEOUT=900 "$BIN/stop-check.sh" 2>"$WORK/dl.err") || rc=$?
 e=$(date +%s)
-assert_eq "deadline: the hook ends near its deadline, not after the 30 s check" "1" "$([ $((e - s)) -le 6 ] && echo 1 || echo 0)"
-assert_eq "deadline: still a block (a check with no result is not a pass)" "block" "$(printf '%s' "$out" | jq -r .decision)"
-assert_contains "deadline: the reason says the hook ran out of time" "$(printf '%s' "$out" | jq -r .reason)" "out of time"
+assert_eq "deadline: the hook ends near its deadline, not after the 30 s check (even with STOP_CHECK_TIMEOUT=900)" "1" "$([ $((e - s)) -le 6 ] && echo 1 || echo 0)"
+assert_eq "deadline: no block (a check with no result is no verdict)" "" "$out"
+assert_eq "deadline: exit 3 (no verdict, stop allowed)" "3" "$rc"
+assert_contains "deadline: stderr says the hook ran out of time" "$(cat "$WORK/dl.err")" "out of time"
 assert_eq "deadline: a stop_deadline event is logged" "2" "$(jq -r 'select(.kind=="stop_deadline" and .sid=="sess-DEADLINE") | .data.budget' "$AGENT_HOME/events.jsonl")"
+assert_eq "deadline: no stop_blocked event" "" "$(jq -r 'select(.kind=="stop_blocked" and .sid=="sess-DEADLINE") | .sid' "$AGENT_HOME/events.jsonl")"
+assert_no_file "deadline: no retry counted" "$AGENT_HOME/sessions/sess-DEADLINE/retries"
+assert_eq "deadline: the user is notified once" "1" "$(grep -c 'out of time' "$AGENT_HOME/notify.log")"
 out=$(STOP_CHECK_DEADLINE=abc STOP_CHECK_TIMEOUT=1 stop "$R" sess-DEADLINE-BAD)
 assert_contains "deadline: a non-number falls back to the default (the 1 s timeout applies)" "$(printf '%s' "$out" | jq -r .reason)" "timed out after 1s"
 # the ladder only starts a model call when the budget leaves room for it and for the re-check after it

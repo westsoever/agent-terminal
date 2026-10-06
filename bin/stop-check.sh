@@ -11,9 +11,11 @@
 # the stop is allowed and stderr says why (see no_verdict below).
 # The check goes through test-escalate.sh (no model unless it fails; Haiku, then Sonnet).
 # One deadline covers the whole hook (check runs and model calls): install.sh gives the hook 900 s, and a hook
-# that Claude Code kills allows the stop and orphans its children. Each step gets what is left; a check cut
-# at the deadline blocks with "out of time" (a stop_deadline event), and that block counts as a retry.
-# Env: STOP_CHECK_MAX_RETRIES (3) STOP_CHECK_TIMEOUT (one check run, 900 s)
+# that Claude Code kills allows the stop and orphans its children. Each step gets what is left. A check cut
+# off at the deadline has no verdict: the stop is allowed (exit 3, "out of time" on stderr), stop_deadline is
+# logged and the user is notified; the model is not told to fix anything and no retry is counted.
+# Env: STOP_CHECK_MAX_RETRIES (3) STOP_CHECK_TIMEOUT (one check run, 600 s, never more than the deadline;
+#      a run cut by it is a failure, "timed out")
 #      STOP_CHECK_DEADLINE (the whole hook, 780 s: 2 minutes of margin under the 900 s hook timeout)
 #      STOP_CHECK_SKIP_TTL (1800 s: how long an unchanged tree's green run is trusted; 0 = always run)
 #      CHING_NO_CHECKPOINT=1 (scripted runs: never ask for the checkpoint; see checkpoint_gate)
@@ -57,14 +59,16 @@ command -v jq >/dev/null 2>&1 || no_verdict "jq is not on the hook PATH ($PATH);
 MAX=${STOP_CHECK_MAX_RETRIES:-3}
 case "$MAX" in ''|*[!0-9]*) MAX=3 ;; esac
 [ "$MAX" -ge 1 ] || MAX=1
-TIMEOUT=${STOP_CHECK_TIMEOUT:-900}
-case "$TIMEOUT" in ''|*[!0-9]*) TIMEOUT=900 ;; esac
-[ "$TIMEOUT" -ge 1 ] || TIMEOUT=1
 BUDGET=${STOP_CHECK_DEADLINE:-780}
 case "$BUDGET" in ''|*[!0-9]*) BUDGET=780 ;; esac
 [ "${#BUDGET}" -le 6 ] || BUDGET=780
 BUDGET=$((10#$BUDGET)); [ "$BUDGET" -ge 1 ] || BUDGET=1
 DEADLINE=$((START + BUDGET))
+TIMEOUT=${STOP_CHECK_TIMEOUT:-600}
+case "$TIMEOUT" in ''|*[!0-9]*) TIMEOUT=600 ;; esac
+[ "${#TIMEOUT}" -le 6 ] || TIMEOUT=600
+TIMEOUT=$((10#$TIMEOUT)); [ "$TIMEOUT" -ge 1 ] || TIMEOUT=1
+[ "$TIMEOUT" -le "$BUDGET" ] || TIMEOUT=$BUDGET   # a run limit past the deadline would never apply
 SKIP_TTL=${STOP_CHECK_SKIP_TTL:-1800}
 case "$SKIP_TTL" in ''|*[!0-9]*) SKIP_TTL=1800 ;; esac
 [ "${#SKIP_TTL}" -le 9 ] || SKIP_TTL=1800
@@ -232,6 +236,14 @@ if [ "$rc" -eq 0 ]; then
   if [ -n "$ROOT" ] && [ "$(fingerprint)" = "$FP" ]; then printf '%s %s\n' "$FP" "$RUN_AT" >"$PASS_FILE"; fi
   finish_ok
 fi
+# Cut off at the deadline: the check never finished, so there is no verdict to act on. Blocking would only
+# send the model to "fix" a check that may be fine, three times over 13 minutes each.
+if [ "$rc" -eq 142 ] && [ "$(date +%s)" -ge "$DEADLINE" ]; then
+  ev stop_deadline "$(jq -nc --argjson b "$BUDGET" --argjson e "$(($(date +%s) - START))" '{budget:$b,elapsed:$e}')"
+  set_state blocked
+  notify blocked "Done-check out of time after ${BUDGET}s (STOP_CHECK_DEADLINE), no verdict: $TEST_CMD"
+  no_verdict "out of time: the done-check did not finish within the hook's ${BUDGET}s budget (STOP_CHECK_DEADLINE)"
+fi
 # Still failing after the ladder: remember the tree before the run and the tree the models left behind.
 if [ "$LADDER_ON" -eq 1 ] && [ -n "$ROOT" ]; then
   FP_AFTER=$(fingerprint)
@@ -257,11 +269,7 @@ n=$((n + 1))
 printf '%s\n' "$n" >"$COUNTER"
 ev stop_blocked "$(jq -nc --argjson n "$n" '{retry:$n,reason:"tests"}')"
 TAIL=$(tail -n 40 "$OUT" | cut -c1-400 | head -c 3500)
-if [ "$rc" -eq 142 ] && [ "$(date +%s)" -ge "$DEADLINE" ]; then
-  WHY="out of time: the hook's ${BUDGET}s budget (STOP_CHECK_DEADLINE) ran out before the check finished"
-  ev stop_deadline "$(jq -nc --argjson b "$BUDGET" --argjson e "$(($(date +%s) - START))" '{budget:$b,elapsed:$e}')"
-elif [ "$rc" -eq 142 ]; then WHY="timed out after ${TIMEOUT}s"
-else WHY="exit code $rc"; fi
+if [ "$rc" -eq 142 ]; then WHY="timed out after ${TIMEOUT}s"; else WHY="exit code $rc"; fi
 REASON="Do not stop yet: the done-check in $GOAL_FILE failed ($WHY, attempt $n of $MAX). Command: $TEST_CMD"$'\n\n'"Last output:"$'\n'"$TAIL"$'\n\n'"Fix the failure and finish. Do not ask questions; log assumptions in STATE.md."
 jq -n --arg r "$REASON" '{decision:"block", reason:$r}'
 exit 0
