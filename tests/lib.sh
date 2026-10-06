@@ -16,6 +16,7 @@ export HOME="$WORK/home"
 export AGENT_HOME="$WORK/agent-home"
 export CLAUDE_DIR="$WORK/claude"
 export AGENT_REPOS_FILE="$WORK/agent-repos"
+export LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"   # install.sh writes its plist here; set explicitly so no test relies on HOME by accident
 export NOTIFY_DRY_RUN=1
 export NOTIFY_TERMINAL_NOTIFIER="$WORK/no-such-terminal-notifier"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com

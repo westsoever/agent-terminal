@@ -28,6 +28,7 @@ export AGENT_REPOS_FILE="$WORK/fixture-agent-repos"
 sum() { shasum -a 256 "$SETTINGS_FILE" | cut -d' ' -f1; }
 inst() { "$KIT/install.sh" "$@" </dev/null 2>&1; }
 BEFORE=$(sum)
+LA="$LAUNCH_AGENTS_DIR/org.ching.watch.plist"   # LAUNCH_AGENTS_DIR is exported by lib.sh
 
 # dry run: shows a diff, writes nothing
 out=$(inst --dry-run); rc=$?
@@ -38,11 +39,23 @@ assert_eq "dry-run: settings untouched" "$BEFORE" "$(sum)"
 assert_no_file "dry-run: no symlink" "$D/ching"
 assert_no_file "dry-run: no backup" "$(ls "$D"/settings.json.bak.ching.* 2>/dev/null | head -1)"
 assert_no_file "dry-run: no ~/.agent-repos" "$AGENT_REPOS_FILE"
+assert_contains "dry-run lists the plist write and load" "$out" "would: write $LA and launchctl bootstrap it"
+assert_contains "dry-run shows the plist diff header" "$out" "+++ $LA (after install)"
+assert_contains "dry-run plist diff shows the interval" "$out" "+  <key>StartInterval</key><integer>300</integer>"
+assert_contains "dry-run plist diff shows the script path" "$out" "$D/ching/bin/ching-watch.sh"
+assert_no_file "dry-run: no plist" "$LA"
+assert_no_file "dry-run: launchctl never called" "$WORK/launchctl.log"
 
 # non-interactive apply needs --yes
 out=$(inst); rc=$?
 assert_eq "no tty and no --yes: refuses" "1" "$rc"
 assert_eq "refusal leaves settings untouched" "$BEFORE" "$(sum)"
+assert_contains "refusal says it needs a terminal or --yes" "$out" "not a terminal"
+assert_contains "refusal previews the plist write" "$out" "would: write $LA and launchctl bootstrap it"
+assert_contains "refusal shows the plist diff" "$out" "+++ $LA (after install)"
+assert_no_file "refusal: no plist written" "$LA"
+assert_no_file "refusal: launchctl never called" "$WORK/launchctl.log"
+assert_no_file "refusal: no symlink" "$D/ching"
 
 # apply
 out=$(inst --yes); assert_eq "apply exits 0" "0" "$?"
@@ -73,7 +86,6 @@ assert_eq "second run: still one backup" "1" "$(ls "$D"/settings.json.bak.ching.
 out=$(inst --yes --dry-run); assert_contains "dry-run after install: nothing to do" "$out" "nothing to do"
 
 # ---------- launchd watcher (Phase 1.5) ----------
-LA="$HOME/Library/LaunchAgents/org.ching.watch.plist"
 assert_file "watcher plist installed" "$LA"
 assert_contains "plist runs every 300 s" "$(cat "$LA")" "<integer>300</integer>"
 assert_contains "plist points at the kit symlink" "$(cat "$LA")" "/ching/bin/ching-watch.sh"
@@ -82,6 +94,35 @@ assert_contains "launchctl bootstrap called" "$(cat "$WORK/launchctl.log")" "boo
 n=$(wc -l <"$WORK/launchctl.log")
 inst --yes >/dev/null
 assert_eq "re-run with identical plist: launchctl not called again" "$n" "$(wc -l <"$WORK/launchctl.log")"
+
+# Nothing else is out of date, only the plist. Without a tty and without --yes the launchd job is neither
+# replaced nor loaded: the run shows the plist diff, says it needs --yes and exits non-zero. --dry-run shows it too.
+psum() { shasum -a 256 "$LA" | cut -d' ' -f1; }
+GOODP=$(psum)
+sed 's|<integer>300</integer>|<integer>999</integer>|' "$LA" >"$LA.t" && mv "$LA.t" "$LA"
+BADP=$(psum)
+n=$(wc -l <"$WORK/launchctl.log")
+out=$(inst); rc=$?
+assert_eq "plist differs, no tty and no --yes: refuses" "1" "$rc"
+assert_contains "plist-only refusal says it needs a terminal or --yes" "$out" "not a terminal"
+assert_contains "plist-only refusal shows the old plist line" "$out" "-  <key>StartInterval</key><integer>999</integer>"
+assert_contains "plist-only refusal shows the new plist line" "$out" "+  <key>StartInterval</key><integer>300</integer>"
+assert_contains "plist-only refusal previews the replace" "$out" "would: write $LA and launchctl bootstrap it"
+assert_eq "plist-only refusal leaves the plist as it was" "$BADP" "$(psum)"
+assert_eq "plist-only refusal does not call launchctl" "$n" "$(wc -l <"$WORK/launchctl.log")"
+out=$(inst --dry-run); rc=$?
+assert_eq "plist differs: dry-run exits 0" "0" "$rc"
+assert_contains "plist differs: dry-run shows the diff" "$out" "-  <key>StartInterval</key><integer>999</integer>"
+assert_eq "plist differs: dry-run leaves the plist" "$BADP" "$(psum)"
+assert_eq "plist differs: dry-run does not call launchctl" "$n" "$(wc -l <"$WORK/launchctl.log")"
+rm -f "$LA"
+out=$(inst); rc=$?
+assert_eq "plist missing, no tty and no --yes: refuses" "1" "$rc"
+assert_no_file "plist missing, refused: not recreated" "$LA"
+assert_eq "plist missing, refused: launchctl not called" "$n" "$(wc -l <"$WORK/launchctl.log")"
+out=$(inst --yes); assert_eq "plist missing: --yes repairs it" "0" "$?"
+assert_eq "plist missing: --yes restores the same plist" "$GOODP" "$(psum)"
+assert_contains "plist missing: --yes loads it" "$(tail -n +$((n + 1)) "$WORK/launchctl.log")" "bootstrap gui/"
 assert_contains "guard matcher covers messaging MCP tools" "$(jq -r '.hooks.PreToolUse[].matcher' "$SETTINGS_FILE")" "[Gg]mail"
 jq '(.hooks.PreToolUse[] | select(.hooks[0].command | contains("/ching/bin/guard.sh")) | .matcher) = "Bash"' "$SETTINGS_FILE" >"$SETTINGS_FILE.t" && mv "$SETTINGS_FILE.t" "$SETTINGS_FILE"
 inst --yes >/dev/null
@@ -107,6 +148,15 @@ assert_eq "popup removed with the flag" "0" "$(printf '%s' "$S" | jq '[.. | obje
 assert_eq "vscode entries still all there" "5" "$(printf '%s' "$S" | jq --arg v "$VS" '[.. | objects | select(.command? != null) | select(.command | startswith($v))] | length')"
 assert_eq "ching Stop hook still there" "1" "$(printf '%s' "$S" | jq '[.hooks.Stop[].hooks[] | select(.command | contains("stop-check.sh"))] | length')"
 AFTER=$(sum); inst --yes --replace-popup >/dev/null; assert_eq "--replace-popup is idempotent" "$AFTER" "$(sum)"
+
+# uninstall needs --yes without a tty too, and then changes nothing (settings, plist, launchd)
+BEFOREU=$(sum); n=$(wc -l <"$WORK/launchctl.log")
+out=$(inst --uninstall); rc=$?
+assert_eq "uninstall: no tty and no --yes refuses" "1" "$rc"
+assert_contains "uninstall refusal previews the plist removal" "$out" "would: launchctl bootout and remove $LA"
+assert_eq "uninstall refusal leaves settings untouched" "$BEFOREU" "$(sum)"
+assert_file "uninstall refusal keeps the plist" "$LA"
+assert_eq "uninstall refusal does not call launchctl" "$n" "$(wc -l <"$WORK/launchctl.log")"
 
 # uninstall removes only our entries
 out=$(inst --uninstall --yes); assert_eq "uninstall exits 0" "0" "$?"
@@ -149,4 +199,40 @@ assert_eq "special characters: the log path survives the round trip" "$XA/watch.
 assert_contains "special characters: the file holds the escaped form" "$(cat "$XP")" "a&amp;b&lt;c&gt;/watch.log"
 assert_not_contains "special characters: no raw ampersand-path in the file" "$(cat "$XP")" "a&b"
 out=$(xinst --yes); assert_contains "special characters: a second run is a no-op" "$out" "nothing to do"
+
+# the --help header is printed whole, and says what happens without a terminal
+help=$("$KIT/install.sh" --help)
+assert_contains "help: explains the non-terminal refusal" "$help" "exits 1"
+assert_contains "help: ends with the overrides line" "$help" "LAUNCHCTL, LAUNCH_AGENTS_DIR."
+assert_not_contains "help: does not print code" "$help" "set -euo pipefail"
+
+# At a terminal the prompt covers everything: settings, symlinks and the launchd job. A pty from script(1) gives
+# install.sh a tty on stdin; the answer is sent once the prompt shows (macOS script; skipped where it is missing).
+if [ "$(uname)" = Darwin ] && printf '' | script -q /dev/null true >/dev/null 2>&1; then
+  TD="$WORK/tty-claude"; TLA="$WORK/tty-la"; mkdir -p "$TD"; printf '{}\n' >"$TD/settings.json"
+  tty_inst() { # answer [install.sh args]: run under a pty and answer the prompt
+    local ans=$1 i=0; shift
+    : >"$WORK/tty.out"
+    { while [ "$i" -lt 50 ] && ! grep -q 'Apply these changes' "$WORK/tty.out"; do sleep 0.2; i=$((i + 1)); done
+      printf '%s\n' "$ans"; sleep 0.5; } \
+      | env SETTINGS_FILE="$TD/settings.json" CLAUDE_DIR="$TD" AGENT_REPOS_FILE="$WORK/tty-repos" LAUNCH_AGENTS_DIR="$TLA" \
+        script -q /dev/null "$KIT/install.sh" "$@" >"$WORK/tty.out" 2>&1
+  }
+  n=$(wc -l <"$WORK/launchctl.log")
+  tty_inst n; rc=$?
+  assert_eq "tty, answer n: exits 1" "1" "$rc"
+  assert_contains "tty, answer n: says aborted" "$(cat "$WORK/tty.out")" "aborted"
+  assert_contains "tty: the prompt follows the plist diff" "$(cat "$WORK/tty.out")" "+++ $TLA/org.ching.watch.plist (after install)"
+  assert_eq "tty, answer n: settings untouched" "{}" "$(jq -c . "$TD/settings.json")"
+  assert_no_file "tty, answer n: no plist" "$TLA/org.ching.watch.plist"
+  assert_no_file "tty, answer n: no symlink" "$TD/ching"
+  assert_eq "tty, answer n: launchctl not called" "$n" "$(wc -l <"$WORK/launchctl.log")"
+  tty_inst y; rc=$?
+  assert_eq "tty, answer y: exits 0" "0" "$rc"
+  assert_file "tty, answer y: plist written" "$TLA/org.ching.watch.plist"
+  assert_eq "tty, answer y: hooks installed" "1" "$(jq '[.hooks.PreToolUse[]?.hooks[]?.command | select(contains("/ching/bin/guard.sh"))] | length' "$TD/settings.json")"
+  assert_contains "tty, answer y: launchctl bootstrap called" "$(tail -n +$((n + 1)) "$WORK/launchctl.log")" "bootstrap gui/"
+else
+  echo "no usable script(1) pty: tty prompt tests skipped" >"$T_ROOT/skipped.t_install"
+fi
 exit 0
