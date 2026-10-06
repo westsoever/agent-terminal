@@ -85,7 +85,10 @@ for m in "$AGENT_HOME"/sessions/*/meta; do
   [ "$cut" -gt 0 ] || continue
   head -c "$cut" "$TMP/chunk" >"$TMP/lines"
   meta_set tok_offset $((off + cut))
+  # Records whose usage totals are zero (model "<synthetic>": API error, rate limit, interrupt) say nothing
+  # about the context window, so they are skipped: read as the last message they reset ctx_level to healthy.
   jq -cR --arg day "$DAY" 'fromjson? | select(.type == "assistant" and ((.message.usage // null) | type) == "object")
+      | select((.message.usage | (.input_tokens // 0) + (.output_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0)) > 0)
       | {id: (.message.id // ""), today: ((.timestamp // "") | startswith($day)), u: .message.usage}' \
       "$TMP/lines" >"$TMP/usage" 2>/dev/null || true
   [ -s "$TMP/usage" ] || continue
