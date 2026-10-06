@@ -134,4 +134,26 @@ touch "$R/fixed"; : >"$CALLS"
 ladder_run 6
 assert_eq "green tests: no model call" "0" "$(ncalls)"
 assert_no_file "green tests: the counter is not created" "$LD"
+
+# ---------- time limit per test run (F4) ----------
+# --timeout N kills the test run's whole process group after N s and reports 142, as an alarm would
+cat >"$WORK/forker.sh" <<'EOS'
+#!/usr/bin/env bash
+( trap '' TERM; exec sleep 300 ) &
+echo "$!" >"$1"
+wait
+EOS
+gone() { local i; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do kill -0 "$1" 2>/dev/null || return 0; sleep 0.2; done; return 1; }
+PGF="$WORK/pg-sleeper"; rm -f "$PGF"; : >"$CALLS"
+s=$(date +%s)
+out=$(CHING_TEST_MODELS="" "$BIN/test-escalate.sh" -C "$R" --timeout 1 -- bash "$WORK/forker.sh" "$PGF" 2>&1); rc=$?
+e=$(date +%s)
+assert_eq "timeout: exit code 142" "142" "$rc"
+assert_eq "timeout: ends within a few seconds" "1" "$([ $((e - s)) -le 5 ] && echo 1 || echo 0)"
+pg_pid=$(cat "$PGF" 2>/dev/null || echo 0)
+if [ "$pg_pid" -gt 0 ] && gone "$pg_pid"; then pass "timeout: the forked TERM-ignoring sleeper is gone"; else fail "timeout: the forked TERM-ignoring sleeper is gone" "  pid $pg_pid"; fi
+[ "$pg_pid" -gt 0 ] && kill -9 "$pg_pid" 2>/dev/null
+assert_ok "timeout: a fast command is not affected" "$BIN/test-escalate.sh" -C "$R" --timeout 5 -- true
+out=$("$BIN/test-escalate.sh" -C "$R" --timeout 5 -- bash -c 'exit 7' 2>&1); rc=$?
+assert_eq "timeout: the command's own exit code is kept" "7" "$rc"
 exit 0

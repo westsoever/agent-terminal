@@ -205,6 +205,24 @@ assert_eq "MAX=0 behaves like 1: second stop is allowed" "" "$out"
 write_goal "$R" "sleep 3; exit 1"
 out=$(STOP_CHECK_TIMEOUT=0 stop "$R" sess-TMOZERO)
 assert_contains "TIMEOUT=0 behaves like 1: timed out after 1s" "$(printf '%s' "$out" | jq -r .reason)" "timed out after 1s"
+# F4: a timed-out test_command is killed with its whole process group, not only the top bash. The forked
+# sleeper ignores TERM, so only the KILL that follows reaches it.
+cat >"$WORK/forker.sh" <<'EOS'
+#!/usr/bin/env bash
+( trap '' TERM; exec sleep 300 ) &
+echo "$!" >"$1"
+wait
+EOS
+gone() { # pid : 0 when the process is gone within 3 s
+  local i; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do kill -0 "$1" 2>/dev/null || return 0; sleep 0.2; done; return 1
+}
+PGF="$WORK/pg-sleeper"; rm -f "$PGF"
+write_goal "$R" "bash $WORK/forker.sh $PGF"
+out=$(STOP_CHECK_TIMEOUT=1 stop "$R" sess-PGKILL)
+assert_contains "process group: the timeout still blocks with timed out" "$(printf '%s' "$out" | jq -r .reason)" "timed out after 1s"
+pg_pid=$(cat "$PGF" 2>/dev/null || echo 0)
+if [ "$pg_pid" -gt 0 ] && gone "$pg_pid"; then pass "process group: the forked sleeper is gone"; else fail "process group: the forked sleeper is gone" "  pid $pg_pid still alive"; fi
+[ "$pg_pid" -gt 0 ] && kill -9 "$pg_pid" 2>/dev/null
 
 # ---------- events (Phase 1.5) ----------
 EVF="$AGENT_HOME/events.jsonl"

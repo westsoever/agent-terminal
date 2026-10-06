@@ -121,8 +121,9 @@ rc=0
 # CHING_ESCALATING: test-escalate.sh would switch the model ladder off for this run too.
 export CHING_STOP_CHECK_RUNNING=1
 if [ "$n" -ge "$MAX" ]; then export CHING_TEST_MODELS=""; fi
-CHING_TEST_NOTIFY=0 "$SELF_DIR/test-escalate.sh" -C "$WORK_DIR" -- \
-  perl -e 'alarm shift @ARGV; exec @ARGV' "$TIMEOUT" bash -c "$TEST_CMD" >"$OUT" 2>&1 </dev/null || rc=$?
+# --timeout kills the whole process group of a run that takes too long (exit 142), not only its top bash.
+CHING_TEST_NOTIFY=0 "$SELF_DIR/test-escalate.sh" -C "$WORK_DIR" --timeout "$TIMEOUT" -- \
+  bash -c "$TEST_CMD" >"$OUT" 2>&1 </dev/null || rc=$?
 
 if [ "$rc" -eq 0 ]; then
   FP=$(fingerprint)   # a model may have changed files while fixing: record the tree as it is now

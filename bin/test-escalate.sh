@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# test-escalate.sh [-C DIR] [-- TEST_COMMAND...]
+# test-escalate.sh [-C DIR] [--timeout SECS] [-- TEST_COMMAND...]
 # Run the tests; spend model tokens only when they fail, starting with the cheapest model.
+# --timeout: the most one test run may take (0 = none); then its whole process group is killed, exit 142.
 #   0. run the test command with no model at all; pass -> exit 0
 #   1. fail -> ask each model in the ladder, cheapest first, to fix it; re-run the tests after each try
 #   2. a model's fix makes the tests pass -> stop (the stronger models are never called)
@@ -17,9 +18,17 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
 
-DIR=$PWD
-if [ "${1:-}" = "-C" ]; then DIR=$2; shift 2; fi
-if [ "${1:-}" = "--" ]; then shift; fi
+DIR=$PWD; TIMEOUT=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -C) DIR=$2; shift 2 ;;
+    --timeout) TIMEOUT=$2; shift 2 ;;
+    --) shift; break ;;
+    *) break ;;
+  esac
+done
+case "$TIMEOUT" in ''|*[!0-9]*) TIMEOUT=0 ;; esac
+[ "${#TIMEOUT}" -le 6 ] || TIMEOUT=999999
 if [ $# -gt 0 ]; then TEST_CMD=("$@")
 elif [ -x "$DIR/tests/run.sh" ]; then TEST_CMD=(tests/run.sh)
 else echo "test-escalate: no test command given and no tests/run.sh in $DIR" >&2; exit 2; fi
@@ -64,10 +73,41 @@ ladder_take() {
   return 1
 }
 
+# run_limited SECS CMD... : run CMD in a process group of its own. After SECS (0 = no limit) the whole group
+# gets TERM, then KILL a second later, and the exit code is 142 (what an alarm gives). A TERM/INT/HUP to the
+# runner takes the group down too, so children forked by the command are never left behind.
+run_limited() {
+  perl -e '
+    use POSIX ":sys_wait_h";
+    my $t = shift @ARGV;
+    my $pid = fork;
+    defined $pid or die "fork: $!\n";
+    if (!$pid) { setpgrp(0, 0); exec { $ARGV[0] } @ARGV; print STDERR "exec $ARGV[0]: $!\n"; POSIX::_exit(127); }
+    setpgrp($pid, $pid);
+    my $reaped = 0;
+    my $down = sub {
+      kill "TERM", -$pid;
+      for (1 .. 10) {
+        $reaped ||= waitpid($pid, WNOHANG) != 0;
+        last if $reaped && !kill(0, -$pid);
+        select undef, undef, undef, 0.1;
+      }
+      kill "KILL", -$pid;
+      waitpid($pid, 0) unless $reaped;
+    };
+    $SIG{ALRM} = sub { $down->(); exit 142 };
+    $SIG{$_} = sub { $down->(); exit 143 } for qw(TERM INT HUP);
+    alarm $t if $t > 0;
+    waitpid($pid, 0);
+    my $s = $?;
+    exit($s & 127 ? 128 + ($s & 127) : $s >> 8);
+  ' "$@"
+}
+
 OUT=$(mktemp /tmp/ching-test-escalate.XXXXXX)
 trap 'rm -f "$OUT"' EXIT
 RC=0
-run_tests() { RC=0; (cd "$DIR" && "${TEST_CMD[@]}") >"$OUT" 2>&1 || RC=$?; return "$RC"; }
+run_tests() { RC=0; (cd "$DIR" && run_limited "$TIMEOUT" "${TEST_CMD[@]}") >"$OUT" 2>&1 || RC=$?; return "$RC"; }
 
 if run_tests; then log "pass model=none"; echo "tests pass (no model used)"; exit 0; fi
 
