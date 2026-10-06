@@ -174,4 +174,36 @@ assert_eq "next: 300 long rows still print exactly 5 lines" "5" "$(printf '%s\n'
 assert_contains "next: first line is numbered 1" "$(printf '%s\n' "$out" | sed -n 1p)" "1. xxxx"
 assert_contains "next: fifth line is numbered 5 with its score" "$(printf '%s\n' "$out" | sed -n 5p)" "5. xxxx"
 assert_contains "next: lines carry the score" "$(printf '%s\n' "$out" | sed -n 5p)" "[score "
+
+# ---------- fix wave FD-1: --next ranking: blocked above working, recency clamped ----------
+NXC="$WORK/nx-claude"; mkdir -p "$NXC"
+nxmeta() { # AGENT_HOME sid name state hours_old [goal] [extra raw meta text]
+  local d="$1/sessions/$2" root=""; mkdir -p "$d"
+  if [ "${6:-}" = goal ]; then root="$WORK/nxroot-$3"; mkdir -p "$root/.agent"; : >"$root/.agent/GOAL.md"; fi
+  printf 'cwd=%s\nroot=%s\nbranch=main\nstate=%s\nupdated=%s\n%s' "$WORK/$3" "$root" "$4" "$((NOW - $5 * 3600))" "${7:-}" >"$d/meta"
+}
+nxrun() { AGENT_HOME="$1" CLAUDE_DIR="$NXC" AGENT_REPOS_FILE="$WORK/none" DASH_NOW="$NOW" "$BIN/dash.sh" --next --hours 400; }
+nxorder() { sed -n 's/^[0-9]*\. \([^ ]*\) .*/\1/p' | tr '\n' ' '; }
+# A: equal importance. A blocked session stays on top however long it has waited (it used to score below a fresh working one at 15 h).
+NA="$WORK/nx-a"
+nxmeta "$NA" a1 nblk blocked 20; nxmeta "$NA" a2 ninp input 20; nxmeta "$NA" a3 nstall working 0 "" "stalled_at=$NOW"$'\n'
+nxmeta "$NA" a4 nhand working 0 "" $'ctx_level=handoff\n'; nxmeta "$NA" a5 nwork working 0
+assert_eq "next: blocked 20 h > input 20 h > stalled > handoff > working at equal importance" "nblk ninp nstall nhand nwork " "$(nxrun "$NA" | nxorder)"
+NA2="$WORK/nx-a2"
+nxmeta "$NA2" a1 nblkold blocked 300; nxmeta "$NA2" a2 nwork working 0
+assert_eq "next: a session blocked for 300 h still beats a fresh working one" "nblkold nwork " "$(nxrun "$NA2" | nxorder)"
+# B: importance 3 (GOAL.md) still counts: a goal-backed working session beats an ordinary blocked one, but not a goal-backed blocked one
+NB="$WORK/nx-b"
+nxmeta "$NB" b1 nbg blocked 30 goal; nxmeta "$NB" b2 nwg working 0 goal; nxmeta "$NB" b3 nbl blocked 20
+assert_eq "next: blocked goal > working goal > blocked plain" "nxroot-nbg nxroot-nwg nbl " "$(nxrun "$NB" | nxorder)"
+# C: recency is clamped to 1: a future-dated row (clock skew) scores like a fresh one
+NC="$WORK/nx-c"
+nxmeta "$NC" c1 nfutw working -10; nxmeta "$NC" c2 nfutb blocked -10
+out=$(nxrun "$NC")
+assert_contains "next: a future-dated working row scores 4.00, not more" "$(printf '%s\n' "$out" | grep nfutw)" "[score 4.00]"
+assert_contains "next: a future-dated blocked row scores 10.00, not more" "$(printf '%s\n' "$out" | grep nfutb)" "[score 10.00]"
+# D: equal scores (both past the floor) fall back to newest first
+ND="$WORK/nx-d"
+nxmeta "$ND" d1 nb50 blocked 50; nxmeta "$ND" d2 nb30 blocked 30; nxmeta "$ND" d3 nb40 blocked 40
+assert_eq "next: blocked sessions at the same score list the newest first" "nb30 nb40 nb50 " "$(nxrun "$ND" | nxorder)"
 exit 0

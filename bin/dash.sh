@@ -259,17 +259,28 @@ case "$MODE" in
 
   next)
     if [ "$total" -eq 0 ]; then echo "no Claude sessions seen in the last ${HOURS}h"; exit 0; fi
+    # score = urgency x importance x recency. Recency is clamped to [floor, 1]: a future-dated row (clock skew)
+    # is no fresher than now. A working session loses recency over a day (floor 0.2). A blocked or waiting
+    # session is no less urgent for waiting, so it loses at most 10% (floor 0.9); 10 x 0.9 and 9 x 0.9 stay
+    # above the best working score (stalled, 8), so blocked and input outrank working sessions of equal or
+    # lower importance however long they have waited. Equal scores list the newest first.
     while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do
+      w=0
       case "$state" in
-        blocked) u=10 ;;
-        input) u=9 ;;
+        blocked) u=10; w=1 ;;
+        input) u=9; w=1 ;;
         *) if [ -n "$stalled" ]; then u=8; elif [ "$ctx" = handoff ]; then u=7; elif [ "$state" = working ]; then u=4; else u=2; fi ;;
       esac
-      printf '%s\037%s\037%s\037%s\037%s\n' "$u" "${imp:-1}" $((NOW - upd)) "$(label_of "$name" "$branch") ($state)" "${nexta:-$note}"
+      printf '%s\037%s\037%s\037%s\037%s\037%s\n' "$u" "${imp:-1}" $((NOW - upd)) "$w" "$(label_of "$name" "$branch") ($state)" "${nexta:-$note}"
     done <"$TMP/sorted" \
-      | awk -F'\037' '{ r = 1 - ($3 / 3600) / 24; if (r < 0.2) r = 0.2; printf "%.2f\037%s\037%s\n", $1 * $2 * r, $4, $5 }' \
-      | sort -t $'\037' -k1,1 -rn \
-      | awk -F'\037' 'NR <= 5 { printf "%d. %s  [score %s]%s\n", NR, $2, $1, ($3 != "" ? "  -- " $3 : "") }'
+      | awk -F'\037' '{
+          d = ($3 / 3600) / 24
+          if ($4 == 1) { r = 1 - d / 10; lo = 0.9 } else { r = 1 - d; lo = 0.2 }
+          if (r < lo) r = lo
+          if (r > 1) r = 1
+          printf "%.2f\037%d\037%s\037%s\n", $1 * $2 * r, $3, $5, $6 }' \
+      | sort -t $'\037' -k1,1rn -k2,2n \
+      | awk -F'\037' 'NR <= 5 { printf "%d. %s  [score %s]%s\n", NR, $3, $1, ($4 != "" ? "  -- " $4 : "") }'
     exit 0 ;;
 esac
 
