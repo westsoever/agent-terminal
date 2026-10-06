@@ -153,4 +153,21 @@ assert_eq "old meta: its transcript is not read" "" "$(awk '$1 == "o3" { print $
 assert_eq "old meta: its meta is left untouched" "" "$(meta_get "$OAH/sessions/o3/meta" tok_offset)"
 assert_contains "meta inside 48 h still stalls" "$(cat "$OAH/sessions/o2/meta")" "stalled_at=1"
 assert_eq "meta inside 48 h: one stall event" "1" "$(jq -r 'select(.kind=="stall" and .sid=="o2") | .kind' "$OAH/events.jsonl" | wc -l | tr -d ' ')"
+
+# ---------- a resumed session that nobody has prompted is not stalled ----------
+# SessionStart used to set state=working, so a resumed session with a transcript older than WATCH_STALL_MINS
+# was reported stalled at the next run, and the alert used up the shared daily budget.
+RAH="$WORK/resume-ah"; mkdir -p "$RAH"
+TR1="$WORK/resumed.jsonl"; amsg rs1 0 1000 0 1 >"$TR1"; touch -t 202001010000 "$TR1"
+( export AGENT_HOME="$RAH"
+  run_hook session-start.sh "$(hook_json SessionStart "$P" s-resumed "$(jq -nc --arg t "$TR1" '{source:"resume",transcript_path:$t}')")" >/dev/null )
+AGENT_HOME="$RAH" "$W"
+assert_eq "resume: a resumed session with an old transcript is not stalled" "" "$(meta_get "$RAH/sessions/s-resumed/meta" stalled_at)"
+assert_eq "resume: no stall event" "0" "$(jq -r 'select(.kind=="stall") | .kind' "$RAH/events.jsonl" 2>/dev/null | wc -l | tr -d ' ')"
+assert_no_file "resume: no alert was sent at all" "$RAH/notify.log"
+assert_eq "resume: no daily budget used" "0" "$(ls "$RAH/notify" 2>/dev/null | grep -c '^budget' || true)"
+( export AGENT_HOME="$RAH"; printf '%s' "$(hook_json UserPromptSubmit "$P" s-resumed)" | "$BIN/session-start.sh" touch )
+AGENT_HOME="$RAH" "$W"
+assert_contains "resume: after a prompt the same silence is a stall" "$(cat "$RAH/sessions/s-resumed/meta")" "stalled_at=1"
+assert_contains "resume: and then the alert is sent" "$(cat "$RAH/notify.log")" "proj: Stalled"
 exit 0
