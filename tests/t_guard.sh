@@ -894,6 +894,10 @@ npm search publish
 npm run test -- publish
 bun run lint publish
 yarn npm info publish
+npm pub --dry-run
+npm un left-pad
+npm pa
+bun pub
 EOF
 while IFS= read -r c; do
   [ -n "$c" ] && gdeny_why "publish: $c" "$QD" "$c" "rule 8"
@@ -917,6 +921,18 @@ npm run publish
 bun run publish:npm
 npm run-script prepublishOnly
 npm run --workspace x publish
+npm pu
+npm pub
+npm publ
+npm publi
+npm publis --tag next
+npm pub --dry-run false
+npx npm pub
+npm unp x@1
+npm unpub x@1
+npm dep x "old"
+npm depr x "old"
+npm dist-tags add x@1 latest
 npx npm publish
 bunx npm publish
 npm exec npm publish

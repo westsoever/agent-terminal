@@ -509,11 +509,21 @@ check_publish() { # $1 = index of npm/pnpm/bun/yarn
   # rule: any `publish` word in the command is denied.
   local sub scr=""
   sub=${TOKS[$(( $1 + 1 ))]:-}
+  base_of "${TOKS[$1]}"
+  if [ "$BASE" = npm ]; then
+    # npm runs any unique prefix of a command (npm 11: pu..publis is publish, unp.. unpublish, dep.. deprecate);
+    # no other npm command starts with pu, unp or dep. pnpm/yarn are not known to; bun runs a script named pub.
+    case "$sub" in
+      pu|pub|publ|publi|publis) sub=publish ;;
+      unp|unpu|unpub|unpubl|unpubli|unpublis|dep|depr|depre|deprec|depreca|deprecat|dist-tags) scr=$sub ;;
+    esac
+  fi
   case "$sub" in
     npm|pnpm|bun|yarn) return 0 ;;   # yarn npm ...: that word is in command position and is checked itself
     test|t|tst|view|v|info|show|help|help-search|search|s|find|ls|list|outdated|why|explain|audit|pack) return 0 ;;
     publish)   # a dry run, unless anything could switch it back off (--dry-run false, --no-dry-run, =false)
-      if seg_matches --dry-run && ! seg_matches '--dry-run=*' && ! seg_matches '--no-dry-run*' && ! seg_matches false && ! seg_matches 0; then return 0; fi ;;
+      if seg_matches --dry-run && ! seg_matches '--dry-run=*' && ! seg_matches '--no-dry-run*' && ! seg_matches false && ! seg_matches 0; then return 0; fi
+      scr=publish ;;
     run|run-script)   # the script name right after it decides: a script named like a publish is one
       scr=${TOKS[$(( $1 + 2 ))]:-}
       case "$scr" in -*|'') scr="" ;; *publish*|*dist-tag*|*deprecate*) ;; *) return 0 ;; esac ;;
