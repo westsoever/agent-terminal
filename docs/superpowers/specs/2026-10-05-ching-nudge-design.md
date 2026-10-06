@@ -34,10 +34,11 @@ A new check in `ching-watch.sh` and one small script, `bin/speak.sh`.
 
 ### 3.1 Waiting
 
-A registry session (state not `ended`) is **waiting** when:
+A registry session (state not `ended`) is **waiting** when all of these hold:
 
 1. meta `state` is `input` or `blocked`, or `done` with open work (the checkpoint has `blocker:` other than `none` or a `next_action:` other than `none`, or the session's `NEXT.md` is non-empty); and
-2. the `updated` time is at least `WATCH_WAIT_GRACE_MINS` (default 2) ago.
+2. the `updated` time is at least `WATCH_WAIT_GRACE_MINS` (default 2) ago; and
+3. the `updated` time is at most `WATCH_NUDGE_MAX_HOURS` (default 12) ago. Older sessions are stale, not waiting; this also keeps a backlog of old sessions from nagging on the first run.
 
 `working` never waits. A new prompt or Stop changes `updated` (and `state`), so a waiting spell ends by itself and the next one starts clean. Spell identity is the `updated` value.
 
@@ -87,6 +88,7 @@ Bash, with stubs for `speak.sh`, `HID_IDLE_CMD`, the conch file and `WATCH_NOW`:
 - `done` with no open work: never nudges.
 - `input` and `blocked`: no watcher banner; spoken note after 5 minutes.
 - A new Stop (new `updated`) re-arms the spell. A new prompt ends it.
+- A session older than the cap (25 h, and 12 h plus 1 s) never nudges; exactly 12 h still does; the cap is configurable.
 - A suppressed banner (quiet hours or budget) logs its reason and retries next tick.
 - Spoken note: user present and conch free speaks once, and a second tick does not repeat. User away, conch held, quiet hours, an unreadable `ioreg`, or a recent `last-spoken` each skip it without setting `spoken_for`. An expired conch counts as free.
 - `speak.sh`: Kokoro down returns non-zero, and the request carries the 30-second limit.

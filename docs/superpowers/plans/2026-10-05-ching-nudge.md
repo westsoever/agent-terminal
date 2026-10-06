@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-05-ching-nudge-design.md`. Read it first, especially section 2 (what the review found).
 
+**Status (2026-10-06):** Tasks 1-5 are implemented on branch `nudge` (worktree `~/bbq/.worktrees/ching-nudge`): Task 1 `d771d75`, Task 2 `99966f2`, Task 3 `1d7c8a9`, Task 4 `1557fee`, Task 5 steps 1, 2 and 6 `9c882db`. The suite there passes (1057 passed, 0 failed). Still open: Task 6 (stale-session cap, found in final review), Task 5 steps 3-5 (full verification and the real-machine check), the rebase onto the Phase 1.5 fix wave (Task 0 step 4), and Checkpoint 1.6.
+
 ## Global Constraints
 
 - Bash 3.2 compatible: no associative arrays, no `${var,,}`, no `mapfile`/`readarray`, no `&>>`.
@@ -45,6 +47,7 @@
 3. **Text with quotes, backslashes or newlines** (a session name or next action containing them) must reach Kokoro as valid JSON and never break the script. Test in Task 1.
 4. **A corrupt, expired or `held:false` conch file** must count as "voice free"; only a live, unexpired hold blocks speech. Test in Task 4.
 5. **Presence at the boundary and when unreadable.** 599 s idle speaks, exactly 600 s does not, and an unreadable or non-numeric `ioreg` result counts as absent. Test in Task 4.
+6. **Old sessions must never nudge.** Registry sessions pile up (the Phase 1.5 watcher skips any whose meta is older than 48 h). A session left `done`, `input` or `blocked` for days with a non-empty `NEXT.md` would otherwise get a banner on the first tick after install, and a spoken "has been waiting 4320 minutes" whenever the user is at the Mac. A spell older than `WATCH_NUDGE_MAX_HOURS` (default 12) is not a check-in. Test in Task 6.
 
 ## Execution waves (D10: parallel implementers on disjoint files, separate verifier)
 
@@ -54,6 +57,7 @@
 | 1 | **A:** Task 1 · **B:** Task 2 | A: `bin/speak.sh`, `tests/t_speak.sh` · B: `bin/notify.sh`, `tests/t_notify.sh` |
 | 2 | Task 3, then Task 4 | `bin/ching-watch.sh`, `tests/t_nudge.sh` (both tasks, so sequential) |
 | 3 | Task 5 | docs, `tests/live-smoke.sh`, verification (separate verifier per D10) |
+| 4 | Task 6 | `bin/ching-watch.sh`, `tests/t_nudge.sh`, and the spec, docs lines it names. Runs after the rebase (Task 0 step 4), before Task 5 steps 3-5 are re-run. |
 
 ---
 
@@ -66,7 +70,7 @@
 Run: `git -C ~/bbq/ching ls-files bin/ching-watch.sh bin/notify.sh tests/t_watch.sh && git -C ~/bbq/ching log --oneline main | head -5`
 Expected: all three files listed, and the log shows the Phase 1.5 work merged. If `bin/ching-watch.sh` is missing from `main`, STOP and tell the user: "The nudge work extends ching-watch.sh from Phase 1.5, which is not on main yet. Please merge phase-1.5-harvest first." Do not continue.
 
-- [ ] **Step 2: Create the worktree**
+- [ ] **Step 2: Create the worktree** (already done: `nudge` exists. Skip this step and use the existing worktree.)
 
 ```bash
 git -C ~/bbq/ching worktree add ~/bbq/.worktrees/ching-nudge -b nudge main
@@ -77,6 +81,19 @@ cd ~/bbq/.worktrees/ching-nudge
 
 Run: `tests/run.sh`
 Expected: `TOTAL: N passed, 0 failed`. Write N down; every later task must keep 0 failed.
+
+- [ ] **Step 4: Rebase onto the Phase 1.5 fix wave**
+
+`main` holds the Phase 1.5 merge `b73af38`, but the branch `phase-1.5-harvest` has 8 later commits (guard fix waves, the 48 h session skip in `ching-watch.sh`, notify clock and budget fixes, the escalation ceiling) that are not on `main` yet. They edit `bin/ching-watch.sh` and `bin/notify.sh`, which this plan also edits.
+
+Run: `git -C ~/bbq/ching merge-base --is-ancestor phase-1.5-harvest main && echo merged || echo NOT-MERGED`
+If it prints `NOT-MERGED`, STOP and tell the user: "The Phase 1.5 fix wave (8 commits on phase-1.5-harvest, tip 0556a4c) is not on main. The nudge branch must be rebased onto it. Please merge it first." Once it prints `merged`:
+
+```bash
+git -C ~/bbq/.worktrees/ching-nudge rebase main
+cd ~/bbq/.worktrees/ching-nudge && tests/run.sh
+```
+Expected: the rebase applies cleanly, or conflicts only in `bin/ching-watch.sh` or `bin/notify.sh`. Resolve a conflict by keeping both sides (the fix-wave lines and the nudge block); never drop a fix-wave line. Then `0 failed`.
 
 ---
 
@@ -731,3 +748,75 @@ Claude-Session: https://claude.ai/code/session_01PE1WVfawsRDWZWqFtVsUZa"
 ```
 
 **Checkpoint 1.6:** test output, the diff of `bin/ching-watch.sh`, and the result of the real-machine check. The user approves before merging `nudge` into `main`.
+
+---
+
+### Task 6: Stale-session cap (added in final review; runs after the Task 0 step 4 rebase, before Task 5 steps 3-5 are re-run)
+
+**Files:**
+- Modify: `bin/ching-watch.sh` (nudge block), `docs/superpowers/specs/2026-10-05-ching-nudge-design.md`
+- Test: `tests/t_nudge.sh`
+
+**Interfaces:**
+- Consumes: Task 3's nudge loop, specifically the line `[ "$age" -ge "$GRACE_SECS" ] || continue` and the variables `age`, `GRACE_SECS`.
+- Produces: env `WATCH_NUDGE_MAX_HOURS` (default 12). A session whose `updated` is more than that many hours ago is neither bannered nor spoken about. Boundary: exactly the cap still nudges; one second more does not.
+
+- [ ] **Step 1: Write the failing tests.** In `tests/t_nudge.sh`, append before the final `exit 0`:
+
+```bash
+# Review Focus 6: a spell older than the cap is not a check-in (no banner, no speech); inside it still is
+reset; reg d1 done 90000; checkpoint d1 "ship the migration" none; run
+assert_eq "done for 25 h with open work: no banner" "0" "$(banners)"
+assert_eq "done for 25 h: not spoken" "0" "$(spoken)"
+reset; reg i1 input 90000; run
+assert_eq "input for 25 h: not spoken" "0" "$(spoken)"
+assert_eq "input for 25 h: spoken_for stays unset" "" "$(mget i1 spoken_for)"
+reset; reg i1 input 43200; run
+assert_eq "exactly 12 h: still nudged" "1" "$(spoken)"
+reset; reg i1 input 43201; run
+assert_eq "12 h and 1 s: not nudged" "0" "$(spoken)"
+reset; reg d1 done 43200; checkpoint d1 "go" none; run
+assert_eq "done for exactly 12 h: still bannered" "1" "$(banners)"
+reset; reg i1 input 90000
+WATCH_NUDGE_MAX_HOURS=48 run
+assert_eq "the cap is configurable" "1" "$(spoken)"
+```
+
+The `reset` helper already clears the sessions, so no state leaks between cases.
+
+- [ ] **Step 2: Run and confirm the new tests fail**
+
+Run: `tests/run.sh 2>&1 | grep -E 't_nudge|TOTAL'`
+Expected: failures on "done for 25 h with open work: no banner", "input for 25 h: not spoken" and "12 h and 1 s: not nudged". The "exactly 12 h" and "configurable" cases already pass; that is fine.
+
+- [ ] **Step 3: Implement.** In `bin/ching-watch.sh`:
+
+1. Header comment: change `Env: WATCH_WAIT_GRACE_MINS (2)` to `Env: WATCH_WAIT_GRACE_MINS (2) WATCH_NUDGE_MAX_HOURS (12)`.
+2. Directly below the line `GRACE_SECS=$(( ${WATCH_WAIT_GRACE_MINS:-2} * 60 ))` add:
+
+```bash
+MAX_AGE_SECS=$(( ${WATCH_NUDGE_MAX_HOURS:-12} * 3600 )) # older than this is stale, not waiting
+```
+
+3. Directly below the line `[ "$age" -ge "$GRACE_SECS" ] || continue` add:
+
+```bash
+  [ "$age" -le "$MAX_AGE_SECS" ] || continue
+```
+
+4. In the spec `docs/superpowers/specs/2026-10-05-ching-nudge-design.md`, section 3.1: after item 2 (`the \`updated\` time is at least \`WATCH_WAIT_GRACE_MINS\` (default 2) ago.`) change the ending to `...ago, and`, and add item `3. the \`updated\` time is at most \`WATCH_NUDGE_MAX_HOURS\` (default 12) ago. Older sessions are stale, not waiting; this also keeps a backlog of old sessions from nagging on the first run.` In section 5 add the bullet `- A session older than the cap (25 h, and 12 h plus 1 s) never nudges; exactly 12 h still does; the cap is configurable.` Also change the intro of 3.1 from `is **waiting** when:` to `is **waiting** when all of these hold:`.
+
+- [ ] **Step 4: Run all tests**
+
+Run: `tests/run.sh`
+Expected: `0 failed`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add bin/ching-watch.sh tests/t_nudge.sh docs/superpowers/specs/2026-10-05-ching-nudge-design.md
+git commit -m "ching-watch: sessions older than 12 h are stale, not waiting
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Ra1bwwdfd3t4GPeJ7eg58X"
+```
