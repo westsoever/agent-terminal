@@ -53,6 +53,21 @@ echo change >>"$R/README.md"
 stop "$R" sess-D >/dev/null
 assert_eq "changed tree: tests ran again" "2" "$(wc -l <"$CNT" | tr -d ' ')"
 git -C "$R" checkout -q README.md
+assert_contains "unchanged tree: a check_skipped event is logged" "$(jq -r 'select(.kind=="check_skipped" and .sid=="sess-D") | .data.reason' "$AGENT_HOME/events.jsonl")" "unchanged"
+# F8: the skip has a time limit (STOP_CHECK_SKIP_TTL, default 1800 s): an older green run is not trusted
+: >"$CNT"
+STOP_CHECK_SKIP_TTL=1 stop "$R" sess-TTL >/dev/null; sleep 2
+STOP_CHECK_SKIP_TTL=1 stop "$R" sess-TTL >/dev/null
+assert_eq "skip TTL: a green run older than the TTL is run again" "2" "$(wc -l <"$CNT" | tr -d ' ')"
+STOP_CHECK_SKIP_TTL=0 stop "$R" sess-TTL >/dev/null
+assert_eq "skip TTL 0: never skipped" "3" "$(wc -l <"$CNT" | tr -d ' ')"
+# F8: the green fingerprint is the tree as it was before the run, kept only when the run left the tree as it
+# found it. A check that writes into the tree is run again next time; once it writes nothing new, it is skipped.
+: >"$CNT"
+write_goal "$R" "echo run >>$CNT; echo gen >$R/gen.out"
+stop "$R" sess-PRE >/dev/null; stop "$R" sess-PRE >/dev/null; stop "$R" sess-PRE >/dev/null
+assert_eq "pre-run fingerprint: the run that changed the tree is not trusted, the next one is" "2" "$(wc -l <"$CNT" | tr -d ' ')"
+rm -f "$R/gen.out"
 
 # placeholder test_command means "no check"
 write_goal "$R" "<the repo's own check>"
@@ -148,7 +163,9 @@ EOS
 chmod +x "$WORK/fake-claude-nofix"
 export NOFIX_CALLS="$WORK/nofix-calls"; : >"$NOFIX_CALLS"
 write_goal "$R" "test -f $WORK/never-exists"
+# every stop below changes the tree first: the ladder is skipped for a tree it already failed on (tested below)
 for i in 1 2 3; do
+  echo "cap $i" >>"$R/churn.txt"
   # LADDER_DAILY=100: this test counts the calls per stop, the daily ceiling (default 6) has its own test below
   out=$(CHING_TEST_LADDER_DAILY=100 CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-CAPLADDER)
   assert_eq "cap ladder: stop $i blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
@@ -166,6 +183,7 @@ assert_eq "cap ladder: the cap stop is still recorded in STATE.md" "$((GAVE_UP_B
 rm -rf "$AGENT_HOME/ladder"; : >"$NOFIX_CALLS"
 for p in 1 2 3; do
   for i in 1 2 3; do
+    echo "daily $p $i" >>"$R/churn.txt"
     out=$(CHING_TEST_LADDER_DAILY=4 CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-DAILY)
     assert_eq "daily ceiling: prompt $p stop $i still blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
   done
@@ -175,6 +193,30 @@ done
 assert_eq "daily ceiling 4: 3 prompts x 4 stops make exactly 4 model calls" "4" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
 assert_eq "daily ceiling 4: the counter says 4" "4" "$(cat "$AGENT_HOME/ladder/$(date -u +%Y-%m-%d)")"
 assert_contains "daily ceiling 4: the cap is in the escalation log" "$(cat "$AGENT_HOME/test-escalation.log")" "ladder-cap"
+
+# Same failing tree, same ladder result: a tree the ladder already failed on is not sent to it again.
+LR=$(mk_repo ladderrepo); write_goal "$LR" "test -f $WORK/never-exists"
+cat >"$WORK/fake-claude-try" <<'EOS'
+#!/usr/bin/env bash
+while [ $# -gt 0 ]; do [ "$1" = --model ] && echo "$2" >>"$NOFIX_CALLS"; shift; done
+echo "attempted fix" >"$TRY_FILE"   # edits the tree without fixing anything
+EOS
+chmod +x "$WORK/fake-claude-try"
+export TRY_FILE="$LR/attempt.txt"
+lstop() { CHING_TEST_LADDER_DAILY=100 CHING_CLAUDE_BIN="$WORK/fake-claude-try" CHING_TEST_MODELS="cheap strong" stop "$LR" "$1"; }
+: >"$NOFIX_CALLS"
+out=$(lstop sess-SAME)
+assert_eq "same tree: first stop runs the ladder (2 calls)" "2" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+out=$(lstop sess-SAME)
+assert_eq "same tree: the tree the ladder left behind is not sent again" "2" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+assert_eq "same tree: the stop still blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+assert_contains "same tree: a ladder_skipped event says why" "$(jq -r 'select(.kind=="ladder_skipped" and .sid=="sess-SAME") | .data.reason' "$AGENT_HOME/events.jsonl")" "same-tree"
+out=$(lstop sess-OTHER)
+assert_eq "same tree: another session on that tree does not pay either" "2" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+echo "real change" >>"$LR/README.md"
+out=$(lstop sess-SAME)
+assert_eq "changed tree: the ladder runs again" "4" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+git -C "$LR" checkout -q README.md
 
 # F6: a non-numeric or zero cap must not switch the safety limit off.
 for i in 1 2 3; do

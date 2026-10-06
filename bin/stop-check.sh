@@ -15,6 +15,7 @@
 # at the deadline blocks with "out of time" (a stop_deadline event), and that block counts as a retry.
 # Env: STOP_CHECK_MAX_RETRIES (3) STOP_CHECK_TIMEOUT (one check run, 900 s)
 #      STOP_CHECK_DEADLINE (the whole hook, 780 s: 2 minutes of margin under the 900 s hook timeout)
+#      STOP_CHECK_SKIP_TTL (1800 s: how long an unchanged tree's green run is trusted; 0 = always run)
 #      CHING_TEST_MODELS CHING_TEST_CALL_TIMEOUT CHING_TEST_MAX_TURNS (see test-escalate.sh)
 set -euo pipefail
 START=$(date +%s)
@@ -63,6 +64,9 @@ case "$BUDGET" in ''|*[!0-9]*) BUDGET=780 ;; esac
 [ "${#BUDGET}" -le 6 ] || BUDGET=780
 BUDGET=$((10#$BUDGET)); [ "$BUDGET" -ge 1 ] || BUDGET=1
 DEADLINE=$((START + BUDGET))
+SKIP_TTL=${STOP_CHECK_SKIP_TTL:-1800}
+case "$SKIP_TTL" in ''|*[!0-9]*) SKIP_TTL=1800 ;; esac
+[ "${#SKIP_TTL}" -le 9 ] || SKIP_TTL=1800
 
 hook_init
 resolve_state
@@ -135,10 +139,19 @@ fingerprint() {
 }
 FP=$(fingerprint)
 
-# Nothing changed since the last green run (git repos only): skip the possibly slow test run.
-if [ -n "$ROOT" ] && [ -f "$PASS_FILE" ] && [ "$(cat "$PASS_FILE")" = "$FP" ]; then
-  rm -f "$COUNTER"
-  finish_ok
+# Nothing changed since the last green run (git repos only): skip the possibly slow test run. PASS_FILE holds
+# "<fingerprint> <epoch of that run>". The fingerprint cannot see gitignored or outside inputs, so a green run
+# is trusted for STOP_CHECK_SKIP_TTL seconds only (0 = never skip).
+if [ -n "$ROOT" ] && [ -f "$PASS_FILE" ]; then
+  pass_fp=""; pass_at=""
+  read -r pass_fp pass_at <"$PASS_FILE" 2>/dev/null || true
+  case "$pass_at" in ''|*[!0-9]*) pass_at=0 ;; esac
+  age=$(($(date +%s) - pass_at))
+  if [ "$pass_fp" = "$FP" ] && [ "$age" -lt "$SKIP_TTL" ]; then
+    ev check_skipped "$(jq -nc --argjson a "$age" '{reason:"unchanged",age:$a}')"
+    rm -f "$COUNTER"
+    finish_ok
+  fi
 fi
 
 OUT=$(mktemp "${TMPDIR:-/tmp}/ching-stop.XXXXXX")   # removed by on_exit
@@ -149,23 +162,46 @@ n=0
 if [ -f "$COUNTER" ]; then n=$(cat "$COUNTER" 2>/dev/null || echo 0); fi
 case "$n" in ''|*[!0-9]*) n=0 ;; esac
 
+# Trees the model ladder already failed on (machine-wide, the last 100 fingerprints): the same failing tree
+# gets the same answer, so it is not paid for again. Any change to the tree makes a new fingerprint.
+LADDER_FAILED="$AGENT_HOME/ladder-failed"
+remember_ladder_failed() { # fingerprint...
+  local tmp
+  tmp=$(mktemp "$AGENT_HOME/.ladder-failed.XXXXXX" 2>/dev/null) || return 0
+  if { tail -n 100 "$LADDER_FAILED" 2>/dev/null || true; printf '%s\n' "$@"; } >"$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$LADDER_FAILED" 2>/dev/null || rm -f "$tmp"
+  else rm -f "$tmp"; fi
+}
+
 rc=0
 # test-escalate.sh runs the check with no model first; only on failure does it call the cheapest model
 # (Haiku), then the next (Sonnet), re-running the check after each. CHING_TEST_MODELS="" turns that off.
 # CHING_STOP_CHECK_RUNNING marks everything the test command starts (see the guard at the top). It is not
 # CHING_ESCALATING: test-escalate.sh would switch the model ladder off for this run too.
 export CHING_STOP_CHECK_RUNNING=1
-if [ "$n" -ge "$MAX" ]; then export CHING_TEST_MODELS=""; fi
+if [ "$n" -ge "$MAX" ]; then export CHING_TEST_MODELS=""
+elif [ -n "$ROOT" ] && [ -f "$LADDER_FAILED" ] && grep -qxF "$FP" "$LADDER_FAILED" 2>/dev/null; then
+  export CHING_TEST_MODELS=""
+  ev ladder_skipped '{"reason":"same-tree"}'
+fi
+LADDER_ON=0; [ -z "${CHING_TEST_MODELS-x}" ] || LADDER_ON=1
+RUN_AT=$(date +%s)
 # --timeout kills the whole process group of a run that takes too long (exit 142), not only its top bash;
 # --deadline makes every run and model call fit in what is left of the hook's budget.
 CHING_TEST_NOTIFY=0 "$SELF_DIR/test-escalate.sh" -C "$WORK_DIR" --timeout "$TIMEOUT" --deadline "$DEADLINE" -- \
   bash -c "$TEST_CMD" >"$OUT" 2>&1 </dev/null || rc=$?
 
 if [ "$rc" -eq 0 ]; then
-  FP=$(fingerprint)   # a model may have changed files while fixing: record the tree as it is now
-  rm -f "$COUNTER"
-  printf '%s\n' "$FP" >"$PASS_FILE"
+  # Record the tree as it was before the run, and only when the run (and any model fix) left it unchanged:
+  # a tree that changed during the run was not the tree that was tested as a whole. It is checked next time.
+  rm -f "$COUNTER" "$PASS_FILE"
+  if [ -n "$ROOT" ] && [ "$(fingerprint)" = "$FP" ]; then printf '%s %s\n' "$FP" "$RUN_AT" >"$PASS_FILE"; fi
   finish_ok
+fi
+# Still failing after the ladder: remember the tree before the run and the tree the models left behind.
+if [ "$LADDER_ON" -eq 1 ] && [ -n "$ROOT" ]; then
+  FP_AFTER=$(fingerprint)
+  if [ "$FP_AFTER" = "$FP" ]; then remember_ladder_failed "$FP"; else remember_ladder_failed "$FP" "$FP_AFTER"; fi
 fi
 
 if [ "$n" -ge "$MAX" ]; then
