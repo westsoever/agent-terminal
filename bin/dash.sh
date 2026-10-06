@@ -92,26 +92,61 @@ tok_for() { [ -f "$TOKDAY" ] || return 0; awk -v s="$1" '$1 == s { print $2; exi
 tok_h() { awk -v n="${1:-0}" 'BEGIN { if (n >= 1000000) printf "%.1fM", n / 1000000; else if (n >= 1000) printf "%dk", n / 1000; else if (n > 0) printf "%d", n; else printf "-" }'; }
 ctx_sym() { case "$1" in healthy) printf '●' ;; watch) printf '◐' ;; handoff) printf '○' ;; *) printf '?' ;; esac; }
 
+# meta_load FILE: every key the registry needs, read in ONE pass with builtins only (no fork per key and
+# none per file). Sets M_updated M_state M_cwd M_root M_transcript M_branch M_ctx M_stalled. Same result
+# as meta_get: the first line of a key wins, a missing key is empty, a last line without a newline counts.
+meta_load() {
+  local line k seen=" "
+  M_updated=""; M_state=""; M_cwd=""; M_root=""; M_transcript=""; M_branch=""; M_ctx=""; M_stalled=""
+  [ -r "$1" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    k=${line%%=*}
+    case "$k" in
+      updated|state|cwd|root|transcript|branch|ctx_level|stalled_at) ;;
+      *) continue ;;
+    esac
+    case "$line" in *=*) ;; *) continue ;; esac
+    case "$seen" in *" $k "*) continue ;; esac
+    seen="$seen$k "
+    case "$k" in
+      updated) M_updated=${line#*=} ;;
+      state) M_state=${line#*=} ;;
+      cwd) M_cwd=${line#*=} ;;
+      root) M_root=${line#*=} ;;
+      transcript) M_transcript=${line#*=} ;;
+      branch) M_branch=${line#*=} ;;
+      ctx_level) M_ctx=${line#*=} ;;
+      stalled_at) M_stalled=${line#*=} ;;
+    esac
+  done <"$1"
+  return 0
+}
+
 # ---- 1. registry ----
+# A machine collects thousands of ended session metas (one runaway loop made 4,655 in a day), so this loop
+# must cost nothing for them: ended sessions are never listed, whatever their age, and are dropped right
+# after the single meta_load pass, before any stat or fork. Any other session is still judged on
+# max(updated, transcript mtime), so an old meta with a fresh transcript stays listed.
 if [ -d "$AGENT_HOME/sessions" ]; then
   for m in "$AGENT_HOME"/sessions/*/meta; do
     [ -f "$m" ] || continue
-    sid=$(basename "$(dirname "$m")")
-    upd=$(meta_get "$m" updated); [ -n "$upd" ] || upd=$(file_mtime "$m")
-    state=$(meta_get "$m" state); [ -n "$state" ] || state=unknown
-    cwd=$(meta_get "$m" cwd); root=$(meta_get "$m" root)
-    tr_path=$(meta_get "$m" transcript)
+    meta_load "$m"
+    [ "$M_state" != ended ] || continue
+    sd=${m%/meta}; sid=${sd##*/}
+    upd=$M_updated; [ -n "$upd" ] || upd=$(file_mtime "$m")
+    state=$M_state; [ -n "$state" ] || state=unknown
+    cwd=$M_cwd; root=$M_root
+    tr_path=$M_transcript
     if [ -n "$tr_path" ] && [ -f "$tr_path" ]; then
       tm=$(file_mtime "$tr_path"); [ "$tm" -le "$upd" ] || upd=$tm
     fi
     [ "$upd" -ge "$CUTOFF" ] || continue
-    [ "$state" != ended ] || continue
     sdir="$AGENT_HOME/sessions/$sid"
     if [ -n "$root" ] && [ -f "$root/.agent/GOAL.md" ]; then sdir="$root/.agent"; fi
     note=$(state_note "$sdir/STATE.md")
     [ -z "$note" ] || [ "$state" = blocked ] || [ "$state" = input ] || state=blocked
-    row "$upd" "$sid" "${cwd:-?}" "$(display_name "${cwd:-?}" "$root")" "$(meta_get "$m" branch)" "$state" "$note" registry \
-      "$(meta_get "$m" ctx_level)" "$(tok_for "$sid")" "$(meta_get "$m" stalled_at)" "$(importance "$root")" \
+    row "$upd" "$sid" "${cwd:-?}" "$(display_name "${cwd:-?}" "$root")" "$M_branch" "$state" "$note" registry \
+      "$M_ctx" "$(tok_for "$sid")" "$M_stalled" "$(importance "$root")" \
       "$(next_of "$sdir/STATE.md")"
   done
 fi
@@ -233,8 +268,8 @@ case "$MODE" in
       printf '%s\037%s\037%s\037%s\037%s\n' "$u" "${imp:-1}" $((NOW - upd)) "$(label_of "$name" "$branch") ($state)" "${nexta:-$note}"
     done <"$TMP/sorted" \
       | awk -F'\037' '{ r = 1 - ($3 / 3600) / 24; if (r < 0.2) r = 0.2; printf "%.2f\037%s\037%s\n", $1 * $2 * r, $4, $5 }' \
-      | sort -t $'\037' -k1,1 -rn | head -5 \
-      | awk -F'\037' '{ printf "%d. %s  [score %s]%s\n", NR, $2, $1, ($3 != "" ? "  -- " $3 : "") }'
+      | sort -t $'\037' -k1,1 -rn \
+      | awk -F'\037' 'NR <= 5 { printf "%d. %s  [score %s]%s\n", NR, $2, $1, ($3 != "" ? "  -- " $3 : "") }'
     exit 0 ;;
 esac
 

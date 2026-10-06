@@ -2,9 +2,6 @@
 # Stop hook: retry then end, per-session counters, schema, any folder.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-# This suite can itself be the test_command of a live stop-check.sh run (the marker is inherited): the hooks
-# under test must not see it, or every one of them would exit at the recursion guard.
-unset CHING_STOP_CHECK_RUNNING CHING_ESCALATING
 
 R=$(mk_repo stoprepo)
 OKFILE="$WORK/tests-ok"
@@ -152,15 +149,32 @@ chmod +x "$WORK/fake-claude-nofix"
 export NOFIX_CALLS="$WORK/nofix-calls"; : >"$NOFIX_CALLS"
 write_goal "$R" "test -f $WORK/never-exists"
 for i in 1 2 3; do
-  out=$(CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-CAPLADDER)
+  # LADDER_DAILY=100: this test counts the calls per stop, the daily ceiling (default 6) has its own test below
+  out=$(CHING_TEST_LADDER_DAILY=100 CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-CAPLADDER)
   assert_eq "cap ladder: stop $i blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
 done
 GAVE_UP_BEFORE=$(grep -c 'gave up after' "$R/.agent/STATE.md" || true)
-out=$(CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-CAPLADDER)
+out=$(CHING_TEST_LADDER_DAILY=100 CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-CAPLADDER)
 assert_eq "cap ladder: stop 4 is allowed" "" "$out"
 assert_eq "cap ladder: 3 blocking stops x 2 models, none on the cap stop" "6" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
 assert_no_file "cap ladder: counter reset at the cap" "$AGENT_HOME/sessions/sess-CAPLADDER/retries"
 assert_eq "cap ladder: the cap stop is still recorded in STATE.md" "$((GAVE_UP_BEFORE + 1))" "$(grep -c 'gave up after' "$R/.agent/STATE.md" || true)"
+
+# Daily ceiling: the retry cap is per session id, so a repo whose tests fail for any reason (a missing service)
+# would pay for the whole ladder on every blocked stop of every session. CHING_TEST_LADDER_DAILY caps the
+# model calls per UTC day, machine-wide. One session id, 3 prompts x 4 stops: 18 calls without the ceiling.
+rm -rf "$AGENT_HOME/ladder"; : >"$NOFIX_CALLS"
+for p in 1 2 3; do
+  for i in 1 2 3; do
+    out=$(CHING_TEST_LADDER_DAILY=4 CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-DAILY)
+    assert_eq "daily ceiling: prompt $p stop $i still blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+  done
+  out=$(CHING_TEST_LADDER_DAILY=4 CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-DAILY)
+  assert_eq "daily ceiling: prompt $p stop 4 is allowed" "" "$out"
+done
+assert_eq "daily ceiling 4: 3 prompts x 4 stops make exactly 4 model calls" "4" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+assert_eq "daily ceiling 4: the counter says 4" "4" "$(cat "$AGENT_HOME/ladder/$(date -u +%Y-%m-%d)")"
+assert_contains "daily ceiling 4: the cap is in the escalation log" "$(cat "$AGENT_HOME/test-escalation.log")" "ladder-cap"
 
 # F6: a non-numeric or zero cap must not switch the safety limit off.
 for i in 1 2 3; do

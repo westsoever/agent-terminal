@@ -51,7 +51,7 @@ for ev in SessionStart UserPromptSubmit SessionEnd PreCompact Stop PreToolUse No
   n=$(printf '%s' "$S" | jq --arg e "$ev" '[.hooks[$e][]?.hooks[]?.command | select(contains("/ching/bin/"))] | length')
   assert_eq "hook added for $ev" "1" "$n"
 done
-assert_eq "guard matcher covers Bash, Read, Edit, Supabase and messaging MCP" "Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit|mcp__.*[Ss]upabase.*|mcp__.*([Gg]mail|[Ss]lack|[Dd]iscord|[Tt]elegram).*" \
+assert_eq "guard matcher covers Bash, Monitor, Read, Edit, Supabase and messaging MCP" "Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit|Monitor|mcp__.*[Ss]upabase.*|mcp__.*([Gg]mail|[Ss]lack|[Dd]iscord|[Tt]elegram).*" \
   "$(printf '%s' "$S" | jq -r '.hooks.PreToolUse[] | select(.hooks[0].command | contains("guard.sh")) | .matcher')"
 assert_eq "Notification entry uses the idle_prompt matcher" "idle_prompt" "$(printf '%s' "$S" | jq -r '.hooks.Notification[] | select(.hooks[0].command | contains("notify.sh")) | .matcher')"
 assert_eq "vscode-session-manager entries untouched (5 of them)" "5" "$(printf '%s' "$S" | jq --arg v "$VS" '[.. | objects | select(.command? != null) | select(.command | startswith($v))] | length')"

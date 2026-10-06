@@ -408,4 +408,366 @@ gdeny "rule 11: redirect into .AGENT/GOAL.md" "$G11" "echo x >> .AGENT/GOAL.md"
 gdeny "rule 11: attached redirect into .agent/Goal.md" "$G11" "echo x >.agent/Goal.md"
 gdeny "rule 11: sed -i on .agent/goal.md" "$G11" "sed -i '' 's/confirm/auto/' .agent/goal.md"
 gallow "rule 11: reading .agent/goal.md" "$G11" "cat .agent/goal.md"
+
+# ---------- fix wave FA ----------
+# FA1: a NUL byte must not void rule 11 (grep without -a prints "Binary file matches" instead of the lines)
+NA=$(mk_repo fa-new)
+tdeny "rule 11: new GOAL.md with a NUL byte, then review: off" Write "$NA" "$(jq -n --arg f "$NA/.agent/GOAL.md" '{file_path:$f,content:"# Goal\u0000\nreview: off\n"}')"
+tdeny "rule 11: new GOAL.md with review: off and a NUL byte after it" Write "$NA" "$(jq -n --arg f "$NA/.agent/GOAL.md" '{file_path:$f,content:"# Goal\nreview: off\u0000\n"}')"
+ZA=$(mk_repo fa-nul); write_goal "$ZA" "bun test" confirm
+printf 'binary\000tail\n' >>"$ZA/.agent/GOAL.md"
+tdeny "rule 11: partial-line Edit confirm -> auto on a GOAL.md that holds a NUL byte" Edit "$ZA" "$(jq -n --arg f "$ZA/.agent/GOAL.md" '{file_path:$f,old_string:"confirm",new_string:"auto"}')"
+tallow "rule 11: prose Edit on a GOAL.md that holds a NUL byte" Edit "$ZA" "$(jq -n --arg f "$ZA/.agent/GOAL.md" '{file_path:$f,old_string:"# Goal",new_string:"# Goal\nShip it."}')"
+tdeny "rule 11: Write over a GOAL.md with a NUL byte that flips release_mode" Write "$ZA" "$(jq -n --arg f "$ZA/.agent/GOAL.md" '{file_path:$f,content:"# Goal\ntest_command: bun test\nrelease_mode: auto\n"}')"
+
+# FA2: a '=' or '>' inside a directory name must not hide a GOAL.md path
+mkdir -p "$G11/.agent/sub=dir" "$G11/.agent/sub>dir"
+gdeny "rule 11: '=' directory, absolute path" "$G11" "echo x >> $G11/.agent/sub=dir/../GOAL.md"
+gdeny "rule 11: '=' directory, attached >> redirect" "$G11" "echo x >>$G11/.agent/sub=dir/../GOAL.md"
+gdeny "rule 11: '=' directory, attached > redirect" "$G11" "echo x >$G11/.agent/sub=dir/../GOAL.md"
+gdeny "rule 11: '=' directory, relative path" "$G11" "echo x >> .agent/sub=dir/../GOAL.md"
+gdeny "rule 11: '>' in a directory name" "$G11" "echo x >> '.agent/sub>dir/../GOAL.md'"
+gdeny "rule 11: '>' in a directory name, attached redirect" "$G11" "echo x >>'.agent/sub>dir/../GOAL.md'"
+gdeny "rule 11: dd of= through an '=' directory" "$G11" "dd if=/tmp/x of=.agent/sub=dir/../GOAL.md"
+gallow "rule 11: reading GOAL.md through an '=' directory" "$G11" "cat .agent/sub=dir/../GOAL.md"
+
+# FA3: a backslash-newline continuation joins the lines, so it cannot split a command past the guard
+F3=$(mk_repo f3); git -C "$F3" checkout -q -b feat-x
+gdeny "continuation: push to main split over two lines" "$F3" "$(printf '%s\n' 'git push \' 'origin HEAD:main')"
+gdeny "continuation: --force on the next line" "$F3" "$(printf '%s\n' 'git push origin HEAD:x \' '--force')"
+gdeny "continuation: GOAL.md redirect target on the next line" "$G11" "$(printf '%s\n' 'echo x >> \' '.agent/GOAL.md')"
+gdeny "continuation: .env on the next line" "$R" "$(printf '%s\n' 'cat \' '.env')"
+gallow "continuation: ls -la" "$F3" "$(printf '%s\n' 'ls \' '-la')"
+gallow "continuation: heredoc body lines ending in a backslash" "$F3" "$(printf '%s\n' "cat <<'EOF'" 'line one \' 'EOF')"
+gdeny "continuation: a heredoc body ending in a backslash does not hide the next command" "$F3" "$(printf '%s\n' "cat <<'EOF'" 'line one \' 'EOF' 'rm -rf /usr')"
+gdeny "continuation: an even number of backslashes is a literal, the next line is its own command" "$F3" "$(printf '%s\n' 'echo a \\' 'git push --force origin x')"
+
+# FA4: a decoy line in a new GOAL.md cannot hide an unsafe setting that goal_get reads
+tdeny "rule 11: new GOAL.md, indented review: required decoy then review: off" Write "$NA" "$(jq -n --arg f "$NA/.agent/GOAL.md" '{file_path:$f,content:"# Goal\n  review: required\nreview: off\n"}')"
+tdeny "rule 11: new GOAL.md, indented release_mode: confirm decoy then release_mode: auto" Write "$NA" "$(jq -n --arg f "$NA/.agent/GOAL.md" '{file_path:$f,content:"# Goal\n  release_mode: confirm\nrelease_mode: auto\n"}')"
+tdeny "rule 11: new GOAL.md, review: required decoy then an indented review: off" Write "$NA" "$(jq -n --arg f "$NA/.agent/GOAL.md" '{file_path:$f,content:"# Goal\nreview: required\n  review: off\n"}')"
+tdeny "rule 11: Edit creating a GOAL.md with a release_mode decoy" Edit "$NA" "$(jq -n --arg f "$NA/.agent/GOAL.md" '{file_path:$f,old_string:"",new_string:"# Goal\n  release_mode: confirm\nrelease_mode: auto\n"}')"
+tallow "rule 11: new GOAL.md repeating the safe values" Write "$NA" "$(jq -n --arg f "$NA/.agent/GOAL.md" '{file_path:$f,content:"# Goal\nreview: required\n  review:   required  \nrelease_mode: confirm\nrelease_mode: confirm\n"}')"
+
+# FA5: export/declare/typeset are ordinary shell; only listing the environment is denied
+gallow "export FOO=1" "$R" 'export FOO=1'
+gallow "declare X=1" "$R" 'declare X=1'
+gallow "typeset Y=2" "$R" 'typeset Y=2'
+gallow "export FOO=1; echo ok" "$R" 'export FOO=1; echo ok'
+gallow "export PATH=\$PATH:/x && ls" "$R" 'export PATH=$PATH:/x && ls'
+gdeny "declare -p" "$R" 'declare -p'
+gdeny "typeset -p" "$R" 'typeset -p'
+gdeny "export FOO=1; export -p" "$R" 'export FOO=1; export -p'
+gdeny "bare export lists the environment" "$R" 'export'
+gdeny "declare -x lists the environment" "$R" 'declare -x'
+
+# FA6: in-place flag clusters and a case-insensitive file system
+SETTINGS="$HOME/.claude/settings.json"
+gdeny "sed -ri on settings.json" "$R" "sed -ri 's/a/b/' $SETTINGS"
+gdeny "perl -wpi on settings.json" "$R" "perl -wpi -e 's/a/b/' $SETTINGS"
+gdeny "perl -wpi on GOAL.md" "$G11" "perl -wpi -e 's/a/b/' .agent/GOAL.md"
+gdeny "redirect into .claude/Settings.JSON" "$R" "echo x > $HOME/.claude/Settings.JSON"
+out=$(printf '%s' "$(bash_json "$R" 'echo x > /Users/nobody/.claude/Settings.JSON')" | HOME=/Users/nobody "$BIN/guard.sh" 2>&1)
+if is_deny "$out"; then pass "deny: redirect into Settings.JSON (realistic HOME)"; else fail "deny: redirect into Settings.JSON (realistic HOME)" "$out"; fi
+gdeny "redirect into .GIT/HOOKS/pre-push" "$R" 'echo exit 0 > .GIT/HOOKS/pre-push'
+tdeny "Write tool on .claude/Settings.JSON" Write "$R" "$(jq -n --arg p "$HOME/.claude/Settings.JSON" '{file_path:$p,content:"{}"}')"
+gallow "cat settings.json" "$R" "cat $SETTINGS"
+gallow "sed -n on settings.json" "$R" "sed -n 1,5p $SETTINGS"
+gallow "sed -E to stdout on settings.json" "$R" "sed -E 's/a/b/' $SETTINGS"
+gallow "perl -ne on settings.json" "$R" "perl -ne 'print if /hooks/' $SETTINGS"
+gallow "perl -lane on settings.json" "$R" "perl -lane 'print' $SETTINGS"
+gallow "grep -i on settings.json" "$R" "grep -i hooks $SETTINGS"
+
+# ---------- fix wave FA7 ----------
+# F1: strip_heredocs never drops the lines that follow something that is not a heredoc
+F1=$(mk_repo f1)
+gdeny "heredoc: a here-string with a literal word does not hide a force push" "$F1" "$(printf '%s\n' 'grep foo <<< "some text"' 'git push --force origin main')"
+gdeny "heredoc: a here-string does not hide gh pr close" "$F1" "$(printf '%s\n' 'grep foo <<< "some text"' 'gh pr close 5')"
+gdeny "heredoc: a here-string does not hide npm publish" "$F1" "$(printf '%s\n' 'cat <<< hello' 'npm publish')"
+gdeny "heredoc: a here-string does not hide rm -rf /etc" "$F1" "$(printf '%s\n' 'cat <<<"x"' 'rm -rf /etc')"
+gdeny "heredoc: hyphenated delimiter, denied command after the terminator" "$F1" "$(printf '%s\n' "cat > n.md <<'END-OF-FILE'" 'body' 'END-OF-FILE' 'git push --force origin main')"
+gdeny "heredoc: dotted delimiter, denied command after the terminator" "$F1" "$(printf '%s\n' "cat > n.md <<'EOF.1'" 'body' 'EOF.1' 'gh pr close 5')"
+gdeny "heredoc: '<<EOF' inside a double-quoted commit message" "$F1" "$(printf '%s\n' 'git commit -m "handle <<EOF"' 'rm -rf /etc')"
+gdeny "heredoc: '<<EOF' inside single quotes" "$F1" "$(printf '%s\n' "grep -n '<<EOF' f" 'rm -rf /etc')"
+gdeny "heredoc: a quoted <<EOF decoy, then a real heredoc with the same word" "$F1" "$(printf '%s\n' "grep -n '<<EOF' f" 'git push --force origin main' 'cat > n.md <<EOF' 'x' 'EOF')"
+gdeny "heredoc: a shift in arithmetic does not hide npm publish" "$F1" "$(printf '%s\n' 'echo $((1<<n))' 'npm publish')"
+gdeny "heredoc: an unterminated heredoc keeps its lines" "$F1" "$(printf '%s\n' 'cat <<EOF' 'git push --force origin main')"
+gdeny "heredoc: the operator line is continued, the next line is part of the command" "$F1" "$(printf '%s\n' 'cat <<EOF && \' 'git push --force origin main' 'body' 'EOF')"
+gdeny "heredoc: a command after two heredocs on one line" "$F1" "$(printf '%s\n' 'cat <<A <<B' 'x' 'A' 'y' 'B' 'rm -rf /etc')"
+gallow "heredoc: an ordinary heredoc whose body mentions denied words" "$F1" "$(printf '%s\n' 'cat > notes.md <<EOF' 'run gh pr close 5 and npm publish' 'EOF')"
+gallow "heredoc: a hyphenated delimiter with a proper terminator" "$F1" "$(printf '%s\n' "cat > n.md <<'END-OF-FILE'" 'git push --force origin main' 'END-OF-FILE')"
+gallow "heredoc: two heredocs on one line, bodies mention denied words" "$F1" "$(printf '%s\n' 'cat <<A <<B' 'git push --force origin main' 'A' 'npm publish' 'B')"
+gallow "heredoc: a shift in arithmetic alone" "$F1" 'echo $((1<<n))'
+gallow "heredoc: a here-string alone" "$F1" 'grep foo <<< "some text"'
+
+# F7: gh api with the method attached to the flag, and GraphQL mutations
+gdeny "gh api merge with --method=PUT" "$GR" 'gh api repos/o/r/pulls/5/merge --method=PUT'
+gdeny "gh api merge with -XPUT" "$GR" 'gh api repos/o/r/pulls/5/merge -XPUT'
+gdeny "gh api -XDELETE of a ref" "$GR" 'gh api -XDELETE repos/o/r/git/refs/heads/main'
+gdeny "gh api --method=DELETE of a ref" "$GR" 'gh api --method=DELETE repos/o/r/git/refs/heads/main'
+gdeny "gh api graphql closePullRequest" "$GR" "gh api graphql -f query='mutation{closePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'"
+gdeny "gh api graphql mergePullRequest with variables" "$GR" 'gh api graphql -f query='"'"'mutation($id:ID!){mergePullRequest(input:{pullRequestId:$id}){clientMutationId}}'"'"' -f id=x'
+gdeny "gh api graphql closeIssue, query flag before graphql" "$GR" "gh api -f query='mutation { closeIssue(input:{issueId:\"x\"}) { clientMutationId } }' graphql"
+gdeny "gh api graphql with --input cannot be inspected" "$GR" 'gh api graphql --input q.json'
+gdeny "gh api PATCH with --input" "$GR" 'gh api repos/o/r/issues/5 -XPATCH --input body.json'
+gdeny "gh api --method PATCH with --input" "$GR" 'gh api repos/o/r/issues/5 --method PATCH --input body.json'
+gallow "gh api repos/o/r" "$GR" 'gh api repos/o/r'
+gallow "gh api -X GET" "$GR" 'gh api -X GET repos/o/r/pulls'
+gallow "gh api -XGET" "$GR" 'gh api -XGET repos/o/r/pulls'
+gallow "gh api --method=GET" "$GR" 'gh api --method=GET repos/o/r/pulls'
+gallow "gh api graphql query" "$GR" "gh api graphql -f query='query{viewer{login}}'"
+gallow "gh api graphql query with variables" "$GR" 'gh api graphql -f query='"'"'query($n:Int!){viewer{repositories(first:$n){nodes{name}}}}'"'"' -F n=5'
+
+# F3: the Monitor tool runs a shell command, so it goes through the Bash rules; the installer matcher covers it
+tdeny "Monitor with a force push" Monitor "$R" '{"command":"git push --force origin main","description":"x","timeout_ms":1000}'
+tdeny "Monitor with gh pr close" Monitor "$R" '{"command":"gh pr close 5","description":"x","timeout_ms":1000}'
+tallow "Monitor with tail -f" Monitor "$R" '{"command":"tail -f x.log","description":"watch the log","timeout_ms":1000}'
+MATCHER=$(sed -n "s/^GUARD_MATCHER='\(.*\)'\$/\1/p" "$KIT/install.sh")
+DISPATCH=$(sed -n '/^case "\$TOOL" in/,$p' "$BIN/guard.sh")
+for n in $(printf '%s' "${MATCHER%%|mcp__*}" | tr '|' ' '); do
+  if printf '%s\n' "$DISPATCH" | grep -Eq "(^|[ |])${n}([|)])"; then pass "tool $n in the installer matcher has an explicit branch in guard.sh"; else fail "tool $n in the installer matcher has an explicit branch in guard.sh" "  matcher: $MATCHER"; fi
+done
+case "$MATCHER" in *'|Monitor|'*) pass "installer matcher lists Monitor" ;; *) fail "installer matcher lists Monitor" "  matcher: $MATCHER" ;; esac
+
+# F6b: a new GOAL.md written by Edit/MultiEdit is checked as the result of the edits, and a NUL byte is never allowed
+NB=$(mk_repo fa-newmulti)
+tdeny "rule 11: new-file MultiEdit, empty old_string then a partial-line confirm -> auto" MultiEdit "$NB" "$(jq -n --arg f "$NB/.agent/GOAL.md" '{file_path:$f,edits:[{old_string:"",new_string:"# Goal\nrelease_mode: confirm\nreview: required\n"},{old_string:"confirm",new_string:"auto"}]}')"
+tdeny "rule 11: new-file MultiEdit, partial-line required -> off" MultiEdit "$NB" "$(jq -n --arg f "$NB/.agent/GOAL.md" '{file_path:$f,edits:[{old_string:"",new_string:"# Goal\nrelease_mode: confirm\nreview: required\n"},{old_string:"required",new_string:"off"}]}')"
+tallow "rule 11: new-file MultiEdit with safe settings and a prose edit" MultiEdit "$NB" "$(jq -n --arg f "$NB/.agent/GOAL.md" '{file_path:$f,edits:[{old_string:"",new_string:"# Goal\nrelease_mode: confirm\nreview: required\n"},{old_string:"# Goal",new_string:"# Objective"}]}')"
+tallow "rule 11: new-file Edit with safe settings" Edit "$NB" "$(jq -n --arg f "$NB/.agent/GOAL.md" '{file_path:$f,old_string:"",new_string:"# Goal\nreview: required\nrelease_mode: confirm\n"}')"
+tdeny "rule 11: any NUL byte in an Edit of a GOAL.md" Edit "$G11" "$(jq -n --arg f "$GF" '{file_path:$f,old_string:"# Goal",new_string:"# Goal\u0000 prose"}')"
+tdeny "rule 11: any NUL byte in a Write of a new GOAL.md with safe settings" Write "$NB" "$(jq -n --arg f "$NB/.agent/GOAL.md" '{file_path:$f,content:"# Goal\u0000\nreview: required\nrelease_mode: confirm\n"}')"
+tdeny "rule 11: any NUL byte in a MultiEdit of a GOAL.md" MultiEdit "$G11" "$(jq -n --arg f "$GF" '{file_path:$f,edits:[{old_string:"# Goal",new_string:"# Goal\u0000"}]}')"
+tallow "a NUL byte in a Write to a file that is not a GOAL.md" Write "$R" "$(jq -n --arg f "$RP/blob.bin" '{file_path:$f,content:"a\u0000b"}')"
+
+# F12: cd with options still moves the simulated working directory
+gdeny "cd -P outside the repo, then rm -rf" "$R" 'cd -P /usr/local && rm -rf lib'
+gdeny "cd -- outside the repo, then rm -rf" "$R" 'cd -- /usr/local && rm -rf lib'
+gdeny "cd -L outside the repo, then rm -rf" "$R" 'cd -L /usr/local; rm -rf lib'
+gdeny "cd -P into a variable, then a relative rm -rf" "$R" 'cd -P $X && rm -rf lib'
+gallow "cd -P into /tmp, then rm -rf" "$R" 'cd -P /tmp && rm -rf scratch'
+gallow "cd -- into the repo, then rm -rf" "$R" "cd -- $RP && rm -rf dist"
+
+# F10: a failure after the decision or in the splitter must not allow the call
+BIGD="$WORK/fa7-big"; mkdir -p "$BIGD"
+with_alarm() { # seconds cmd...: run cmd and SIGKILL it after the limit (bash defers SIGALRM inside one long expansion)
+  perl -e '$s = shift; $p = fork; if (!$p) { exec @ARGV; exit 127 } $k = 0; $SIG{ALRM} = sub { $k = 1; kill 9, $p }; alarm $s;
+           $r = waitpid($p, 0); waitpid($p, 0) if $r != $p; exit($k ? 137 : $? >> 8)' "$@"
+}
+{ printf 'rm -rf $'; head -c 1100000 /dev/zero | tr '\0' A; } >"$BIGD/cmd.txt"
+jq -Rs --arg d "$R" '{hook_event_name:"PreToolUse",tool_name:"Bash",cwd:$d,tool_input:{command:.}}' "$BIGD/cmd.txt" >"$BIGD/in.json"
+t0=$SECONDS
+out=$("$BIN/guard.sh" <"$BIGD/in.json" 2>"$BIGD/err"); rc=$?
+t1=$((SECONDS - t0))
+assert_eq "1.1 MB token under rm -rf: exit 0" "0" "$rc"
+assert_eq "1.1 MB token under rm -rf: a valid deny on stdout" "deny" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)"
+assert_contains "1.1 MB token under rm -rf: denied up front by the size cap (over 256 KB)" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason' 2>/dev/null | head -c 200)" "too large"
+# the same shape under the cap still goes through the delete rule, and its reason stays short
+{ printf 'rm -rf $'; head -c 200000 /dev/zero | tr '\0' A; } >"$BIGD/cmd200k.txt"
+jq -Rs --arg d "$R" '{hook_event_name:"PreToolUse",tool_name:"Bash",cwd:$d,tool_input:{command:.}}' "$BIGD/cmd200k.txt" >"$BIGD/in200k.json"
+out200=$(with_alarm 30 "$BIN/guard.sh" <"$BIGD/in200k.json" 2>/dev/null); rc200=$?
+assert_eq "200 KB token under rm -rf: exit 0" "0" "$rc200"
+assert_contains "200 KB token under rm -rf: denied by the delete rule" "$(printf '%s' "$out200" | jq -r '.hookSpecificOutput.permissionDecisionReason' 2>/dev/null | head -c 200)" "unresolved variable"
+assert_eq "200 KB token under rm -rf: the reason is short" "yes" "$([ "$(printf '%s' "$out200" | jq -r '.hookSpecificOutput.permissionDecisionReason | length' 2>/dev/null || echo 999999)" -le 700 ] && echo yes || echo no)"
+assert_eq "1.1 MB token under rm -rf: the reason is truncated" "yes" "$([ "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason | length' 2>/dev/null || echo 999999)" -le 700 ] && echo yes || echo no)"
+assert_eq "1.1 MB token under rm -rf: decided within 20 s" "yes" "$([ "$t1" -lt 20 ] && echo yes || echo "no ($t1 s)")"
+mkdir -p "$WORK/nosed"
+for tool in jq git perl awk tr dirname basename cat grep sort wc head date; do ln -sf "$(command -v "$tool")" "$WORK/nosed/$tool"; done
+out=$(printf '%s' "$(bash_json "$R" 'git push --force origin main')" | PATH="$WORK/nosed" /bin/bash "$BIN/guard.sh" 2>&1); rc=$?
+assert_eq "no sed on PATH: fails closed with exit 2" "2" "$rc"
+assert_contains "no sed on PATH: says what is missing" "$out" "sed"
+rm -f "$WORK/nosed/awk"
+out=$(printf '%s' "$(bash_json "$R" 'git push --force origin main')" | PATH="$WORK/nosed" /bin/bash "$BIN/guard.sh" 2>&1); rc=$?
+assert_eq "no awk on PATH either: still fails closed with exit 2" "2" "$rc"
+# a missing grep/sort/wc/head would silently empty gated_lines and void rule 11, so each is a preflight failure
+for missing in grep sort wc head; do
+  rm -rf "${WORK:?}/miss-$missing"; mkdir -p "$WORK/miss-$missing"
+  for tool in jq git perl awk tr dirname basename cat sed grep sort wc head date; do
+    [ "$tool" = "$missing" ] || ln -sf "$(command -v "$tool")" "$WORK/miss-$missing/$tool"
+  done
+  out=$(printf '%s' "$(bash_json "$R" 'git push --force origin main')" | PATH="$WORK/miss-$missing" /bin/bash "$BIN/guard.sh" 2>&1); rc=$?
+  assert_eq "no $missing on PATH: fails closed with exit 2" "2" "$rc"
+  assert_contains "no $missing on PATH: says what is missing" "$out" "$missing"
+done
+
+# F5: a cheap fail-closed time ceiling, and no quadratic work on a long segment
+cmd2k=$(i=0; while [ "$i" -lt 2000 ]; do printf 'env A=1 '; i=$((i + 1)); done; printf 'echo hi')
+jq -n --arg c "$cmd2k" --arg d "$R" '{hook_event_name:"PreToolUse",tool_name:"Bash",cwd:$d,tool_input:{command:$c}}' >"$BIGD/in2k.json"
+t0=$SECONDS
+out=$("$BIN/guard.sh" <"$BIGD/in2k.json" 2>&1); rc=$?
+t1=$((SECONDS - t0))
+assert_eq "2000 leading env tokens: exit 0" "0" "$rc"
+case "$out" in ''|*'"permissionDecision": "deny"'*) pass "2000 leading env tokens: allowed or denied, never an error" ;; *) fail "2000 leading env tokens: allowed or denied, never an error" "$out" ;; esac
+assert_eq "2000 leading env tokens: decided within 12 s" "yes" "$([ "$t1" -lt 12 ] && echo yes || echo "no ($t1 s)")"
+# The ceiling is tested through GUARD_TIME_LIMIT (it can only LOWER the 8 s limit), not by presetting SECONDS:
+# the guard resets SECONDS itself, and a preset near the limit is flaky (bash counts whole wall-clock seconds).
+out=$(GUARD_TIME_LIMIT=0 "$BIN/guard.sh" <<<"$(bash_json "$R" 'ls -la')" 2>&1); rc=$?
+assert_eq "time ceiling reached: exit 0" "0" "$rc"
+assert_contains "time ceiling reached: denies as too large" "$out" "too large"
+out=$(GUARD_TIME_LIMIT=500 "$BIN/guard.sh" <<<"$(bash_json "$R" 'ls -la')" 2>&1)
+assert_eq "GUARD_TIME_LIMIT cannot raise the limit (an ordinary command is still allowed)" "" "$out"
+out=$(env SECONDS=5 "$BIN/guard.sh" <<<"$(bash_json "$R" 'ls -la')" 2>&1)
+assert_eq "an inherited SECONDS=5: an ordinary command is allowed" "" "$out"
+out=$(env SECONDS=100 "$BIN/guard.sh" <<<"$(bash_json "$R" 'ls -la')" 2>&1)
+assert_eq "an inherited SECONDS=100 does not deny every call" "" "$out"
+
+# F2: wrappers with option values, leading redirections, more launchers
+gdeny "xargs -I {} gh pr close" "$GR" 'echo 5 | xargs -I {} gh pr close {}'
+gdeny "xargs -I {} gh release create" "$GR" 'echo v1 | xargs -I {} gh release create {}'
+gdeny "xargs -I {} rm -rf outside the repo" "$GR" 'ls | xargs -I {} rm -rf /etc/{}'
+gdeny "xargs -a list -I{} gh issue close" "$GR" 'xargs -a list -I{} gh issue close {}'
+gdeny "xargs -d newline npm publish" "$GR" 'xargs -d x npm publish'
+gdeny "sudo -u deploy git push --force" "$GR" 'sudo -u deploy git push --force origin main'
+gdeny "sudo -u root npm publish" "$GR" 'sudo -u root npm publish'
+gdeny "env -u X gh pr close" "$GR" 'env -u X gh pr close 5'
+gdeny "timeout -s KILL 10 npm publish" "$GR" 'timeout -s KILL 10 npm publish'
+gdeny "timeout -k 5 10 gh pr close" "$GR" 'timeout -k 5 10 gh pr close 5'
+gdeny "leading >/dev/null redirect before gh pr close" "$GR" '>/dev/null gh pr close 5'
+gdeny "leading </dev/null redirect before npm publish" "$GR" '</dev/null npm publish'
+gdeny "leading spaced redirect before gh pr close" "$GR" '> /dev/null gh pr close 5'
+gdeny "parallel gh pr close" "$GR" 'parallel gh pr close ::: 1 2'
+gdeny "doppler run -- npm publish" "$GR" 'doppler run -- npm publish'
+gdeny "dotenv -- gh pr close" "$GR" 'dotenv -- gh pr close 5'
+gdeny "direnv gh pr close" "$GR" 'direnv gh pr close 5'
+gdeny "volta run npm publish" "$GR" 'volta run npm publish'
+gdeny "mise exec -- npm publish" "$GR" 'mise exec -- npm publish'
+gdeny "op run -- gh pr close" "$GR" 'op run -- gh pr close 5'
+gallow "xargs -I {} echo" "$GR" 'ls | xargs -I {} echo {}'
+gallow "xargs -n 1 echo" "$GR" 'ls | xargs -n 1 echo'
+gallow "sudo -u deploy ls" "$GR" 'sudo -u deploy ls'
+gallow "timeout -s KILL 10 sleep" "$GR" 'timeout -s KILL 10 sleep 5'
+gallow "env -u X ls" "$GR" 'env -u X ls'
+gallow "leading redirect before ls" "$GR" '>/dev/null ls'
+gallow "xargs -I {} rm inside the repo" "$GR" 'ls | xargs -I {} rm -rf build/{}'
+
+# F9 (narrow): more send and publish spellings
+tdeny "rule 10: slack reply to a thread" mcp__plugin_slack_slack__slack_reply_to_thread "$GR" '{"text":"hi"}'
+tdeny "rule 10: chat_postMessage" mcp__plugin_slack_slack__chat_postMessage "$GR" '{"text":"hi"}'
+tdeny "rule 10: replyAll" mcp__claude_ai_Gmail__replyAll "$GR" '{}'
+tdeny "rule 10: reply_all" mcp__claude_ai_Gmail__reply_all "$GR" '{}'
+tdeny "rule 10: slack update_message" mcp__plugin_slack_slack__slack_update_message "$GR" '{"text":"hi"}'
+tdeny "rule 10: slack upload_file" mcp__plugin_slack_slack__slack_upload_file "$GR" '{}'
+tallow "rule 10: slack get_thread_replies" mcp__plugin_slack_slack__slack_get_thread_replies "$GR" '{"channel_id":"C1","ts":"1"}'
+tallow "rule 10: slack list_replies" mcp__plugin_slack_slack__slack_list_replies "$GR" '{"channel_id":"C1","ts":"1"}'
+tallow "rule 10: slack read_channel" mcp__plugin_slack_slack__slack_read_channel "$GR" '{"channel_id":"C1"}'
+gdeny "rule 8: npm unpublish" "$GR" 'npm unpublish x@1'
+gdeny "rule 8: npm deprecate" "$GR" 'npm deprecate x "msg"'
+gdeny "rule 8: npm dist-tag add" "$GR" 'npm dist-tag add x@1 latest'
+gallow "rule 8: npm view" "$GR" 'npm view x versions'
+
+# ---------- fix wave FA, round 3 ----------
+# C1: a comment is not continued by a trailing backslash, so the next line is its own command; the guard scans
+# the un-joined text AND the joined text and denies when either is denied
+gdeny "comment ending in a backslash does not hide gh pr close" "$F3" "$(printf '%s\n' 'ls # note \' 'gh pr close 5')"
+gdeny "comment '#\\' after a command does not hide a force push" "$F3" "$(printf '%s\n' 'echo hi #\' 'git push --force origin main')"
+gdeny "whole-line comment ending in a backslash does not hide gh pr close" "$F3" "$(printf '%s\n' '# c \' 'gh pr close 5')"
+gdeny "comment ending in a backslash does not hide npm publish" "$F3" "$(printf '%s\n' 'ls # note \' 'npm publish')"
+gdeny "comment ending in a backslash does not hide rm -rf /usr/lib" "$F3" "$(printf '%s\n' 'ls # note \' 'rm -rf /usr/lib')"
+gdeny "comment ending in a backslash does not hide gh release create" "$F3" "$(printf '%s\n' 'ls # note \' 'gh release create v1')"
+gdeny "comment ending in a backslash does not hide a push to main" "$F3" "$(printf '%s\n' 'ls # note \' 'git push origin HEAD:main')"
+gdeny "comment ending in a backslash does not hide a push to main (git on the second line, args on the third)" "$F3" "$(printf '%s\n' 'ls # note \' 'git push \' 'origin HEAD:main')"
+gdeny "comment backslash, then a command split over two more lines (needs the comment-aware join)" "$F3" "$(printf '%s\n' 'ls # note \' 'git push origin HEAD:x \' '--force')"
+gdeny "a '#' inside quotes is not a comment: the continuation still joins" "$F3" "$(printf '%s\n' 'git push origin "a #b" \' '--force')"
+gdeny "a '#' inside a word is not a comment: the continuation still joins" "$F3" "$(printf '%s\n' 'git push origin x#y \' '--force')"
+gdeny "even number of backslashes after a comment: the next line is its own command" "$F3" "$(printf '%s\n' 'ls # note \\' 'gh pr close 5')"
+gdeny "continuation still joined: push to main split over two lines" "$F3" "$(printf '%s\n' 'git push \' 'origin HEAD:main')"
+gdeny "continuation still joined: .env on the next line" "$R" "$(printf '%s\n' 'cat \' '.env')"
+gallow "continuation still allowed: ls over two lines" "$F3" "$(printf '%s\n' 'ls \' '-la')"
+gallow "a comment ending in a backslash followed by an ordinary command" "$F3" "$(printf '%s\n' 'ls # note \' 'echo done')"
+gallow "a comment ending in a backslash followed by a comment" "$F3" "$(printf '%s\n' '# note \' '# more')"
+# the per-pass state (the simulated cd) is reset between the two scans: a cd in the first pass must not leak
+gallow "state reset between the two scans: rm -rf dist, then a cd outside, over a continuation" "$F3" "$(printf '%s\n' 'rm -rf dist \' '&& cd /usr/local')"
+gdeny "a cd outside over a continuation still moves the simulated directory" "$F3" "$(printf '%s\n' 'cd /usr/local \' '&& rm -rf lib')"
+gallow "cd /tmp then a relative rm over a continuation stays allowed" "$F3" "$(printf '%s\n' 'cd /tmp \' '&& rm -rf scratch')"
+
+# R1: the quoted $(cat <<'EOF' ... EOF) idiom of commit messages and PR bodies is data, like the unquoted one
+hd_idiom() { # head body-lines... -> head "$(cat <<'EOF'  body  EOF  )"
+  local pre=$1; shift
+  printf '%s\n' "$pre \"\$(cat <<'EOF'" "$@" 'EOF' ')"'
+}
+gallow "commit idiom: prose with a backtick npm publish line" "$F3" "$(hd_idiom 'git commit -m' 'fix: tighten the deny list' '' '`npm publish` is denied now.')"
+gallow "commit idiom: prose with a git push --force line" "$F3" "$(hd_idiom 'git commit -m' 'fix: x' '' 'git push --force is denied for all branches.')"
+gallow "commit idiom: prose with an add .env loading bullet" "$F3" "$(hd_idiom 'git commit -m' 'fix: env loading' '' '- add .env loading from the parent directory')"
+gallow "commit idiom: prose with a bash fence" "$F3" "$(hd_idiom 'git commit -m' 'docs: usage' '' '```bash' 'npm publish' 'git push --force origin main' '```')"
+gallow "commit idiom: prose with gh release create" "$F3" "$(hd_idiom 'git commit -m' 'docs: release' '' 'Then gh release create v1.0.0 by hand.')"
+gallow "gh pr create --body idiom with a bash fence" "$F3" "$(hd_idiom 'gh pr create --title t --body' '## Summary' '' '```bash' 'gh pr close 5' '```')"
+gallow "gh issue comment --body idiom with rm -rf prose" "$F3" "$(hd_idiom 'gh issue comment 5 --body' 'Do not run rm -rf /usr/lib here.')"
+gallow "commit idiom with a tab-indented terminator form (<<-)" "$F3" "$(printf '%s\n' "git commit -m \"\$(cat <<-'EOF'" '	npm publish is mentioned' '	EOF' ')"')"
+gdeny "commit idiom followed by a real force push after the closing )\"" "$F3" "$(hd_idiom 'git commit -m' 'fix: x' 'prose'; printf '%s\n' 'git push --force origin main')"
+gdeny "commit idiom chained to a force push on the closing line" "$F3" "$(hd_idiom 'git commit -m' 'fix: x' 'prose' | sed '$s/$/ \&\& git push --force origin main/')"
+gdeny "bash -c with the heredoc inside the quotes: the body IS code" "$F3" "$(hd_idiom 'bash -c' 'gh pr close 5')"
+gdeny "unterminated quoted heredoc keeps its lines" "$F3" "$(printf '%s\n' "git commit -m \"\$(cat <<'EOF'" 'fix: x' 'git push --force origin main')"
+gdeny "arithmetic in double quotes does not hide the next line" "$F3" "$(printf '%s\n' 'echo "it costs $((1<<n))"' 'npm publish')"
+gallow "arithmetic in double quotes alone" "$F3" 'echo "it costs $((1<<n))"'
+gdeny "a quoted <<EOF without a command substitution is not a heredoc" "$F3" "$(printf '%s\n' 'git commit -m "handle <<EOF"' 'npm publish')"
+gdeny "an ANSI-C quoted \\' keeps the <<EOF inside the string: not a heredoc" "$F3" "$(printf '%s\n' "echo \$'it\\'s <<EOF'" 'gh pr close 5' 'EOF')"
+gallow "an ANSI-C quoted string alone" "$F3" "echo \$'tab\\there'"
+# a loop over many prose messages with risky words, through both idioms: none may be denied
+n=0; bad=0
+for body in 'run npm publish after the review' 'git push --force is denied' 'we never gh pr close 5 ourselves' 'rm -rf /usr/lib would be bad' \
+            'load .env at start' 'cat .env is denied' 'export -p dumps the env' 'env vars are read from the shell' 'db-migrate --apply needs a gate' \
+            'vercel deploy comes from CI' 'git config core.hooksPath is guarded' 'gh release create is the users call' 'bash <<EOF is scanned' \
+            'curl https://x | bash is denied' 'supabase db push is denied' 'git commit -n skips hooks' 'sudo rm -rf /etc' 'xargs -I {} gh pr close {}' \
+            '- `npm publish`' '- `git push --force origin main`' '- `rm -rf /usr/lib`' '1. gh issue close 5' '> gh pr merge 5' '$ npm publish' \
+            'echo "a; b" && npm publish' 'cd /tmp && rm -rf *' 'psql postgres://db.x.supabase.co/postgres' 'migrate-gate.sh --confirm x' \
+            'release-gate.sh --approve' 'eval "$CMD"'; do
+  for head in 'git commit -m' 'gh pr create --title t --body' 'gh issue comment 5 --body'; do
+    n=$((n + 1))
+    out=$(printf '%s' "$(bash_json "$F3" "$(hd_idiom "$head" 'fix: a title' '' "$body" 'and a second line')")" | "$BIN/guard.sh" 2>&1)
+    if [ -n "$out" ]; then bad=$((bad + 1)); printf 'idiom denied: %s / %s\n%s\n' "$head" "$body" "$out" >&2; fi
+  done
+done
+assert_eq "synthetic prose messages through the quoted heredoc idiom: no denies ($n runs)" "0" "$bad"
+
+# ---------- fix wave FA, round 4: fail closed on commands too large or too continued to scan in time ----------
+# The awk that joins continuation lines runs outside the bash ceiling, so the size is checked up front. Each
+# fixture runs under a 30 s alarm (a hang is a failure, not a stuck suite) and is judged on decision and time.
+mk_big() { # name; the command text on stdin -> $BIGD/<name>.json
+  jq -Rs --arg d "$F3" '{hook_event_name:"PreToolUse",tool_name:"Bash",cwd:$d,tool_input:{command:.}}' >"$BIGD/$1.json"
+}
+big_decision() { # name fixture want(allow|deny|either) max-seconds
+  local out rc dec t0 t1 njson
+  t0=$SECONDS
+  out=$(with_alarm 30 "$BIN/guard.sh" <"$BIGD/$2.json" 2>"$BIGD/$2.err"); rc=$?
+  t1=$((SECONDS - t0))
+  dec=allow
+  if [ -n "$out" ]; then
+    dec=deny; njson=$(printf '%s' "$out" | jq -s 'length' 2>/dev/null || echo 0)
+    [ "$njson" = 1 ] || dec="deny-but-$njson-json-documents"
+  fi
+  [ "$rc" -eq 0 ] || dec="exit-$rc"
+  if { [ "$dec" = "$3" ] || { [ "$3" = either ] && { [ "$dec" = allow ] || [ "$dec" = deny ]; }; }; } && [ "$t1" -lt "$4" ]; then pass "$1 ($dec in ${t1}s)"
+  else fail "$1" "  wanted $3 in under $4 s, got $dec in ${t1}s"$'\n'"  stderr: $(head -c 200 "$BIGD/$2.err")"; fi
+}
+awk 'BEGIN { for (i = 0; i < 1500; i++) print "echo a \\"; print "end" }' | mk_big cont1500
+awk 'BEGIN { for (i = 0; i < 900; i++) print "echo a \\"; print "end" }' | mk_big cont900
+awk 'BEGIN { s = sprintf("%52s", ""); gsub(/ /, "a", s); for (i = 0; i < 1000; i++) print "echo " s " \\"; print "end" }' | mk_big cont1000x60
+{ printf 'echo '; head -c 300000 /dev/zero | tr '\0' a; echo; } | mk_big tok300k
+{ printf 'echo '; head -c 100000 /dev/zero | tr '\0' a; echo; } | mk_big tok100k
+{ printf 'echo '; head -c 70000 /dev/zero | tr '\0' a; printf ' \\\nls\n'; } | mk_big tok70k_cont
+{ printf 'echo '; head -c 1000000 /dev/zero | tr '\0' a; printf ' # c \\\ngh pr \\\nclose 5\n'; } | mk_big tok1m_comment
+{ printf 'echo '; head -c 12000 /dev/zero | tr '\0' '"'; echo; } | mk_big quotes12k
+{ printf 'echo '; head -c 100000 /dev/zero | tr '\0' '\\'; printf 'x\n'; } | mk_big bsrun100k
+{ printf 'echo '; head -c 100 /dev/zero | tr '\0' '\\'; printf '\nls\n'; } | mk_big bsend100
+big_decision "1500 harmless continuations are denied (too many)" cont1500 deny 5
+big_decision "300 KB single token is denied (too large)" tok300k deny 5
+big_decision "70 KB token joined to a next line is denied (logical line over 64 KB)" tok70k_cont deny 5
+big_decision "1000 short continuations adding up to 60 KB are denied (join work)" cont1000x60 deny 5
+big_decision "1 MB token, comment, backslash and a split command is denied" tok1m_comment deny 5
+big_decision "900 continuations of a harmless echo are allowed" cont900 allow 5
+big_decision "a 100 KB single-token echo is allowed" tok100k allow 5
+big_decision "12000 double quotes on a line are decided without a stall" quotes12k either 5
+big_decision "a 100 KB run of backslashes inside a line is decided without a stall" bsrun100k either 5
+big_decision "a line ending in 100 backslashes is denied" bsend100 deny 5
+out=$(printf '%s' "$(bash_json "$F3" 'ls -la')" | "$BIN/guard.sh" 2>&1)
+assert_eq "an ordinary command is still allowed" "" "$out"
+t0=$(perl -MTime::HiRes=time -e 'printf "%.0f", time * 1000')
+i=0; while [ "$i" -lt 10 ]; do printf '%s' "$(bash_json "$F3" 'ls -la')" | "$BIN/guard.sh" >/dev/null 2>&1; i=$((i + 1)); done
+t1=$(perl -MTime::HiRes=time -e 'printf "%.0f", time * 1000')
+assert_eq "ordinary command latency stays low (10 runs in under 3 s)" "yes" "$([ $((t1 - t0)) -lt 3000 ] && echo yes || echo "no ($((t1 - t0)) ms)")"
+
+# R2: Gmail's label tool is not a message update; Slack's update_message still is
+tdeny "rule 10: slack update_message (suffix pattern)" mcp__plugin_slack_slack__slack_update_message "$GR" '{"text":"hi"}'
+tallow "rule 10: gmail update_message_labels is a label tool" mcp__claude_ai_Gmail__update_message_labels "$GR" '{"messageId":"m","addLabelIds":["L"]}'
+tallow "rule 10: gmail update_label" mcp__claude_ai_Gmail__update_label "$GR" '{}'
 exit 0

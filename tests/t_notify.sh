@@ -99,4 +99,24 @@ assert_contains "stall label" "$(grep -m1 Stalled "$LOG")" "notifyrepo (main): S
 EVF="$AGENT_HOME/events.jsonl"
 assert_contains "events: suppressed alert with reason" "$(jq -r 'select(.kind=="notify" and .data.outcome=="suppressed") | .data.reason' "$EVF")" "daily-budget"
 assert_contains "events: inbox routing" "$(jq -r 'select(.kind=="notify") | .data.reason' "$EVF")" "routed-to-inbox"
+
+# ---------- fix wave FC1-3: when the hour cannot be read the quiet-hours check fails closed ----------
+# A `date` that rejects -r (a non-BSD date on PATH) used to leave the hour empty and let the alert through.
+mkdir -p "$WORK/shim-noclock"
+cat >"$WORK/shim-noclock/date" <<'EOS'
+#!/usr/bin/env bash
+case "${1:-}" in -r) exit 1 ;; esac
+exec /bin/date "$@"
+EOS
+chmod +x "$WORK/shim-noclock/date"
+rm -rf "$AGENT_HOME/notify"; : >"$LOG"
+printf '%s' "$(hook_json Notification "$R" nc1)" | PATH="$WORK/shim-noclock:$PATH" NOTIFY_NOW=$NOON "$BIN/notify.sh" stall m 2>"$WORK/nc.err"
+assert_contains "no clock: a budgeted alert is suppressed as no-clock" "$(tail -1 "$LOG")" "suppressed:no-clock"
+assert_eq "no clock: nothing is delivered" "0" "$(grep -c $'\tdry-run\t' "$LOG" || true)"
+assert_eq "no clock: no budget is booked" "0" "$(ls "$AGENT_HOME/notify" | grep -c '^budget' || true)"
+assert_no_file "no clock: no cooldown is booked" "$AGENT_HOME/notify/nc1.budgeted"
+assert_eq "no clock: no error output" "" "$(cat "$WORK/nc.err")"
+assert_contains "no clock: the event carries the reason" "$(jq -r 'select(.kind=="notify") | .data.reason' "$EVF" | tail -1)" "no-clock"
+printf '%s' "$(hook_json Notification "$R" nc2)" | PATH="$WORK/shim-noclock:$PATH" NOTIFY_NOW=$NOON "$BIN/notify.sh" blocked m
+assert_contains "no clock: an urgent alert is still delivered" "$(tail -1 "$LOG")" $'\tdry-run\t'
 exit 0

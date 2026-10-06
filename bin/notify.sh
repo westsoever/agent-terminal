@@ -83,7 +83,9 @@ esac
 WHY=""
 budget_ok() { # 0 when a budgeted alert may go out now (and books it); else sets WHY
   local hour used last file
-  hour=$(date -r "$NOW" +%H); hour=${hour#0}
+  hour=$(date -r "$NOW" +%H 2>/dev/null || true); hour=${hour#0}
+  # no readable hour (a date without BSD -r on PATH): the quiet-hours check cannot run, so do not send
+  case "$hour" in ''|*[!0-9]*) WHY=no-clock; return 1 ;; esac
   if [ "$hour" -lt "${NOTIFY_QUIET_END:-9}" ] || [ "$hour" -ge "${NOTIFY_QUIET_START:-21}" ]; then WHY=quiet-hours; return 1; fi
   file="$AGENT_HOME/notify/budget-$(date -r "$NOW" +%Y-%m-%d)"
   used=$(cat "$file" 2>/dev/null || echo 0); case "$used" in ''|*[!0-9]*) used=0 ;; esac

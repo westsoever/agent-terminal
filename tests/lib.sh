@@ -21,7 +21,7 @@ export NOTIFY_TERMINAL_NOTIFIER="$WORK/no-such-terminal-notifier"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export CHING_TEST_MODELS=""   # tests never call a real model; t_escalate.sh sets its own fake
-unset TMPDIR CHING_ALLOW_PUSH
+unset TMPDIR CHING_ALLOW_PUSH CHING_STOP_CHECK_RUNNING CHING_ESCALATING   # recursion markers inherited from a live stop-check.sh run
 mkdir -p "$AGENT_HOME" "$CLAUDE_DIR"
 
 # install.sh calls $LAUNCHCTL: a test must never reach the real launchd

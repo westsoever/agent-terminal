@@ -126,4 +126,52 @@ assert_not_contains "inbox: FINISHED omits a none next_action" "$(printf '%s\n' 
 # --inbox on a machine where ~/.agent does not exist yet must not die writing the marker
 assert_ok "inbox: fresh machine (no AGENT_HOME yet) exits 0" env AGENT_HOME="$WORK/fresh-ah" CLAUDE_DIR="$WORK/empty-claude" AGENT_REPOS_FILE="$WORK/none" "$BIN/dash.sh" --inbox
 assert_file "inbox: fresh machine gets its inbox.seen" "$WORK/fresh-ah/inbox.seen"
+
+# ---------- fix wave FC1-2: the registry loop reads each meta in one pass and skips ended ones early ----------
+# (the 3000-file timing is not a unit test; this guards what the loop must keep listing and hiding)
+FAH="$WORK/fc1-ah"; mkdir -p "$FAH/sessions"
+fmeta() { # sid folder state updated_or_- meta_age_stamp(touch -t, "-" = now) transcript_or_- [extra raw text]
+  local d="$FAH/sessions/$1"; mkdir -p "$d"
+  { printf 'cwd=%s\nroot=\nname=%s\nbranch=main\nstate=%s\n' "$WORK/$2" "$2" "$3"
+    if [ "$4" != - ]; then printf 'updated=%s\n' "$4"; fi
+    if [ "$6" != - ]; then printf 'transcript=%s\n' "$6"; fi
+    if [ -n "${7:-}" ]; then printf '%s' "$7"; fi; } >"$d/meta"
+  if [ "$5" != - ]; then touch -t "$5" "$d/meta"; fi
+}
+OLDU=$((NOW - 10 * 86400)); OLDT=202001010000
+FT="$WORK/fc1-fresh.jsonl"; printf '{}\n' >"$FT"
+fmeta fe1 fcended1 ended "$OLDU" "$OLDT" -                   # ended and old
+fmeta fe2 fcended2 ended "$NOW" - -                          # ended but recent: never listed
+fmeta fw1 fcwork1 working "$NOW" - -                         # recent: listed
+fmeta fo1 fcoldfresh working "$OLDU" "$OLDT" "$FT"           # old meta, fresh transcript: listed through the transcript
+fmeta fo2 fcoldgone working "$OLDU" "$OLDT" -                # old meta, no transcript: outside the window
+fmeta fo3 fcnoupd working - - -                              # no updated key: the file mtime is used
+fmeta fd1 fcdup working "$NOW" - - $'state=ended\n'          # duplicate key: the first line wins, so not ended
+fmeta fn1 fcnonl working "$NOW" - - 'ctx_level=healthy'      # last line without a newline is still read
+out=$(AGENT_HOME="$FAH" CLAUDE_DIR="$WORK/fc1-claude" AGENT_REPOS_FILE="$WORK/none" "$BIN/dash.sh")
+assert_not_contains "registry: an old ended session is not listed" "$out" "fcended1"
+assert_not_contains "registry: a recent ended session is not listed" "$out" "fcended2"
+assert_contains "registry: a recent session is listed" "$out" "fcwork1 [main]"
+assert_contains "registry: an old meta with a fresh transcript is listed" "$out" "fcoldfresh [main]"
+assert_not_contains "registry: an old meta with no fresh transcript is outside the window" "$out" "fcoldgone"
+assert_contains "registry: a meta without updated falls back to its file mtime" "$out" "fcnoupd [main]"
+assert_contains "registry: the first of two state lines wins" "$out" "fcdup [main]"
+assert_contains "registry: a last line without a newline is read" "$(printf '%s\n' "$out" | grep fcnonl)" "●"
+assert_contains "registry: summary counts only the listed sessions" "$out" "5 session(s)"
+
+# ---------- fix wave FC1-4: --next must not die of SIGPIPE when many rows reach head ----------
+FAH2="$WORK/fc1-many-ah"; mkdir -p "$FAH2"
+LONGN=$(head -c 250 /dev/zero | tr '\0' 'x')
+mkdir -p "$FAH2"/sessions/m{1..300}
+i=1
+while [ "$i" -le 300 ]; do
+  printf 'cwd=%s\nroot=\nname=n\nbranch=main\nstate=working\nupdated=%s\n' "$WORK/${LONGN}$i" "$NOW" >"$FAH2/sessions/m$i/meta"
+  i=$((i + 1))
+done
+rc=0; out=$(AGENT_HOME="$FAH2" CLAUDE_DIR="$WORK/fc1-claude" AGENT_REPOS_FILE="$WORK/none" "$BIN/dash.sh" --next --all 2>/dev/null) || rc=$?
+assert_eq "next: 300 long rows exit 0 (no SIGPIPE under pipefail)" "0" "$rc"
+assert_eq "next: 300 long rows still print exactly 5 lines" "5" "$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
+assert_contains "next: first line is numbered 1" "$(printf '%s\n' "$out" | sed -n 1p)" "1. xxxx"
+assert_contains "next: fifth line is numbered 5 with its score" "$(printf '%s\n' "$out" | sed -n 5p)" "5. xxxx"
+assert_contains "next: lines carry the score" "$(printf '%s\n' "$out" | sed -n 5p)" "[score "
 exit 0

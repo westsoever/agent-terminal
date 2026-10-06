@@ -17,26 +17,48 @@
 # publish, gh release, gh repo delete/visibility/public) | 9 closing PRs/issues | 10 sending email/chat
 # (drafts only) | 11 gate settings in GOAL.md (review, release_mode, test_command). Extras: --no-verify,
 # hook/settings/token tampering, gh pr merge, piping into a shell.
+# The Monitor tool (it runs a shell command) goes through the Bash rules. A missing dependency, a failing
+# splitter, a deny that cannot be printed, or a command that takes more than 8 s to check all fail closed.
 # Every deny is also logged as a `deny` event, after the decision has been printed.
-# Env: GUARD_PROTECTED_BRANCHES (default "main master" plus the remote default branch)
+# Env: GUARD_PROTECTED_BRANCHES (default "main master" plus the remote default branch);
+#      GUARD_TIME_LIMIT (seconds; can only lower the 8 s ceiling, for the tests)
 set -euo pipefail
 
-SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# The time ceiling counts from here. An inherited SECONDS (the hook environment) would otherwise start the clock
+# late and deny every call. GUARD_TIME_LIMIT can only LOWER the 8 s limit (it is how the tests reach the ceiling).
+SECONDS=0
+TIME_LIMIT=8
+case "${GUARD_TIME_LIMIT:-}" in ''|*[!0-9]*) ;; *) if [ "$GUARD_TIME_LIMIT" -lt 8 ]; then TIME_LIMIT=$GUARD_TIME_LIMIT; fi ;; esac
 PROTECTED=${GUARD_PROTECTED_BRANCHES:-"main master"}
 DEFB=""
 
-command -v jq >/dev/null 2>&1 || { echo "GUARD: jq is not installed; failing closed" >&2; exit 2; }
+# Every external tool the guard needs: a missing one must fail CLOSED (a missing sed used to leave the splitter
+# with no segments, and every command was allowed).
+for dep in jq dirname sed awk perl git tr grep sort wc head; do
+  command -v "$dep" >/dev/null 2>&1 || { echo "GUARD: $dep is not installed; failing closed" >&2; exit 2; }
+done
+SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 INPUT=$(cat)
 DECIDED=0
 
 emit_deny() {
+  # The reason can carry attacker-shaped text (a 1 MB token makes jq fail with "Argument list too long"): cap it.
+  local reason=$1
+  if [ "${#reason}" -gt 500 ]; then reason="${reason:0:500}..."; fi
+  # DECIDED only after the decision was printed; if it cannot be printed, exit 2 (a blocking error).
+  if ! jq -n --arg r "GUARD: $reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'; then
+    echo "GUARD: could not print the deny decision; failing closed" >&2
+    exit 2
+  fi
   DECIDED=1
-  jq -n --arg r "GUARD: $1" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
   # The decision is printed first; logging it can never change it.
   ( SID=$(jq -r '.session_id // ""' <<<"$INPUT" 2>/dev/null || true); CWD=${CWD:-$PWD}; NAME=$(basename "$CWD")
     # shellcheck source=lib.sh
-    . "$SELF_DIR/lib.sh" && ev deny "$(jq -nc --arg r "$1" --arg t "${TOOL:-}" '{rule:$r,tool:$t}')" ) >/dev/null 2>&1 || true
+    . "$SELF_DIR/lib.sh" && ev deny "$(jq -nc --arg r "$reason" --arg t "${TOOL:-}" '{rule:$r,tool:$t}')" ) >/dev/null 2>&1 || true
   exit 0
+}
+ceiling() { # a fail-closed time ceiling: the hook has 15 s, and a timed-out hook lets the call through
+  if [ "$SECONDS" -ge "$TIME_LIMIT" ]; then emit_deny "command too large to check safely (took too long). Split it into smaller commands."; fi
 }
 allow() { DECIDED=1; exit 0; }
 # shellcheck disable=SC2329
@@ -108,32 +130,66 @@ declare -a TOKS=()
 NT=0
 SIM_CWD=$CWD_PHYS
 SIM_UNKNOWN=0
-WRAPPERS=" sudo env command exec time nohup nice ionice xargs timeout watch caffeinate npx bunx bun pnpm yarn npm dlx x run exec bash sh zsh eval then do else if while until ! { "
+WRAPPERS=" sudo env command exec time nohup nice ionice xargs timeout watch caffeinate npx bunx bun pnpm yarn npm dlx x run exec bash sh zsh eval then do else if while until ! { parallel doppler dotenv direnv volta mise op "
+CP_LIMIT=0   # index of the command word of the current segment (see compute_cmd_limit)
+BASE=""
 
-tokenize() {
-  local s=$1
-  s=${s//\"/}; s=${s//\'/}; s=${s//\\/}
-  TOKS=()
-  read -r -a TOKS <<<"$s" || true
-  NT=${#TOKS[@]}
+base_of() { # sets BASE to the basename of $1. ${t##*/} is quadratic in the token length on bash 3.2 (a 100 KB
+  # token took 16 s), so a very long token, which is never a command word, is cut to its last 512 characters first.
+  if [ "${#1}" -gt 512 ]; then BASE=${1: -512}; BASE=${BASE##*/}; else BASE=${1##*/}; fi
 }
 
-cmd_pos() { # is token index $1 in command position (only wrappers/options/assignments before it)?
-  local k=0 t b
-  while [ "$k" -lt "$1" ]; do
-    t=${TOKS[$k]}; b=${t##*/}
+value_opt() { # wrapper, option -> 0 when the option takes a separate value word (that word is not the command)
+  case "$1" in
+    xargs) case "$2" in -I|-J|-a|-d|-E|-L|-n|-P|-R|-S|-s) return 0 ;; esac ;;
+    sudo) case "$2" in -u|-g|-p|-C|-D|-R|-r|-t|-U) return 0 ;; esac ;;
+    env) case "$2" in -u|-C|-P) return 0 ;; esac ;;
+    timeout) case "$2" in -s|-k) return 0 ;; esac ;;
+    npx|bunx) case "$2" in -p) return 0 ;; esac ;;
+    exec) case "$2" in -a) return 0 ;; esac ;;
+  esac
+  return 1
+}
+
+compute_cmd_limit() { # CP_LIMIT = index of the command word: the first token that is not a wrapper, an option
+  # (or an option's value word), an assignment or a redirection. Linear, computed once per segment.
+  local k=0 t w="" skip=0
+  while [ "$k" -lt "$NT" ]; do
+    t=${TOKS[$k]}
+    if [ "$skip" -eq 1 ]; then skip=0; k=$((k + 1)); continue; fi
     case "$t" in
-      -*|*=*|[0-9]*) ;;
-      *) case "$WRAPPERS" in *" $b "*) ;; *) return 1 ;; esac ;;
+      "<"*|">"*|"&>"*|[0-9]"<"*|[0-9]">"*)   # a redirection; a bare '>' / '>>' / '2>' takes the next word as its target
+        if [ -z "${t//[0-9<>&]/}" ]; then skip=1; fi ;;
+      -*) if [ -n "$w" ] && value_opt "$w" "$t"; then skip=1; fi ;;
+      *=*|[0-9]*) ;;
+      *) base_of "$t"
+         case "$WRAPPERS" in *" $BASE "*) w=$BASE ;; *) break ;; esac ;;
     esac
     k=$((k + 1))
   done
-  return 0
+  CP_LIMIT=$k
 }
+
+tokenize() {
+  local s=$1
+  if [ "${#s}" -gt 2048 ]; then
+    # ${s//x/} is far worse than linear on bash 3.2 (10000 quote characters: 39 s, and bash cannot be interrupted
+    # inside it), so a long segment is cleaned by tr, which is the same three deletions
+    s=$(printf '%s' "$s" | tr -d "\"'\\\\")
+  else
+    s=${s//\"/}; s=${s//\'/}; s=${s//\\/}
+  fi
+  TOKS=()
+  read -r -a TOKS <<<"$s" || true
+  NT=${#TOKS[@]}
+  compute_cmd_limit
+}
+
+cmd_pos() { [ "$1" -le "$CP_LIMIT" ]; }   # is token index $1 in command position?
 
 has_token() { # exact basename match anywhere
   local k=0
-  while [ "$k" -lt "$NT" ]; do [ "${TOKS[$k]##*/}" != "$1" ] || return 0; k=$((k + 1)); done
+  while [ "$k" -lt "$NT" ]; do base_of "${TOKS[$k]}"; [ "$BASE" != "$1" ] || return 0; k=$((k + 1)); done
   return 1
 }
 # shellcheck disable=SC2254
@@ -150,10 +206,10 @@ seg_writes() { # does the current segment write/modify files?
   local k=0 b t
   case "$SEG_RAW" in *">"*) return 0 ;; esac
   while [ "$k" -lt "$NT" ]; do
-    t=${TOKS[$k]}; b=${t##*/}
+    t=${TOKS[$k]}; base_of "$t"; b=$BASE
     case "$b" in
       rm|mv|cp|tee|truncate|ln|chmod|chown|dd|install|rsync|ed|unlink|shred) return 0 ;;
-      sed|perl) { seg_matches '-i*' || seg_matches '-[pnlasE0-9]*i*'; } && return 0 ;;   # -i, -i.bak, and clustered forms such as perl -pi -e
+      sed|perl) { seg_matches '-i*' || seg_matches '-[!-]*i*'; } && return 0 ;;   # -i, -i.bak, and any short-option cluster holding an i (-pi, -ri, -wpi)
     esac
     case "$t" in --in-place*) return 0 ;; esac
     k=$((k + 1))
@@ -165,8 +221,10 @@ seg_writes() { # does the current segment write/modify files?
 check_delete_target() { # path-as-written
   local a=$1 pre dir abs
   case "$a" in
-    *'$'*|*'`'*) emit_deny "recursive delete with an unresolved variable or substitution ($a). Use a literal path inside the repo or /tmp." ;;
+    *'$'*|*'`'*) emit_deny "recursive delete with an unresolved variable or substitution (${a:0:200}). Use a literal path inside the repo or /tmp." ;;
   esac
+  # no real path is this long (PATH_MAX is 1024), and resolving a huge one is quadratic on bash 3.2
+  if [ "${#a}" -gt 4096 ]; then emit_deny "recursive delete of a path too long to check. Use a literal path inside the repo or /tmp."; fi
   if [ "$SIM_UNKNOWN" -eq 1 ]; then
     case "$a" in /*|"~"*) ;; *) emit_deny "recursive delete with a relative path after a cd the guard cannot resolve. Use an absolute path inside the repo or /tmp." ;; esac
   fi
@@ -288,7 +346,8 @@ check_git() { # $1 = index of git token
   while [ "$j" -lt "$NT" ]; do
     a=${TOKS[$j]}
     case "$a" in
-      -C) gdir=$(resolve_path "${TOKS[$((j + 1))]:-.}" "$gdir"); j=$((j + 2)) ;;
+      -C) if [ "${#TOKS[$((j + 1))]}" -gt 4096 ]; then emit_deny "git -C with a path too long to check."; fi
+          gdir=$(resolve_path "${TOKS[$((j + 1))]:-.}" "$gdir"); j=$((j + 2)) ;;
       -c|--git-dir|--work-tree|--namespace|--exec-path) j=$((j + 2)) ;;
       -*) j=$((j + 1)) ;;
       *) break ;;
@@ -317,15 +376,28 @@ check_git() { # $1 = index of git token
 }
 
 # ---------- rules 4, 6, 7 and extras ----------
+graphql_mutation() { # `gh api graphql` whose query text (anywhere in the command: the segment splitter cuts at the
+  # parentheses of a query) is a mutation that closes, merges, deletes, publishes or writes refs/commits
+  case "$CMD_ALL" in *[[:space:]]graphql*) ;; *) return 1 ;; esac
+  case "$CMD_ALL" in *[Mm][Uu][Tt][Aa][Tt][Ii][Oo][Nn]*) ;; *) return 1 ;; esac
+  case "$CMD_ALL" in
+    *[Cc][Ll][Oo][Ss][Ee]*|*[Mm][Ee][Rr][Gg][Ee]*|*[Dd][Ee][Ll][Ee][Tt][Ee]*|*[Pp][Uu][Bb][Ll][Ii][Ss][Hh]*|*[Uu][Pp][Dd][Aa][Tt][Ee][Rr][Ee][Ff]*|*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Ff]*|*[Cc][Rr][Ee][Aa][Tt][Ee][Cc][Oo][Mm][Mm][Ii][Tt]*) return 0 ;;
+  esac
+  return 1
+}
+
 check_gh() { # $1 = index of gh
-  local k subs="" n=0 a mut=0 hit=0 method=""
+  local k subs="" n=0 a mut=0 hit=0 method="" inp=0
   k=$(( $1 + 1 ))
   while [ "$k" -lt "$NT" ]; do
     a=${TOKS[$k]}
     case "$a" in
       -X|--method) method=${TOKS[$((k + 1))]:-}; k=$((k + 1)) ;;
+      -X?*) method=${a#-X} ;;               # attached: -XPUT
+      --method=*) method=${a#--method=} ;;
       -R|--repo) k=$((k + 1)) ;;   # the repo is a value, not a subcommand (gh pr -R o/r close 5)
-      -f|-F|--field|--raw-field|--input) mut=1 ;;
+      --input|--input=*) mut=1; inp=1 ;;    # a request body from a file: its text cannot be inspected
+      -f|-F|--field|--raw-field) mut=1 ;;
       -*) ;;
       *) if [ "$n" -lt 2 ]; then subs="$subs $a"; n=$((n + 1)); fi
          case "$a" in *git/refs*|*/merge|*/merges|*dispatches*|*/contents/*) hit=1 ;; esac ;;
@@ -358,14 +430,18 @@ check_gh() { # $1 = index of gh
     " repo create"*) if seg_matches '--public'; then emit_deny "rule 8: a public repository publishes code. Create it with --private, or ask the user."; fi ;;
     " workflow run"*|" workflow dispatch"*|" run rerun"*) emit_deny "starting or re-running workflows by hand is not allowed; deploys come from CI on a push. To roll back, push a revert commit through the release gate." ;;
     " api"*)
-      case "$method" in ''|GET|get) ;; *) mut=1 ;; esac
+      local mm=0
+      case "$method" in ''|[Gg][Ee][Tt]|[Hh][Ee][Aa][Dd]) ;; *) mut=1; mm=1 ;; esac
       if [ "$mut" -eq 1 ] && seg_matches '*state=closed*'; then emit_deny "rule 9: closing an issue or PR through the API is the user's call. Comment and notify instead."; fi
-      if [ "$mut" -eq 1 ] && [ "$hit" -eq 1 ]; then emit_deny "gh api call that merges, dispatches workflows, or writes refs/contents bypasses the release gate."; fi ;;
+      if [ "$mut" -eq 1 ] && [ "$hit" -eq 1 ]; then emit_deny "gh api call that merges, dispatches workflows, or writes refs/contents bypasses the release gate."; fi
+      if [ "$mm" -eq 1 ] && [ "$inp" -eq 1 ]; then emit_deny "gh api with a mutating method and --input sends a body the guard cannot read. Use the dedicated gh subcommand, or ask the user."; fi
+      if [ "$inp" -eq 1 ] && seg_matches graphql; then emit_deny "gh api graphql --input sends a query the guard cannot read. Pass the query with -f query=... so it can be checked."; fi
+      if graphql_mutation; then emit_deny "rule 3/9: a GraphQL mutation that closes, merges, deletes, publishes or writes refs is the user's call (it bypasses the release gate)."; fi ;;
   esac
 }
 
 check_publish() { # $1 = index of npm/pnpm/bun/yarn: any `publish` word in the command is denied
-  if seg_matches publish; then
+  if seg_matches publish || seg_matches unpublish || seg_matches deprecate || seg_matches dist-tag; then
     emit_deny "rule 8: publishing a package is the user's call. Run '${TOKS[$1]##*/} pack' to check the tarball, then notify that it is ready."
   fi
 }
@@ -407,12 +483,13 @@ READERS=" cat tac less more head tail grep egrep fgrep rg ag sed awk gawk cut so
 
 check_env_files() { # whole line (tokens in TOKS): a reader and an env-file operand together
   local k t b reader=0 envtok=0
-  case "${TOKS[0]##*/}" in
+  base_of "${TOKS[0]}"
+  case "$BASE" in
     git) case " ${TOKS[*]} " in *" commit "*|*" tag "*|*" check-ignore "*|*" status "*) return 0 ;; esac ;;
   esac
   k=0
   while [ "$k" -lt "$NT" ]; do
-    t=${TOKS[$k]}; b=${t##*/}
+    t=${TOKS[$k]}; base_of "$t"; b=$BASE
     case "$READERS" in *" $b "*) reader=1 ;; esac
     case "$b" in .gitignore|.dockerignore|.npmignore|.vercelignore|.eslintignore) return 0 ;; esac
     case "$t" in "<"*) reader=1 ;; esac
@@ -426,11 +503,15 @@ check_env_files() { # whole line (tokens in TOKS): a reader and an env-file oper
 
 check_secret_dump() { # one segment
   local k first
-  first=${TOKS[0]##*/}
+  base_of "${TOKS[0]}"; first=$BASE
   case "$first" in
     printenv) emit_deny "printenv dumps credentials into the session." ;;
     env) [ "$NT" -gt 1 ] || emit_deny "'env' with no command dumps credentials into the session." ;;
-    export|declare|typeset) seg_matches '-p' && emit_deny "listing exported variables dumps credentials into the session." ;;
+    # `A && B` as the last statement of a case arm returns 1 when A fails, and set -e then kills the caller
+    # ("internal error; failing closed") for every plain `export FOO=1`: use if. Bare export/declare/typeset
+    # (no operand) list the environment just like -p does.
+    export|declare|typeset)
+      if seg_matches '-p' || ! seg_has_operand; then emit_deny "listing exported variables dumps credentials into the session."; fi ;;
     echo|printf) k=1; while [ "$k" -lt "$NT" ]; do var_is_secret "${TOKS[$k]}" && emit_deny "printing a token/secret variable is not allowed."; k=$((k + 1)); done ;;
   esac
 }
@@ -439,7 +520,8 @@ check_misc() { # one segment, tokens in TOKS
   local k t b
   k=0
   while [ "$k" -lt "$NT" ]; do
-    t=${TOKS[$k]}; b=${t##*/}
+    ceiling
+    t=${TOKS[$k]}; base_of "$t"; b=$BASE
     case "$t" in
       *release-token*|*release-ready*|*migrate-token*|*migrate-confirmed*|*.agent/secret*)
         emit_deny "release/migration tokens and the signing secret are managed by release-gate.sh and migrate-gate.sh only." ;;
@@ -507,9 +589,12 @@ committed_migration() { # absolute physical path -> 0 if it exists in HEAD of it
   git -C "$top" cat-file -e "HEAD:$rel" 2>/dev/null
 }
 
-is_tamper_path() {
-  case "$1" in "$SELF_DIR"|"$SELF_DIR"/*) return 0 ;; esac
-  case "$1" in
+is_tamper_path() { # macOS volumes are case-insensitive: match on the lower-cased path (like is_goal_path)
+  local l s
+  l=$(printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z')
+  s=$(printf '%s' "$SELF_DIR" | LC_ALL=C tr 'A-Z' 'a-z')
+  case "$l" in "$s"|"$s"/*) return 0 ;; esac
+  case "$l" in
     */.claude/settings.json|*/.claude/settings.local.json|*/.git/hooks|*/.git/hooks/*|*.githooks|*.githooks/*|*/ching/bin|*/ching/bin/*|*/.claude/ching|*/.claude/ching/*) return 0 ;;
   esac
   return 1
@@ -522,7 +607,9 @@ is_goal_path() { # macOS volumes are case-insensitive by default, so .agent/goal
   case "$l" in */.agent/goal.md|*/defaults/goal.md) return 0 ;; esac   # */defaults/ also covers AGENT_HOME overrides
   return 1
 }
-gated_lines() { grep -E '^[[:space:]]*(review|release_mode|test_command):' | sed 's/[[:space:]]*$//' | sort || true; }
+# -a: a NUL byte in the text must not turn the output into "Binary file matches" (the lines would vanish);
+# LC_ALL=C on every stage: sed fails on a byte sequence that is not valid UTF-8 and would drop the lines too.
+gated_lines() { LC_ALL=C grep -aE '^[[:space:]]*(review|release_mode|test_command):' | LC_ALL=C sed 's/[[:space:]]*$//' | LC_ALL=C sort || true; }
 deny_goal() { emit_deny "rule 11: review, release_mode and test_command in GOAL.md are the user's settings. Put the proposed change in STATE.md and notify the user."; }
 goal_seg_writes() { # seg_writes, except that discarding or merging a stream (2>/dev/null, 2>&1 split at '&') is not a write
   local keep=$SEG_RAW rc=0
@@ -533,14 +620,19 @@ goal_seg_writes() { # seg_writes, except that discarding or merging a stream (2>
 }
 check_new_goal() { # $1 = the gated lines of a GOAL.md that does not exist yet
   local rv relm
-  rv=$(printf '%s\n' "$1" | sed -n 's/^[[:space:]]*review:[[:space:]]*//p' | head -1)
-  relm=$(printf '%s\n' "$1" | sed -n 's/^[[:space:]]*release_mode:[[:space:]]*//p' | head -1)
-  if { [ -n "$rv" ] && [ "$rv" != required ]; } || { [ -n "$relm" ] && [ "$relm" != confirm ]; }; then
+  # EVERY review:/release_mode: line counts, not just the first one: a harmless indented decoy line must not
+  # hide the unindented line goal_get reads. `grep -vx ... || true` keeps this safe under pipefail.
+  rv=$(printf '%s\n' "$1" | LC_ALL=C sed -n 's/^[[:space:]]*review:[[:space:]]*//p' | LC_ALL=C grep -vxe required -e '' || true)
+  relm=$(printf '%s\n' "$1" | LC_ALL=C sed -n 's/^[[:space:]]*release_mode:[[:space:]]*//p' | LC_ALL=C grep -vxe confirm -e '' || true)
+  if [ -n "$rv" ] || [ -n "$relm" ]; then
     emit_deny "rule 11: a new GOAL.md may only start with review: required and release_mode: confirm. The user switches them."
   fi
 }
 check_goal_write() { # $1 = absolute path of a GOAL.md being written by Edit/MultiEdit/Write
   local old new before after size
+  # Defence in depth next to grep -a: a NUL byte anywhere in the input of a GOAL.md write is never legitimate
+  # (and any failure to look is a deny).
+  jq -e '[.tool_input | .. | strings | select(contains("\u0000"))] | length == 0' <<<"$INPUT" >/dev/null 2>&1 || deny_goal
   case "$TOOL" in
     Edit|MultiEdit)
       if [ "$TOOL" = Edit ]; then
@@ -550,7 +642,14 @@ check_goal_write() { # $1 = absolute path of a GOAL.md being written by Edit/Mul
         old=$(jq -r '[.tool_input.edits[]?.old_string // ""] | join("\n")' <<<"$INPUT" | gated_lines)
         new=$(jq -r '[.tool_input.edits[]?.new_string // ""] | join("\n")' <<<"$INPUT")
       fi
-      if [ ! -f "$1" ]; then   # nothing on disk to edit: an edit can only create the file (empty old_string)
+      if [ ! -f "$1" ]; then
+        # Nothing on disk: the edits can only create the file (empty old_string) and later edits then change it,
+        # so check the RESULT of applying them to empty text, not the strings they carry (a partial-line
+        # "confirm" -> "auto" after the creating edit names no setting).
+        after=$(printf '%s' "$INPUT" | perl "$SELF_DIR/goal-sim-edit.pl" "$TOOL" "$1" | gated_lines) || deny_goal
+        check_new_goal "$after"
+        # and, as before, the settings the edit strings name themselves (an edit whose old_string cannot match
+        # still must not carry an unsafe setting)
         new=$(printf '%s\n' "$new" | gated_lines)
         check_new_goal "$new"
         return 0
@@ -575,21 +674,41 @@ check_goal_write() { # $1 = absolute path of a GOAL.md being written by Edit/Mul
   esac
 }
 
+goal_token_path() { # token -> sets GABS to the GOAL.md path it names, or "" (not in a $() so that a deny can exit)
+  # The path may follow an attached redirect operator (>>f, 2>f, &>f) or a name= prefix (of=f), and a directory
+  # name may itself hold a '<', '>' or '=' (.agent/sub=dir/../GOAL.md). So try the whole token and the tail
+  # after each of those characters; any one resolving to a GOAL.md path counts.
+  local rest=$1 n=0 cand
+  GABS=""
+  while :; do
+    if [ "${#rest}" -le 4096 ]; then   # no real path is longer; resolving a huge one is quadratic on bash 3.2
+      cand=$(resolve_path "$rest" "$SIM_CWD")
+      if is_goal_path "$cand"; then GABS=$cand; return 0; fi
+    fi
+    [ "$rest" != "${rest#*[<>=]}" ] || return 0
+    rest=${rest#*[<>=]}
+    n=$((n + 1))
+    if [ "$n" -gt 24 ]; then emit_deny "rule 11: a token naming GOAL.md with this many '<', '>' or '=' cannot be checked. Use the Edit or Write tool."; fi
+  done
+}
+
 tamper_bash() {
-  local k=0 t abs u gabs
+  local k=0 t abs gabs
   while [ "$k" -lt "$NT" ]; do
+    ceiling
     t=${TOKS[$k]}
     case "$t" in -*) k=$((k + 1)); continue ;; esac
     abs=""
-    case "$t" in *hooks*|*settings*|*ching*|*.sql) abs=$(resolve_path "$t" "$SIM_CWD") ;; esac
+    # any case: macOS volumes are case-insensitive, so .claude/Settings.JSON is settings.json
+    case "$t" in *[Hh][Oo][Oo][Kk][Ss]*|*[Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss]*|*[Cc][Hh][Ii][Nn][Gg]*|*.[Ss][Qq][Ll])
+      if [ "${#t}" -le 4096 ]; then abs=$(resolve_path "$t" "$SIM_CWD"); fi ;;
+    esac
     if [ -n "$abs" ] && is_tamper_path "$abs" && seg_writes; then
       emit_deny "editing hooks, settings or the guard itself ($t) would disable the guardrails. Ask the user."
     fi
     gabs=""
     case "$t" in
-      *[Gg][Oo][Aa][Ll].[Mm][Dd]*)   # any case; drop an attached redirect operator (>>f, 2>f, &>f) and a name= prefix (of=f)
-        u=${t##*[<>]}; u=${u#*=}
-        gabs=$(resolve_path "$u" "$SIM_CWD") ;;
+      *[Gg][Oo][Aa][Ll].[Mm][Dd]*) goal_token_path "$t"; gabs=$GABS ;;
     esac
     # '>&f' is split at the '&', so the target is the first token of a segment whose predecessor ended in '>'
     if [ -n "$gabs" ] && is_goal_path "$gabs" && { goal_seg_writes || { [ "$k" -eq 0 ] && [ "$SEG_AFTER_REDIR" -eq 1 ]; }; }; then
@@ -609,16 +728,29 @@ SEG_RAW=""
 SEG_AFTER_REDIR=0   # the previous segment ended in '>' (the split at '&' of '>&file' puts the file in this one)
 NEXT_AFTER_REDIR=0
 scan_segment() {
-  local trimmed
+  local trimmed tail ci tgt
+  ceiling
   SEG_RAW=$1
   tokenize "$1"
   [ "$NT" -gt 0 ] || return 0
   SEG_AFTER_REDIR=$NEXT_AFTER_REDIR
-  trimmed=${1%"${1##*[![:space:]]}"}
+  if [ "${#1}" -gt 256 ]; then tail=${1: -256}; else tail=$1; fi   # ${1##*pattern} on a long segment is quadratic
+  trimmed=${tail%"${tail##*[![:space:]]}"}
   case "$trimmed" in *'>') NEXT_AFTER_REDIR=1 ;; *) NEXT_AFTER_REDIR=0 ;; esac
   # track cd so later relative paths resolve like the shell would
-  if [ "${TOKS[0]##*/}" = cd ] || [ "${TOKS[0]##*/}" = pushd ]; then
-    local tgt=${TOKS[1]:-$HOME}
+  base_of "${TOKS[0]}"
+  if [ "$BASE" = cd ] || [ "$BASE" = pushd ]; then
+    ci=1   # skip the options (-P, -L, --): the target is the first word after them; a lone '-' is the previous directory
+    while [ "$ci" -lt "$NT" ]; do
+      case "${TOKS[$ci]}" in
+        -) break ;;
+        --) ci=$((ci + 1)); break ;;
+        -*) ci=$((ci + 1)) ;;
+        *) break ;;
+      esac
+    done
+    tgt=${TOKS[$ci]:-$HOME}
+    if [ "${#tgt}" -gt 4096 ]; then tgt='$too-long'; fi   # no real path is this long: treat it as unresolvable
     case "$tgt" in
       *'$'*|*'`'*|-) SIM_UNKNOWN=1 ;;
       *) SIM_CWD=$(resolve_path "$tgt" "$SIM_CWD"); SIM_UNKNOWN=0 ;;
@@ -628,37 +760,178 @@ scan_segment() {
   check_misc
 }
 
-strip_heredocs() { # drop heredoc bodies unless the heredoc feeds an interpreter
-  awk '
-    skip { l = $0; sub(/^[ \t]+/, "", l); if (l == word) skip = 0; next }
-    {
-      print
-      if (match($0, /<<-?[ \t]*["'"'"']?[A-Za-z_][A-Za-z_0-9]*["'"'"']?/)) {
-        w = substr($0, RSTART, RLENGTH); gsub(/<<-?[ \t]*|["'"'"']/, "", w)
-        pre = substr($0, 1, RSTART - 1); n = split(pre, t, /[ \t]+/); interp = 0; redir = 0
-        for (i = 1; i <= n; i++) {
-          if (redir) { redir = 0; continue }
-          if (t[i] ~ /^[0-9]*>>?$/) { redir = 1; continue }
-          b = t[i]; sub(/.*\//, "", b)
-          if (b ~ /^(bash|sh|zsh|python3?|node|perl|ruby|bun|deno)$/) interp = 1
-        }
-        if (!interp) { word = w; skip = 1 }
+# Drop the bodies of heredocs that do not feed an interpreter (a body is data, not commands). When in doubt the
+# lines are KEPT, because a false deny is cheaper than a body that swallows the commands after it:
+#  - here-strings (<<<), and <<word inside quotes, comments or (( )) arithmetic, are not heredocs;
+#  - the delimiter is the whole word after optional quotes (END-OF-FILE, EOF.1), not just its leading letters;
+#  - the skipped lines are buffered and printed at END if the terminator never came;
+#  - $1 selects how a line that ends in an odd number of backslashes is treated: 1 joins it with the next line
+#    (so the heredoc body starts after the joined line), 2 joins it unless the backslash sits in a comment (the
+#    shell does not continue a comment: `ls # note \` + `gh pr close 5` runs both), 0 never joins. The guard
+#    scans the output of all the views that differ and denies when any one is denied;
+#  - $( inside double quotes is command context again, so the body of git commit -m "$(cat <<'EOF' ... EOF)"
+#    is data like the unquoted $(cat <<'EOF'; bash -c "$(cat <<EOF ...)" stays scanned (an interpreter).
+strip_heredocs() {
+  awk -v jn="$1" -v sq="'" -v dq='"' '
+    function isinterp(pre,   n, t, i, b, redir, r) {
+      n = split(pre, t, /[ \t]+/); redir = 0; r = 0
+      for (i = 1; i <= n; i++) {
+        if (redir) { redir = 0; continue }
+        if (t[i] ~ /^[0-9]*>>?$/) { redir = 1; continue }
+        b = t[i]; sub(/.*\//, "", b)
+        if (b ~ /^(bash|sh|zsh|python3?|node|perl|ruby|bun|deno)$/) r = 1
       }
-    }'
+      return r
+    }
+    function odd_trailing(line,   n, t) {   # an odd number of backslashes at the end (only the tail is looked at: a
+      # regex over a long run of backslashes is quadratic; size_verdict has already refused runs of 64 or more)
+      n = length(line); t = (n > 64) ? substr(line, n - 63) : line
+      return (match(t, /\\+$/) && RLENGTH % 2 == 1)
+    }
+    function in_comment(line,   len, i, c, q) {   # does a shell comment start somewhere in this line?
+      if (index(line, "#") == 0) return 0   # no hash at all: nothing to walk (index is fast, the loop below is not)
+      len = length(line); q = ""
+      for (i = 1; i <= len; i++) {
+        c = substr(line, i, 1)
+        if (q == sq) { if (c == sq) q = ""; continue }
+        if (q == "ansi") { if (c == "\\") i++; else if (c == sq) q = ""; continue }
+        if (q == dq) { if (c == "\\") i++; else if (c == dq) q = ""; continue }
+        if (c == "\\") { i++; continue }
+        if (c == "$" && substr(line, i + 1, 1) == sq) { q = "ansi"; i++; continue }   # ANSI-C quoting (dollar, single quote): a backslash escapes the next character
+        if (c == sq || c == dq) { q = c; continue }
+        if (c == "#" && (i == 1 || index(" \t;&|(", substr(line, i - 1, 1)) > 0)) return 1
+      }
+      return 0
+    }
+    function scan(line,   len, i, j, c, q, depth, ad, w, d, sp, sv_q, sv_d) {
+      len = length(line); q = ""; depth = 0; ad = 0; sp = 0
+      for (i = 1; i <= len; i++) {
+        c = substr(line, i, 1)
+        if (q == sq) { if (c == sq) q = ""; continue }
+        if (q == "ansi") { if (c == "\\") i++; else if (c == sq) q = ""; continue }
+        if (q == dq) {
+          if (c == "\\") i++
+          else if (c == dq) q = ""
+          else if (c == "$" && substr(line, i + 1, 1) == "(") {   # $( in double quotes: command context until its )
+            sp++; sv_q[sp] = dq; sv_d[sp] = depth; q = ""; depth++; i++
+            if (substr(line, i + 1, 1) == "(") { ad = depth; depth++; i++ }   # $(( is arithmetic
+          }
+          continue
+        }
+        if (c == "\\") { i++; continue }
+        if (c == "$" && substr(line, i + 1, 1) == sq) { q = "ansi"; i++; continue }
+        if (c == sq || c == dq) { q = c; continue }
+        if (c == "#" && (i == 1 || index(" \t;&|(", substr(line, i - 1, 1)) > 0)) break
+        if (c == "(") { depth++; if (!ad && substr(line, i + 1, 1) == "(") ad = depth; continue }
+        if (c == ")") {
+          depth--; if (depth < 0) depth = 0; if (ad && depth < ad) ad = 0
+          if (sp > 0 && depth == sv_d[sp]) { q = sv_q[sp]; sp-- }   # back into the double quote
+          continue
+        }
+        if (c == "<" && substr(line, i + 1, 1) == "<") {
+          if (substr(line, i + 2, 1) == "<") { i += 2; continue }
+          if (ad) { i++; continue }
+          j = i + 2
+          if (substr(line, j, 1) == "-") j++
+          while (substr(line, j, 1) == " " || substr(line, j, 1) == "\t") j++
+          while (substr(line, j, 1) == sq || substr(line, j, 1) == dq || substr(line, j, 1) == "\\") j++
+          w = ""
+          while (j <= len) { d = substr(line, j, 1); if (index(" \t;&|<>()" sq dq, d) > 0) break; w = w d; j++ }
+          if (j <= len && (substr(line, j, 1) == sq || substr(line, j, 1) == dq)) j++
+          if (w != "" && !isinterp(substr(line, 1, i - 1))) words[++nw] = w
+          i = j - 1
+        }
+      }
+    }
+    skip {
+      l = $0; sub(/^[ \t]+/, "", l)
+      if (l == words[cur]) { cur++; if (cur > nw) { skip = 0; nb = 0 } }
+      else buf[++nb] = $0
+      next
+    }
+    {
+      line = $0
+      if (jn) while (odd_trailing(line) && !(jn == 2 && in_comment(line)) && (getline nx) > 0) line = substr(line, 1, length(line) - 1) nx
+      print line
+      if (index(line, "<<") > 0) { nw = 0; scan(line); if (nw > 0) { skip = 1; cur = 1; nb = 0 } }
+    }
+    END { if (skip) for (i = 1; i <= nb; i++) print buf[i] }'
+}
+
+join_continuations() { # backslash-newline is a line continuation: `git push \` + `origin HEAD:main` is one command
+  # An odd number of backslashes before the newline continues the line; an even number is literal backslashes.
+  # Runs AFTER strip_heredocs: a heredoc body line ending in a backslash must not swallow its terminator.
+  perl -0777 -pe 's/(?<!\\)((?:\\\\)*)\\\n/$1/g'
+}
+
+CMD_ALL=""   # the text being scanned (for checks that span segments)
+scan_text() { # scan one text (heredoc bodies already stripped); a deny exits, so this only returns when it is clean
+  local seg segs
+  # every piece of per-scan state starts fresh: the simulated cd, the redirect carry-over; the time ceiling
+  # (SECONDS) keeps counting across scans
+  SIM_CWD=$CWD_PHYS; SIM_UNKNOWN=0; SEG_RAW=""; SEG_AFTER_REDIR=0; NEXT_AFTER_REDIR=0; DEFB=""
+  CMD_ALL=$1
+  while IFS= read -r seg; do   # pass 1: per line, for rules that need the whole line (.env readers)
+    ceiling
+    SEG_RAW=$seg; tokenize "$seg"
+    if [ "$NT" -gt 0 ]; then check_env_files; fi
+  done <<<"$1"
+  # A failed splitter must not look like "no segments": capture its output and fail closed if it errs.
+  segs=$(printf '%s\n' "$1" | sed -e 's/&&/\n/g' -e 's/||/\n/g' -e 's/[;|&()`]/\n/g') || { echo "GUARD: could not split the command; failing closed" >&2; exit 2; }
+  while IFS= read -r seg; do   # pass 2: per simple command
+    scan_segment "$seg"
+  done <<<"$segs"
+}
+
+size_verdict() { # stdin: the raw command -> prints "ok", or "big" when it cannot be scanned in time. One linear awk
+  # pass. The heredoc/join awk and the bash tokenizer cannot be interrupted by the 8 s ceiling, and a hook that
+  # times out (15 s) lets the call run, so what would take too long is refused up front:
+  #  - more than 256 KB, or more than 1000 backslash-newline continuations;
+  #  - a logical (joined) line over 64 KB, or a join workload (the sum of the joined-line lengths at each join,
+  #    which is what the comment-aware join costs) over 4.5 million characters;
+  #  - a line that ends in 64 or more backslashes.
+  LC_ALL=C awk -v maxbytes=262144 -v maxcont=1000 -v maxlogical=65536 -v maxwork=4500000 '
+    BEGIN { bytes = 0; cont = 0; acc = 0; grp = 0; work = 0; bad = 0 }
+    {
+      n = length($0); bytes += n + 1
+      if (bytes > maxbytes) { bad = 1; exit }
+      t = (n > 64) ? substr($0, n - 63) : $0
+      if (n >= 64 && match(t, /\\+$/) && RLENGTH >= 64) { bad = 1; exit }
+      if (substr(t, length(t), 1) == "\\") {
+        cont++; acc += n; work += acc; grp = 1
+        if (cont > maxcont || acc > maxlogical || work > maxwork) { bad = 1; exit }
+      } else {
+        if (grp && acc + n > maxlogical) { bad = 1; exit }
+        acc = 0; grp = 0
+      }
+    }
+    END { print (bad ? "big" : "ok") }'
 }
 
 check_bash() {
-  local cmd seg
-  cmd=$(jq -r '.tool_input.command // ""' <<<"$INPUT")
-  [ -n "$cmd" ] || allow
-  cmd=$(printf '%s\n' "$cmd" | strip_heredocs)
-  while IFS= read -r seg; do   # pass 1: per line, for rules that need the whole line (.env readers)
-    SEG_RAW=$seg; tokenize "$seg"
-    if [ "$NT" -gt 0 ]; then check_env_files; fi
-  done <<<"$cmd"
-  while IFS= read -r seg; do   # pass 2: per simple command
-    scan_segment "$seg"
-  done < <(printf '%s\n' "$cmd" | sed -e 's/&&/\n/g' -e 's/||/\n/g' -e 's/[;|&()`]/\n/g')
+  local raw plain joined prev verdict
+  raw=$(jq -r '.tool_input.command // ""' <<<"$INPUT")
+  [ -n "$raw" ] || allow
+  # before any view is computed: a command that cannot be scanned in time is refused (fail closed)
+  verdict=$(printf '%s\n' "$raw" | size_verdict) || { echo "GUARD: could not measure the command; failing closed" >&2; exit 2; }
+  if [ "$verdict" != ok ]; then emit_deny "command too large to check safely (over 256 KB, over 1000 line continuations, or a joined line over 64 KB). Split it into smaller commands or put the script in a file."; fi
+  # Up to three views of the command, denied when any one is denied:
+  #  - un-joined: every physical line stands alone (the shell does not continue a comment that ends in a
+  #    backslash, so `ls # note \` + `gh pr close 5` runs both);
+  #  - joined: a backslash-newline continues the line (`git push \` + `origin HEAD:main` is one command);
+  #  - joined except after a comment (the shell's real behaviour; needed for `ls # c \` + `git push \` +
+  #    `origin HEAD:main`, which the other two views each get wrong).
+  # Without a backslash-newline in the command all three are the same text, so only one scan runs.
+  plain=$(printf '%s\n' "$raw" | strip_heredocs 0)
+  scan_text "$plain"
+  case "$raw" in
+    *'\'$'\n'*)
+      prev=$plain
+      joined=$(printf '%s\n' "$raw" | strip_heredocs 1 | join_continuations)
+      if [ "$joined" != "$prev" ]; then scan_text "$joined"; prev=$joined; fi
+      joined=$(printf '%s\n' "$raw" | strip_heredocs 2)   # awk did every join itself: no perl pass, it ignores comments
+      if [ "$joined" != "$prev" ] && [ "$joined" != "$plain" ]; then scan_text "$joined"; fi ;;
+  esac
   allow
 }
 
@@ -722,14 +995,14 @@ check_send_mcp() { # rule 10 (D18): drafts only
   local op=${TOOL_LC##*__}
   case "$op" in *draft*) allow ;; esac
   case "$op" in
-    *send*|reply|*_reply|reply_*|forward|*_forward|forward_*|*post_message*|*schedule_message*)
+    *send*|reply|*_reply|reply_*|forward|*_forward|forward_*|*post_message*|*schedule_message*|*reply_to*|*reply_all*|*replyall*|*postmessage*|*update_message|*upload_file*)
       emit_deny "rule 10: sessions write drafts and never send (D18). Save it as a draft and notify the user to send it." ;;
   esac
   allow
 }
 
 case "$TOOL" in
-  Bash) check_bash ;;
+  Bash|Monitor) check_bash ;;   # Monitor runs a shell command too ({command, description, timeout_ms})
   Read|Grep) check_read ;;
   Edit|Write|MultiEdit|NotebookEdit) check_write ;;
   *) case "$TOOL_LC" in

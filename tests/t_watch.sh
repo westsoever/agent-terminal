@@ -100,4 +100,57 @@ assert_no_file "lock removed after the run" "$AGENT_HOME/watch.lock"
 WATCH_ROTATE_BYTES=10 "$W"
 assert_no_file "events.jsonl rotated away" "$EVF"
 assert_eq "one rotated file kept" "1" "$(ls "$AGENT_HOME"/events-*.jsonl | wc -l | tr -d ' ')"
+
+# ---------- fix wave FC1-1: TOKEN_BUDGET_DAILY parsing ----------
+# Each case runs in its own AGENT_HOME that holds one day total (no sessions), so only the budget code runs.
+bud_flags() { # agent_home -> "80", "80 100", "100" or ""
+  local f=""
+  if [ -f "$1/tokens/$DAY.alert80" ]; then f="80"; fi
+  if [ -f "$1/tokens/$DAY.alert100" ]; then f="$f${f:+ }100"; fi
+  printf '%s' "$f"
+}
+bud() { # name day_total expected_alerts expected_token_events env_value("-" = unset) [ching.env line]
+  local ah="$WORK/bud-$1"
+  rm -rf "$ah"; mkdir -p "$ah/tokens" "$ah/defaults"
+  printf 'mach %s\n' "$2" >"$ah/tokens/$DAY"
+  if [ -n "${6:-}" ]; then printf '%s\n' "$6" >"$ah/defaults/ching.env"; fi
+  if [ "$5" = "-" ]; then AGENT_HOME="$ah" "$W" 2>"$ah/err"; else AGENT_HOME="$ah" TOKEN_BUDGET_DAILY="$5" "$W" 2>"$ah/err"; fi
+  assert_eq "budget $1: alerts fired" "$3" "$(bud_flags "$ah")"
+  assert_eq "budget $1: token events" "$4" "$(jq -r 'select(.kind=="tokens") | .kind' "$ah/events.jsonl" 2>/dev/null | wc -l | tr -d ' ')"
+  assert_eq "budget $1: stderr is empty" "" "$(cat "$ah/err")"
+}
+bud octal-env 9 "80 100" 2 08 ""
+assert_eq "budget octal-env: the budget is read as decimal 8" "8 8" "$(jq -r 'select(.kind=="tokens") | .data.budget' "$WORK/bud-octal-env/events.jsonl" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+bud octal-file 9 "80 100" 2 - "TOKEN_BUDGET_DAILY=08"
+bud zero-env 9 "" 0 0 ""
+bud zero-file 9 "" 0 - "TOKEN_BUDGET_DAILY=0"
+bud zeros-only 9 "" 0 000 ""
+bud export-quoted 85 "80" 1 - 'export TOKEN_BUDGET_DAILY="100"'
+bud single-quoted 85 "80" 1 - "TOKEN_BUDGET_DAILY='100'"
+bud plain-file 85 "80" 1 - "TOKEN_BUDGET_DAILY=100"
+bud export-zero-padded 9 "80 100" 2 - "export TOKEN_BUDGET_DAILY=0008"
+bud garbage-env 9 "" 0 abc ""
+bud negative-env 9 "" 0 -5 ""
+bud ten-digits-env 9 "" 0 1000000000 ""
+bud garbage-file 9 "" 0 - 'TOKEN_BUDGET_DAILY="1x0"'
+bud empty-file 9 "" 0 - "TOKEN_BUDGET_DAILY="
+bud nine-digits-file 9 "" 0 - "TOKEN_BUDGET_DAILY=999999999"
+
+# ---------- fix wave FC1-2: a session whose meta file is older than 48 h is skipped before any key is read ----------
+OAH="$WORK/old-ah"; mkdir -p "$OAH/sessions"
+oreg() { # sid state transcript meta_age_secs : session in the old-ah sandbox whose meta file is that old
+  local d="$OAH/sessions/$1"; mkdir -p "$d"
+  printf 'cwd=%s\nname=proj\nstate=%s\ntranscript=%s\nupdated=%s\n' "$P" "$2" "$3" "$NOW" >"$d/meta"
+  touch -t "$(date -r $((NOW - $4)) +%Y%m%d%H%M.%S)" "$d/meta"
+}
+TO1="$WORK/o1.jsonl"; amsg q1 0 1 0 1 >"$TO1"; touch -t 202001010000 "$TO1"; oreg o1 working "$TO1" 259200   # 3 days old
+TO2="$WORK/o2.jsonl"; amsg q2 0 1 0 1 >"$TO2"; touch -t 202001010000 "$TO2"; oreg o2 working "$TO2" 144000   # 40 h old: inside the window
+TO3="$WORK/o3.jsonl"; amsg q3 0 1000 0 77 >"$TO3"; oreg o3 idle "$TO3" 259200                                # 3 days old, unread tokens
+AGENT_HOME="$OAH" "$W"
+assert_eq "old meta: a silent working session is not stalled" "" "$(meta_get "$OAH/sessions/o1/meta" stalled_at)"
+assert_eq "old meta: no stall event for it" "0" "$(jq -r 'select(.kind=="stall" and .sid=="o1") | .kind' "$OAH/events.jsonl" 2>/dev/null | wc -l | tr -d ' ')"
+assert_eq "old meta: its transcript is not read" "" "$(awk '$1 == "o3" { print $2 }' "$OAH/tokens/$DAY" 2>/dev/null)"
+assert_eq "old meta: its meta is left untouched" "" "$(meta_get "$OAH/sessions/o3/meta" tok_offset)"
+assert_contains "meta inside 48 h still stalls" "$(cat "$OAH/sessions/o2/meta")" "stalled_at=1"
+assert_eq "meta inside 48 h: one stall event" "1" "$(jq -r 'select(.kind=="stall" and .sid=="o2") | .kind' "$OAH/events.jsonl" | wc -l | tr -d ' ')"
 exit 0
