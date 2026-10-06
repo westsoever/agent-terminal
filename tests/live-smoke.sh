@@ -39,6 +39,8 @@ run 'Run exactly this command with the Bash tool and report what happened in one
 echo "remote has scratch: $(git --git-dir="$S/remote.git" rev-parse -q --verify refs/heads/scratch >/dev/null && echo YES-BAD || echo no-good)"
 echo "== 4. check-in nudge: real voice and idle read (you should hear one short sentence)"
 if "$KIT/bin/speak.sh" "Ching check-in test."; then echo "speak.sh: ok"; else echo "speak.sh: FAILED (is Kokoro running on port 8880?)"; fi
-idle=$(ioreg -c IOHIDSystem | awk '/"HIDIdleTime"/ { print int($NF / 1000000000); exit }')
+# ioreg lives in /usr/sbin (not on launchd's PATH). awk exits at the first match and ioreg may get SIGPIPE (141):
+# with set -eo pipefail that must not end the script before the idle value and the sandbox line are printed.
+idle=$(/usr/sbin/ioreg -c IOHIDSystem | awk '/"HIDIdleTime"/ { print int($NF / 1000000000); exit }' || true)
 echo "keyboard/mouse idle seconds: ${idle:-UNREADABLE}"
 echo "sandbox: $S"
