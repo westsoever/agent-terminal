@@ -86,10 +86,30 @@ nt q4 stall $((NOON + 9 * 3600))
 assert_contains "budgeted alert at exactly 21:00 waits" "$(tail -1 "$LOG")" "suppressed:quiet-hours"
 rm -rf "$AGENT_HOME/notify"
 nt c1 stall
-nt c1 handoff $((NOON + 600))
+nt c1 tokens $((NOON + 600))
 assert_contains "second budgeted alert within 45 min is suppressed" "$(tail -1 "$LOG")" "suppressed:cooldown"
-nt c1 handoff $((NOON + 46 * 60))
+nt c1 tokens $((NOON + 46 * 60))
 assert_contains "after the cooldown it is delivered" "$(tail -1 "$LOG")" $'\tdry-run\t'
+# handoff is the alert worth keeping (context almost full, once per crossing of 80%): it is not counted
+# against the daily budget and does not start or obey the per-session cooldown. Quiet hours still apply.
+rm -rf "$AGENT_HOME/notify"
+for s in h1 h2 h3 h4; do nt "$s" stall; done
+nt h5 handoff
+assert_contains "handoff is delivered with the daily budget used up" "$(tail -1 "$LOG")" $'\tdry-run\t'
+nt h5 stall
+assert_contains "a stall for that session is still suppressed by the daily budget" "$(tail -1 "$LOG")" "suppressed:daily-budget"
+assert_eq "handoff did not use any of the daily budget" "4" "$(cat "$AGENT_HOME/notify/budget-2026-10-05")"
+rm -rf "$AGENT_HOME/notify"
+nt h6 handoff
+nt h6 stall $((NOON + 60))
+assert_contains "handoff does not start the cooldown for the next alert" "$(tail -1 "$LOG")" $'\tdry-run\t'
+nt h6 handoff $((NOON + 120))
+assert_contains "handoff ignores the cooldown a stall just started" "$(tail -1 "$LOG")" $'\tdry-run\t'
+assert_eq "only the stall used the budget" "1" "$(cat "$AGENT_HOME/notify/budget-2026-10-05")"
+nt h7 handoff $((NOON + 10 * 3600))
+assert_contains "handoff at 22:00 waits for the morning" "$(tail -1 "$LOG")" "suppressed:quiet-hours"
+nt h7 handoff $((NOON - 3 * 3600 - 60))
+assert_contains "handoff at 08:59 waits too" "$(tail -1 "$LOG")" "suppressed:quiet-hours"
 rm -rf "$AGENT_HOME/notify"; mkdir -p "$AGENT_HOME/notify"; echo garbage >"$AGENT_HOME/notify/budget-2026-10-05"
 nt k1 stall
 assert_contains "corrupt budget file counts as 0" "$(tail -1 "$LOG")" $'\tdry-run\t'

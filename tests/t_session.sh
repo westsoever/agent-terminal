@@ -18,13 +18,45 @@ assert_contains "repo: names the repo" "$ctx" "repo1"
 meta="$AGENT_HOME/sessions/s-repo/meta"
 assert_file "repo: registry meta written" "$meta"
 assert_contains "repo: meta has cwd" "$(cat "$meta")" "cwd=$(cd "$R" && pwd -P)"
-assert_contains "repo: meta state working" "$(cat "$meta")" "state=working"
+assert_contains "repo: a new session is idle until its first prompt" "$(cat "$meta")" "state=idle"
 assert_contains "repo: meta keeps transcript path" "$(cat "$meta")" "transcript=/x/y.jsonl"
 
 # retry counter is cleared on (re)start
 mkdir -p "$AGENT_HOME/sessions/s-repo"; echo 3 >"$AGENT_HOME/sessions/s-repo/retries"
 run_hook session-start.sh "$(hook_json SessionStart "$R" s-repo '{"source":"resume"}')" >/dev/null
 assert_no_file "resume resets the retry counter" "$AGENT_HOME/sessions/s-repo/retries"
+
+# --- state per SessionStart source: nobody has prompted yet, so startup/resume/clear are idle; compact keeps the state ---
+# A resumed session marked working looked stalled to the watcher (old transcript), which ate the 4-a-day budget.
+PS="$WORK/srcfolder"; mkdir -p "$PS"
+smeta() { cat "$AGENT_HOME/sessions/s-src/meta"; }
+start_src() { run_hook session-start.sh "$(hook_json SessionStart "$PS" s-src "{\"source\":\"$1\"}")" >/dev/null; }
+set_src() { sed "s/^$1=.*/$1=$2/" "$AGENT_HOME/sessions/s-src/meta" >"$WORK/s-src.meta" && mv "$WORK/s-src.meta" "$AGENT_HOME/sessions/s-src/meta"; }
+touch_src() { printf '%s' "$(hook_json UserPromptSubmit "$PS" s-src)" | "$BIN/session-start.sh" touch; }
+start_src startup
+assert_contains "source startup: idle" "$(smeta)" "state=idle"
+touch_src
+assert_contains "prompt after startup: working" "$(smeta)" "state=working"
+start_src resume
+assert_contains "source resume: idle, not working" "$(smeta)" "state=idle"
+touch_src
+assert_contains "prompt after resume: working" "$(smeta)" "state=working"
+start_src clear
+assert_contains "source clear: idle" "$(smeta)" "state=idle"
+touch_src
+set_src updated 1000
+start_src compact
+assert_contains "source compact: a working session stays working" "$(smeta)" "state=working"
+assert_contains "source compact: updated is left alone" "$(smeta)" "updated=1000"
+set_src state done
+start_src compact
+assert_contains "source compact: a done session stays done" "$(smeta)" "state=done"
+assert_contains "source compact: a done session keeps its updated" "$(smeta)" "updated=1000"
+assert_contains "source compact: the source is still recorded" "$(smeta)" "source=compact"
+run_hook session-start.sh "$(hook_json SessionStart "$PS" s-src-new '{"source":"compact"}')" >/dev/null
+assert_contains "source compact with no earlier state: working" "$(cat "$AGENT_HOME/sessions/s-src-new/meta")" "state=working"
+run_hook session-start.sh "$(hook_json SessionStart "$PS" s-src-none '{}')" >/dev/null
+assert_contains "no source at all: idle" "$(cat "$AGENT_HOME/sessions/s-src-none/meta")" "state=idle"
 
 # --- plain non-git folder, nothing saved yet ---
 P="$WORK/plainfolder"; mkdir -p "$P"

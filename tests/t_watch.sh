@@ -153,4 +153,67 @@ assert_eq "old meta: its transcript is not read" "" "$(awk '$1 == "o3" { print $
 assert_eq "old meta: its meta is left untouched" "" "$(meta_get "$OAH/sessions/o3/meta" tok_offset)"
 assert_contains "meta inside 48 h still stalls" "$(cat "$OAH/sessions/o2/meta")" "stalled_at=1"
 assert_eq "meta inside 48 h: one stall event" "1" "$(jq -r 'select(.kind=="stall" and .sid=="o2") | .kind' "$OAH/events.jsonl" | wc -l | tr -d ' ')"
+
+# ---------- a resumed session that nobody has prompted is not stalled ----------
+# SessionStart used to set state=working, so a resumed session with a transcript older than WATCH_STALL_MINS
+# was reported stalled at the next run, and the alert used up the shared daily budget.
+RAH="$WORK/resume-ah"; mkdir -p "$RAH"
+TR1="$WORK/resumed.jsonl"; amsg rs1 0 1000 0 1 >"$TR1"; touch -t 202001010000 "$TR1"
+( export AGENT_HOME="$RAH"
+  run_hook session-start.sh "$(hook_json SessionStart "$P" s-resumed "$(jq -nc --arg t "$TR1" '{source:"resume",transcript_path:$t}')")" >/dev/null )
+AGENT_HOME="$RAH" "$W"
+assert_eq "resume: a resumed session with an old transcript is not stalled" "" "$(meta_get "$RAH/sessions/s-resumed/meta" stalled_at)"
+assert_eq "resume: no stall event" "0" "$(jq -r 'select(.kind=="stall") | .kind' "$RAH/events.jsonl" 2>/dev/null | wc -l | tr -d ' ')"
+assert_no_file "resume: no alert was sent at all" "$RAH/notify.log"
+assert_eq "resume: no daily budget used" "0" "$(ls "$RAH/notify" 2>/dev/null | grep -c '^budget' || true)"
+( export AGENT_HOME="$RAH"; printf '%s' "$(hook_json UserPromptSubmit "$P" s-resumed)" | "$BIN/session-start.sh" touch )
+AGENT_HOME="$RAH" "$W"
+assert_contains "resume: after a prompt the same silence is a stall" "$(cat "$RAH/sessions/s-resumed/meta")" "stalled_at=1"
+assert_contains "resume: and then the alert is sent" "$(cat "$RAH/notify.log")" "proj: Stalled"
+
+# ---------- a zero-usage record (API error, interrupt) must not reset the context level ----------
+# Claude Code writes a synthetic assistant record with model "<synthetic>" and all-zero usage for a login
+# error, a rate limit or an interrupt. Read as the last message it made the context 0%, so ctx_level fell
+# from handoff to healthy and the next real message raised a second handoff notice.
+zmsg() { # id : the record Claude Code writes for an API error
+  jq -nc --arg id "$1" --arg ts "${DAY}T10:00:00.000Z" \
+    '{type:"assistant",timestamp:$ts,error:"authentication_failed",isApiErrorMessage:true,
+      message:{id:$id,model:"<synthetic>",role:"assistant",content:[{type:"text",text:"Login expired"}],
+        usage:{input_tokens:0,output_tokens:0,cache_creation_input_tokens:0,cache_read_input_tokens:0}}}'
+}
+ZAH="$WORK/zero-ah"; mkdir -p "$ZAH/sessions/z1" "$ZAH/sessions/z2" "$ZAH/sessions/z3"
+zreg() { printf 'cwd=%s\nname=proj\nstate=idle\ntranscript=%s\nupdated=%s\n' "$P" "$2" "$NOW" >"$ZAH/sessions/$1/meta"; }
+zget() { meta_get "$ZAH/sessions/$1/meta" "$2"; }
+zhand() { grep -c 'Context almost full' "$ZAH/notify.log" 2>/dev/null || true; }
+zctx() { jq -r 'select(.kind=="context" and .sid=="'"$1"'") | .data.level' "$ZAH/events.jsonl" 2>/dev/null | tr '\n' ' ' | sed 's/ $//'; }
+
+# a zero record arrives in a later run
+TZ1="$WORK/z1.jsonl"; amsg zm1 0 170000 0 10 >"$TZ1"; zreg z1 "$TZ1"
+AGENT_HOME="$ZAH" "$W"
+assert_eq "zero usage: 85% is handoff" "handoff" "$(zget z1 ctx_level)"
+assert_eq "zero usage: one handoff notice so far" "1" "$(zhand)"
+zmsg zz1 >>"$TZ1"; AGENT_HOME="$ZAH" "$W"
+assert_eq "zero usage: a later synthetic record keeps handoff" "handoff" "$(zget z1 ctx_level)"
+assert_eq "zero usage: the percentage is kept" "85" "$(zget z1 ctx_pct)"
+assert_eq "zero usage: the last real message id is kept" "zm1" "$(zget z1 tok_last_mid)"
+assert_eq "zero usage: the synthetic record is consumed" "$(wc -c <"$TZ1" | tr -d ' ')" "$(zget z1 tok_offset)"
+amsg zm2 0 175000 0 10 >>"$TZ1"; AGENT_HOME="$ZAH" "$W"
+assert_eq "zero usage: the next real message is still handoff" "handoff" "$(zget z1 ctx_level)"
+assert_eq "zero usage: no second handoff notice" "1" "$(zhand)"
+assert_eq "zero usage: only one context event" "handoff" "$(zctx z1)"
+assert_eq "zero usage: a synthetic record adds no tokens" "20" "$(awk '$1 == "z1" { print $2 }' "$ZAH/tokens/$DAY")"
+
+# a real message and a zero record in the same new chunk: the zero record is last
+TZ2="$WORK/z2.jsonl"; { amsg zm3 0 170000 0 10; zmsg zz2; } >"$TZ2"; zreg z2 "$TZ2"
+AGENT_HOME="$ZAH" "$W"
+assert_eq "zero usage: a zero record last in the chunk is ignored" "handoff" "$(zget z2 ctx_level)"
+assert_eq "zero usage: percentage from the real message" "85" "$(zget z2 ctx_pct)"
+
+# only zero records, no usage ever seen: nothing is invented
+TZ3="$WORK/z3.jsonl"; zmsg zz3 >"$TZ3"; zreg z3 "$TZ3"
+AGENT_HOME="$ZAH" "$W" 2>"$ZAH/err"
+assert_eq "zero usage only: ctx_level stays unset" "" "$(zget z3 ctx_level)"
+assert_eq "zero usage only: no percentage" "" "$(zget z3 ctx_pct)"
+assert_eq "zero usage only: no error output" "" "$(cat "$ZAH/err")"
+assert_eq "zero usage only: the record is still consumed" "$(wc -c <"$TZ3" | tr -d ' ')" "$(zget z3 tok_offset)"
 exit 0
