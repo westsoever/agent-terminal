@@ -204,8 +204,25 @@ seg_has_operand() { # any token after the first that is not an option?
 var_is_secret() { case "$1" in \$*[Tt][Oo][Kk][Ee][Nn]*|\$*[Ss][Ee][Cc][Rr][Ee][Tt]*|\$*[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]*|\$*[Aa][Pp][Ii]_[Kk][Ee][Yy]*|\$*[Pp][Rr][Ii][Vv][Aa][Tt][Ee]_[Kk][Ee][Yy]*) return 0 ;; esac; return 1; }
 
 seg_writes() { # does the current segment write/modify files?
-  local k=0 b t
   case "$SEG_RAW" in *">"*) return 0 ;; esac
+  cmd_writes
+}
+redir_target() { # $1 = token index -> 0 when that token is the target of an output redirection (>f, 2>>f, &>f,
+  # a word after a bare > >> 2> >| <>, or the first word after '>&' was split at the '&')
+  local k=$1 t=${TOKS[$1]} p
+  case "$t" in ">"*|[0-9]">"*|"&>"*|"<>"*|[0-9]"<>"*) if [ -n "${t//[0-9<>&|]/}" ]; then return 0; fi ;; esac
+  if [ "$k" -gt 0 ]; then
+    p=${TOKS[$((k - 1))]}
+    case "$p" in *">"|*">|") if [ -z "${p//[0-9<>&|]/}" ]; then return 0; fi ;; esac
+  fi
+  [ "$k" -eq 0 ] && [ "$SEG_AFTER_REDIR" -eq 1 ]
+}
+tok_written() { # $1 = token index -> 0 when the segment writes that token: a writing command, or a redirect to it
+  # (a redirect elsewhere, such as 2>&1 or >/tmp/out while running a ching script, does not write it)
+  cmd_writes || redir_target "$1"
+}
+cmd_writes() { # does the command of the current segment write/modify files (rm, cp, tee, sed -i, ...)?
+  local k=0 b t
   while [ "$k" -lt "$NT" ]; do
     t=${TOKS[$k]}; base_of "$t"; b=$BASE
     case "$b" in
@@ -509,11 +526,21 @@ check_publish() { # $1 = index of npm/pnpm/bun/yarn
   # rule: any `publish` word in the command is denied.
   local sub scr=""
   sub=${TOKS[$(( $1 + 1 ))]:-}
+  base_of "${TOKS[$1]}"
+  if [ "$BASE" = npm ]; then
+    # npm runs any unique prefix of a command (npm 11: pu..publis is publish, unp.. unpublish, dep.. deprecate);
+    # no other npm command starts with pu, unp or dep. pnpm/yarn are not known to; bun runs a script named pub.
+    case "$sub" in
+      pu|pub|publ|publi|publis) sub=publish ;;
+      unp|unpu|unpub|unpubl|unpubli|unpublis|dep|depr|depre|deprec|depreca|deprecat|dist-tags) scr=$sub ;;
+    esac
+  fi
   case "$sub" in
     npm|pnpm|bun|yarn) return 0 ;;   # yarn npm ...: that word is in command position and is checked itself
     test|t|tst|view|v|info|show|help|help-search|search|s|find|ls|list|outdated|why|explain|audit|pack) return 0 ;;
     publish)   # a dry run, unless anything could switch it back off (--dry-run false, --no-dry-run, =false)
-      if seg_matches --dry-run && ! seg_matches '--dry-run=*' && ! seg_matches '--no-dry-run*' && ! seg_matches false && ! seg_matches 0; then return 0; fi ;;
+      if seg_matches --dry-run && ! seg_matches '--dry-run=*' && ! seg_matches '--no-dry-run*' && ! seg_matches false && ! seg_matches 0; then return 0; fi
+      scr=publish ;;
     run|run-script)   # the script name right after it decides: a script named like a publish is one
       scr=${TOKS[$(( $1 + 2 ))]:-}
       case "$scr" in -*|'') scr="" ;; *publish*|*dist-tag*|*deprecate*) ;; *) return 0 ;; esac ;;
@@ -770,7 +797,7 @@ goal_token_path() { # token -> sets GABS to the GOAL.md path it names, or "" (no
 }
 
 tamper_bash() {
-  local k=0 t abs gabs
+  local k=0 t abs gabs mabs
   while [ "$k" -lt "$NT" ]; do
     ceiling
     t=${TOKS[$k]}
@@ -780,7 +807,7 @@ tamper_bash() {
     case "$t" in *[Hh][Oo][Oo][Kk][Ss]*|*[Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss]*|*[Cc][Hh][Ii][Nn][Gg]*|*.[Ss][Qq][Ll])
       if [ "${#t}" -le 4096 ]; then abs=$(resolve_path "$t" "$SIM_CWD"); fi ;;
     esac
-    if [ -n "$abs" ] && is_tamper_path "$abs" && seg_writes; then
+    if [ -n "$abs" ] && is_tamper_path "$abs" && tok_written "$k"; then
       emit_deny "editing hooks, settings or the guard itself ($t) would disable the guardrails. Ask the user."
     fi
     gabs=""
@@ -791,8 +818,10 @@ tamper_bash() {
     if [ -n "$gabs" ] && is_goal_path "$gabs" && { goal_seg_writes || { [ "$k" -eq 0 ] && [ "$SEG_AFTER_REDIR" -eq 1 ]; }; }; then
       emit_deny "rule 11: write GOAL.md with the Edit or Write tool so the guard can check its gate settings."
     fi
-    if [ -n "$abs" ] && is_migration_path "$abs" && seg_writes && [ "$SIM_UNKNOWN" -eq 0 ]; then
-      if committed_migration "$abs"; then
+    if [ -n "$abs" ] && is_migration_path "$abs" && tok_written "$k" && [ "$SIM_UNKNOWN" -eq 0 ]; then
+      mabs=$abs   # an attached redirect (>>db/migrations/x.sql): the path starts after the operator
+      case "$t" in ">"*|[0-9]">"*|"&>"*|"<>"*|[0-9]"<>"*) mabs=$(resolve_path "${t#"${t%%[!0-9<>&|]*}"}" "$SIM_CWD") ;; esac
+      if committed_migration "$mabs"; then
         emit_deny "$t is an already-committed migration; never edit it. Write a NEW numbered migration file that alters it."
       fi
     fi

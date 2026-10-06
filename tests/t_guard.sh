@@ -866,7 +866,6 @@ echo it\'s ; npm publish
 echo "${x:-'a;b'}" ; npm publish
 echo 'unterminated ; npm publish
 sudo -s echo 'a; npm publish'
-FOO='a; npm publish' echo hi
 echo "$(bash -c 'a; npm publish')"
 grep -f <(npm publish) f
 echo x > >(npm publish)
@@ -894,6 +893,10 @@ npm search publish
 npm run test -- publish
 bun run lint publish
 yarn npm info publish
+npm pub --dry-run
+npm un left-pad
+npm pa
+bun pub
 EOF
 while IFS= read -r c; do
   [ -n "$c" ] && gdeny_why "publish: $c" "$QD" "$c" "rule 8"
@@ -917,6 +920,18 @@ npm run publish
 bun run publish:npm
 npm run-script prepublishOnly
 npm run --workspace x publish
+npm pu
+npm pub
+npm publ
+npm publi
+npm publis --tag next
+npm pub --dry-run false
+npx npm pub
+npm unp x@1
+npm unpub x@1
+npm dep x "old"
+npm depr x "old"
+npm dist-tags add x@1 latest
 npx npm publish
 bunx npm publish
 npm exec npm publish
@@ -984,6 +999,63 @@ echo "$(cat "| grep "KEY .env " )")"
 EOF
 # a double quote opened on an earlier line: `grep KEY" .env "` is not a pattern there, cat reads .env
 gdeny_why "rule 5 file: a quote spanning lines does not make .env a grep pattern" "$QD" "$(printf '%s\n' 'cat "x' 'grep KEY" .env "' '"')" "reading or copying .env"
+
+# ---------- a quoted ; | or space in a leading assignment's value does not hide the command after it ----------
+while IFS= read -r c; do
+  [ -n "$c" ] && gdeny "assignment value: $c" "$QD" "$c"
+done <<'EOF'
+FOO="a; b" npm publish
+env FOO="a;b" npm publish
+FOO="a;b" git push --force origin x
+FOO='a|b' gh pr close 5
+FOO="a b" gh pr close 5
+A=1 FOO="x && y" npm publish
+sudo FOO="a;b" npm publish
+FOO="a;b" bash -c 'npm publish'
+FOO=$'a\'; b' gh pr close 5
+> 'a b' npm publish
+FOO="a;b" rm -rf /usr/lib
+sudo -u 'a b' npm publish
+EOF
+gdeny "assignment value: a value spanning lines" "$QD" "$(printf '%s\n' 'FOO="a' 'b" npm publish')"
+while IFS= read -r c; do
+  [ -n "$c" ] && gallow "assignment value: $c" "$QD" "$c"
+done <<'EOF'
+FOO="a;b" echo ok
+FOO='a; npm publish' echo hi
+FOO="a b" ls
+FOO='a|b' bun test
+env FOO="a;b" echo ok
+NODE_OPTIONS="--max-old-space-size=4096 --enable-source-maps" bun run build
+EOF
+
+# ---------- running a ching script with a redirect is not a write to it (2026-10-06: dash.sh 2>&1 | head was denied) ----------
+while IFS= read -r c; do
+  [ -n "$c" ] && gallow "redirect while running a ching script: $c" "$QD" "$c"
+done <<'EOF'
+~/.claude/ching/bin/dash.sh 2>&1 | head -8
+~/.claude/ching/bin/dash.sh 2>/dev/null
+~/.claude/ching/bin/dash.sh --next >/tmp/dash-out.txt
+~/.claude/ching/bin/dash.sh > /tmp/dash-out.txt 2>&1
+~/.claude/ching/bin/dash.sh >&2
+bash ~/.claude/ching/bin/dash.sh --inbox 2>&1 | tail -3
+cat ~/.claude/settings.json > /tmp/settings-copy.json
+EOF
+while IFS= read -r c; do
+  [ -n "$c" ] && gdeny_why "write to a protected path: $c" "$QD" "$c" "editing hooks, settings or the guard"
+done <<'EOF'
+echo x > ~/.claude/ching/bin/dash.sh
+cat a >> ~/.claude/settings.json
+tee ~/.claude/ching/bin/x
+echo x >~/.claude/settings.json
+echo x 2>~/.claude/ching/bin/dash.sh
+echo x &> ~/.claude/settings.json
+echo x >& ~/.claude/settings.json
+exec 3<>~/.claude/settings.json
+cp /tmp/x ~/.claude/ching/bin/dash.sh 2>/dev/null
+~/.claude/ching/bin/dash.sh > ~/.claude/ching/bin/dash.sh
+sed -i '' 's/a/b/' ~/.claude/settings.json 2>&1
+EOF
 
 # ---------- "GUARD: internal error (exit 1)": commands that hit it before 5fd969f reached the installed guard ----------
 # (export under set -e; the quote-blind split fed grep's `\|export` to it as a bare export). Each must be decided:

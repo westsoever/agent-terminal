@@ -10,6 +10,9 @@
 #     Quoted text handed to bash -c, eval, ssh, watch, an interpreter or any unknown command is left as it was,
 #     so it is still split and scanned. Only a string that opens and closes on one line is blanked, a
 #     double-quoted one only when it holds no $( substitution (that is code), and never a redirect target.
+#     For any command, the quoted part of a VALUE before the command word (FOO="a; b", a redirect target, a
+#     wrapper option value such as sudo -u 'a b') has ; | & ( ) < >, spaces and newlines turned into '_': bash
+#     reads it as one word, and split up its tail was taken for the command (FOO="a; b" npm publish passed).
 #
 #   quote-data.pl patterns < text  (for the .env reader check, rule 5)
 #     `grep -n "ching.env" f` named no .env file: ching.env is the pattern. This overwrites (with '_') the
@@ -43,6 +46,7 @@ my $BOOL_LONG = qr/^--(?:recursive|line-number|ignore-case|count|files-with-matc
 
 my @blank;   # [start, end) of quote contents to blank (default mode)
 my @over;    # [start, end) of pattern words to overwrite (patterns mode)
+my @value;   # [start, end) of quoted values before the command word to join into one word (default mode)
 
 sub new_frame { return { t => 'T', cs => $_[0], depth => 0, words => [], cur => '', plain => 1, ws => 0, spans => [] } }
 
@@ -79,6 +83,24 @@ sub cmd_index { # words -> index of the command word (past assignments, redirect
     }
     return -1 if $k >= @w || !$w[$k]{plain};
     return $k;
+}
+
+sub prefix_values { # words -> indices of the value words before the command word: assignments (FOO="a; b"),
+    # redirect targets and wrapper option values. Their quoted text is a value, never the command.
+    my @w = @{ $_[0] };
+    my ($k, $wrap, @v) = (0, '');
+    while ($k < @w) {
+        my $x = $w[$k]{text};
+        if (is_redir($x)) { push @v, $k; if ($x =~ /^[0-9]*[<>&]+$/) { $k++; push @v, $k } $k++; next }
+        last if $wrap eq 'sudo' && $x =~ /^(?:-[A-Za-z]*[si]|--shell|--login)/;
+        if ($x =~ /^-/) { if ($wrap ne '' && $VALUE_OPT{$wrap} && $x =~ $VALUE_OPT{$wrap}) { $k++; push @v, $k } $k++; next }
+        if ($x =~ /^[A-Za-z_][A-Za-z0-9_]*\+?=/) { push @v, $k; $k++; next }
+        if ($x =~ /=/ || $x =~ /^[0-9]/) { $k++; next }
+        last unless $w[$k]{plain};
+        if ($WRAP{ base($x) }) { $wrap = base($x); $k++; next }
+        last;
+    }
+    return @v;
 }
 
 sub subwords { # words, k -> the first two non-option words after the command word k, with their indices
@@ -152,6 +174,12 @@ sub end_cmd {
     if ($MODE eq 'patterns') {
         push @over, [ $w[$_]{s}, $w[$_]{e} ] for pattern_words(\@w);
     } else {
+        # a value before the command word is one word to bash, whatever it holds (spaces, ; | &, newlines): make it
+        # one word for the splitter and the tokenizer too, or its tail is taken for the command (FOO="a; b" npm publish)
+        my %val = map { $_ => 1 } prefix_values(\@w);
+        for my $sp (@{ $f->{spans} }) {
+            push @value, [ $sp->{s} + 1, $sp->{e} ] if $val{ $sp->{w} } && !$sp->{sub};
+        }
         my $from = data_from(\@w);
         if ($from >= 0) {
             my %redir;   # a redirection target is a path, never data: `echo x >> '.agent/a>b/../GOAL.md'`
@@ -238,6 +266,11 @@ end_cmd($st[0]);
 for my $b (@blank) {
     for my $p ($b->[0] .. $b->[1] - 1) {
         substr($s, $p, 1) = ' ' if index(';|&()<>', substr($s, $p, 1)) >= 0;
+    }
+}
+for my $b (@value) {
+    for my $p ($b->[0] .. $b->[1] - 1) {
+        substr($s, $p, 1) = '_' if index(";|&()<> \t\n", substr($s, $p, 1)) >= 0;
     }
 }
 for my $b (@over) { substr($s, $b->[0], $b->[1] - $b->[0]) = '_' x ($b->[1] - $b->[0]) }
