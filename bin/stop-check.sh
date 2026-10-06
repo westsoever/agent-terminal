@@ -179,7 +179,8 @@ if [ -n "$ROOT" ] && [ -f "$PASS_FILE" ]; then
   pass_fp=""; pass_at=""
   read -r pass_fp pass_at <"$PASS_FILE" 2>/dev/null || true
   case "$pass_at" in ''|*[!0-9]*) pass_at=0 ;; esac
-  age=$(($(date +%s) - pass_at))
+  [ "${#pass_at}" -le 12 ] || pass_at=0
+  age=$(($(date +%s) - 10#$pass_at))
   if [ "$pass_fp" = "$FP" ] && [ "$age" -lt "$SKIP_TTL" ]; then
     ev check_skipped "$(jq -nc --argjson a "$age" '{reason:"unchanged",age:$a}')"
     rm -f "$COUNTER"
