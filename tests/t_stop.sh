@@ -217,6 +217,16 @@ echo "real change" >>"$LR/README.md"
 out=$(lstop sess-SAME)
 assert_eq "changed tree: the ladder runs again" "4" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
 git -C "$LR" checkout -q README.md
+# a tree is recorded only when a model was really called: a ladder held back by the daily ceiling or by the
+# deadline has not failed on it
+echo "skipped-ladder tree" >>"$LR/README.md"; : >"$NOFIX_CALLS"
+out=$(CHING_TEST_LADDER_DAILY=0 CHING_CLAUDE_BIN="$WORK/fake-claude-try" CHING_TEST_MODELS="cheap strong" stop "$LR" sess-NOREC)
+assert_eq "daily ceiling 0: no model call" "0" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+out=$(STOP_CHECK_DEADLINE=20 lstop sess-NOREC)
+assert_eq "deadline too near: no model call" "0" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+out=$(lstop sess-NOREC)
+assert_eq "a tree no model was called on is not recorded: the ladder runs on it later" "2" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+git -C "$LR" checkout -q README.md; rm -f "$LR/attempt.txt"
 
 # F6: a non-numeric or zero cap must not switch the safety limit off.
 for i in 1 2 3; do
@@ -229,8 +239,8 @@ out=$(STOP_CHECK_MAX_RETRIES=0 stop "$R" sess-MAXZERO)
 assert_contains "MAX=0 behaves like 1: first stop blocks, attempt 1 of 1" "$(printf '%s' "$out" | jq -r .reason)" "attempt 1 of 1"
 out=$(STOP_CHECK_MAX_RETRIES=0 stop "$R" sess-MAXZERO)
 assert_eq "MAX=0 behaves like 1: second stop is allowed" "" "$out"
-# TIMEOUT=0 is perl `alarm 0` (no alarm): it behaves like 1 second. (A non-number falls back to 900 s, which
-# cannot be observed without a 900 s test, so only the zero case is tested.)
+# TIMEOUT=0 would mean no limit: it behaves like 1 second. (A non-number falls back to 600 s, which
+# cannot be observed without a 600 s test, so only the zero case is tested.)
 write_goal "$R" "sleep 3; exit 1"
 out=$(STOP_CHECK_TIMEOUT=0 stop "$R" sess-TMOZERO)
 assert_contains "TIMEOUT=0 behaves like 1: timed out after 1s" "$(printf '%s' "$out" | jq -r .reason)" "timed out after 1s"
@@ -252,17 +262,48 @@ assert_contains "process group: the timeout still blocks with timed out" "$(prin
 pg_pid=$(cat "$PGF" 2>/dev/null || echo 0)
 if [ "$pg_pid" -gt 0 ] && gone "$pg_pid"; then pass "process group: the forked sleeper is gone"; else fail "process group: the forked sleeper is gone" "  pid $pg_pid still alive"; fi
 [ "$pg_pid" -gt 0 ] && kill -9 "$pg_pid" 2>/dev/null
+# A TERM to the hook itself (what Claude Code sends on its hook timeout or on Esc) takes the whole check down:
+# test-escalate.sh, the test run and everything it forked. The hook ends as a no verdict.
+cat >"$WORK/slowcheck.sh" <<'EOS'
+#!/usr/bin/env bash
+echo "$$" >"$1.bash"
+sleep 97 &
+echo "$!" >"$1"
+wait
+EOS
+TP="$WORK/term-pids"; rm -f "$TP" "$TP.bash"
+write_goal "$R" "bash $WORK/slowcheck.sh $TP"
+hook_json Stop "$R" sess-TERM '{"stop_hook_active":false}' >"$WORK/term.json"
+"$BIN/stop-check.sh" <"$WORK/term.json" >"$WORK/term.out" 2>"$WORK/term.err" &
+hp=$!
+for i in $(seq 1 50); do [ -s "$TP" ] && break; sleep 0.1; done
+s=$(date +%s); kill -TERM "$hp"; rc=0; wait "$hp" || rc=$?; e=$(date +%s)
+assert_eq "TERM to the hook: it ends within 3 s" "1" "$([ $((e - s)) -le 3 ] && echo 1 || echo 0)"
+assert_eq "TERM to the hook: no verdict (exit 3)" "3" "$rc"
+assert_eq "TERM to the hook: no block" "" "$(cat "$WORK/term.out")"
+assert_contains "TERM to the hook: stderr says it was interrupted" "$(cat "$WORK/term.err")" "interrupted"
+for f in "$TP" "$TP.bash"; do
+  p=$(cat "$f" 2>/dev/null || echo 0)
+  if [ "$p" -gt 0 ] && gone "$p"; then pass "TERM to the hook: $(basename "$f") process is gone"; else fail "TERM to the hook: $(basename "$f") process is gone" "  pid $p"; fi
+  [ "$p" -gt 0 ] && kill -9 "$p" 2>/dev/null
+done
 
 # F3: one deadline for the whole hook (STOP_CHECK_DEADLINE, default 780 s, under the 900 s hook timeout).
-# A check that outlives it is killed at the deadline, and the stop blocks with "out of time" plus an event.
+# A check cut off at the deadline has no verdict: the model is not told to fix anything. The stop is allowed
+# (exit 3, "out of time" on stderr), stop_deadline is logged, the user is notified once, no retry is counted.
 write_goal "$R" "sleep 30"
-s=$(date +%s)
-out=$(STOP_CHECK_DEADLINE=2 stop "$R" sess-DEADLINE)
+: >"$AGENT_HOME/notify.log"
+s=$(date +%s); rc=0
+out=$(printf '%s' "$(hook_json Stop "$R" sess-DEADLINE '{"stop_hook_active":false}')" | STOP_CHECK_DEADLINE=2 STOP_CHECK_TIMEOUT=900 "$BIN/stop-check.sh" 2>"$WORK/dl.err") || rc=$?
 e=$(date +%s)
-assert_eq "deadline: the hook ends near its deadline, not after the 30 s check" "1" "$([ $((e - s)) -le 6 ] && echo 1 || echo 0)"
-assert_eq "deadline: still a block (a check with no result is not a pass)" "block" "$(printf '%s' "$out" | jq -r .decision)"
-assert_contains "deadline: the reason says the hook ran out of time" "$(printf '%s' "$out" | jq -r .reason)" "out of time"
+assert_eq "deadline: the hook ends near its deadline, not after the 30 s check (even with STOP_CHECK_TIMEOUT=900)" "1" "$([ $((e - s)) -le 6 ] && echo 1 || echo 0)"
+assert_eq "deadline: no block (a check with no result is no verdict)" "" "$out"
+assert_eq "deadline: exit 3 (no verdict, stop allowed)" "3" "$rc"
+assert_contains "deadline: stderr says the hook ran out of time" "$(cat "$WORK/dl.err")" "out of time"
 assert_eq "deadline: a stop_deadline event is logged" "2" "$(jq -r 'select(.kind=="stop_deadline" and .sid=="sess-DEADLINE") | .data.budget' "$AGENT_HOME/events.jsonl")"
+assert_eq "deadline: no stop_blocked event" "" "$(jq -r 'select(.kind=="stop_blocked" and .sid=="sess-DEADLINE") | .sid' "$AGENT_HOME/events.jsonl")"
+assert_no_file "deadline: no retry counted" "$AGENT_HOME/sessions/sess-DEADLINE/retries"
+assert_eq "deadline: the user is notified once" "1" "$(grep -c 'out of time' "$AGENT_HOME/notify.log")"
 out=$(STOP_CHECK_DEADLINE=abc STOP_CHECK_TIMEOUT=1 stop "$R" sess-DEADLINE-BAD)
 assert_contains "deadline: a non-number falls back to the default (the 1 s timeout applies)" "$(printf '%s' "$out" | jq -r .reason)" "timed out after 1s"
 # the ladder only starts a model call when the budget leaves room for it and for the re-check after it
@@ -356,6 +397,13 @@ assert_eq "claude -p (CLAUDE_CODE_ENTRYPOINT=sdk-cli): no checkpoint block" "" "
 touch_prompt "$CR" cp-8; work "$CR" cp-8
 out=$(CLAUDE_CODE_ENTRYPOINT=cli stop "$CR" cp-8)
 assert_eq "interactive claude (CLAUDE_CODE_ENTRYPOINT=cli): still asked" "block" "$(printf '%s' "$out" | jq -r .decision)"
+# the gate looks at the tree as it was before the test run: files the check itself writes are not the turn's work
+git -C "$CU" checkout -q new.txt
+write_goal "$CU" "echo gen >$CU/gen-by-test.out"
+age_tree; touch -t 202001010000 "$CU/new.txt"; touch_prompt "$CU" cu-5
+out=$(stop "$CU" cu-5)
+assert_eq "a check that writes into the tree does not make the turn look changed" "" "$out"
+assert_file "the check did write into the tree" "$CU/gen-by-test.out"
 # ---------- no verdict (F5, F9) ----------
 # When the hook cannot do its own bookkeeping it has no verdict: it allows the stop, says why on stderr,
 # exits 3 (a non-blocking hook error, so Claude Code shows the message) and logs stop_no_verdict when it can.
