@@ -2,6 +2,20 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D23 (2026-10-06): Ching is not ported to a Claude Code mod
+
+**Decision (user, accepting the orchestrator's recommendation):** Ching stays bash, settings command hooks and launchd. It is not rewritten as a Claude Code mod (a function-hooks plugin, TypeScript, in-session). A mod may come later only as a read-only UI layer on top, after the Phase 2 pilot.
+
+**Why:**
+- Most of Ching runs outside any session: the launchd watcher, `events.jsonl`, `dash.sh`, the session registry, git `pre-push`, the release and migrate gates, the voice dispatcher. A mod lives only while a session runs, so a port would leave two codebases.
+- `guard.sh` as a `PreToolUse` command hook is verified under `bypassPermissions` (Phase 0) and covered by the test suite and the Checkpoint 1.5 differential probe. A mod's `tool.call` deny under bypass is untested, and a mod hook that throws is skipped (the call goes ahead), which is the wrong failure mode for a deny list.
+- A port would undo D17 (stay in bash) and the guard hardening, and changing the substrate mid-pilot would spoil the pilot metrics.
+- Mods are new (Claude Code 2.1.29x) and the API is large and likely to change; the bash scripts and settings hooks are stable.
+
+**How to apply:**
+- Enforcement (guard, gates, Stop check, watcher) never moves into a mod.
+- If the pilot shows visibility or notification as the weak spot, build a `ching-ui` mod that only reads `~/.agent/` and `events.jsonl`: a pane for `dash.sh --inbox`/`--next`, a status-line entry (goal, Stop retries, release token), toasts for other sessions' blocked/done events (could replace `notify.sh` popups), possibly a `prompt.compose` hook re-injecting `STATE.md`/`NEXT.md` each turn, and `$.audio.speak` as an option for Phase 3 spoken status. If the mod breaks, only the view is lost.
+
 ## D20-D22 (2026-10-06): before the pilot
 
 **Decisions (user, choosing the orchestrator's recommended option for each question):**

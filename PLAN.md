@@ -41,6 +41,7 @@ Success is measured in the pilot (section 7), not by whether the scripts exist.
 | D17 | Stay in bash: an append-only event log (`~/.agent/events.jsonl`) plus a one-shot launchd watcher. No daemon, no cloud scheduler, no AI calls in Phase 1.5. | User, v4 |
 | D18 | Sessions may write **drafts only**. They never send email or chat messages (guard rule 10). | User, v4 |
 | D20-D22 | Sessions never push `v*` release tags (rule 8). The pilot-affecting gaps are fixed before the pilot. miso opts in first, in the `ching-pilot` worktree. Details in `DECISIONS.md`. | User, 2026-10-06 |
+| D23 | Ching is **not** ported to a Claude Code mod. Enforcement stays in bash, settings hooks and launchd; a read-only `ching-ui` mod may follow the pilot. Details in `DECISIONS.md`. | User, 2026-10-06 |
 
 Items marked "pending your OK" are the ones to challenge when you review.
 
@@ -307,6 +308,7 @@ Everything writes only to `~/.agent/proposals/`. The model call is a local `clau
 - Phone voice via VoiceMode Connect (routes audio through voicemode.dev's cloud; needs your explicit decision).
 - ~~Director loop~~: replaced by the Phase 6 learning loop (D11).
 - Cloud sessions for long migrations. Hooks may not fire there; test first.
+- `ching-ui` Claude Code mod (D23), only if the pilot shows visibility or notification as the weak spot: read-only pane for `dash.sh --inbox`/`--next`, status-line entry, toasts for other sessions' events. Never enforcement.
 
 ## 7. How we judge it (pilot metrics, from your original doc)
 
