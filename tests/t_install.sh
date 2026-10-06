@@ -178,7 +178,20 @@ n=$(wc -l <"$WORK/launchctl.log")
 out=$(inst --yes); assert_eq "retry after a failed bootstrap exits 0" "0" "$?"
 assert_file "retry after a failed bootstrap: plist installed" "$LA"
 assert_contains "retry after a failed bootstrap: bootstrap called again" "$(tail -n +$((n + 1)) "$WORK/launchctl.log")" "bootstrap gui/"
-assert_eq "failure flag was scoped to the one call" "" "${LAUNCHCTL_FAIL_BOOTSTRAP:-}"
+# The flag is injected by the environment of one call only. The fake launchctl records every bootstrap it
+# failed on purpose: exactly one (the failing call), and the retry above, run without the flag, succeeded.
+assert_eq "failure flag: exactly one bootstrap was made to fail" "1" "$(wc -l <"$WORK/launchctl.failed" | tr -d ' ')"
+assert_eq "failure flag: not left in the test environment" "" "$(env | grep '^LAUNCHCTL_FAIL_BOOTSTRAP=' || true)"
+
+# uninstall when the plist is already gone: the hooks go, nothing is created, no bootstrap
+rm -f "$LA"; n=$(wc -l <"$WORK/launchctl.log")
+out=$(inst --uninstall --yes); rc=$?
+assert_eq "uninstall with an absent plist exits 0" "0" "$rc"
+assert_eq "uninstall with an absent plist: no ching entries left" "0" "$(jq '[.. | objects | select(.command? != null) | select(.command | contains("/ching/bin/"))] | length' "$SETTINGS_FILE")"
+assert_no_file "uninstall with an absent plist: no plist appears" "$LA"
+assert_no_file "uninstall with an absent plist: no stray temp plist" "$LA.tmp"
+assert_not_contains "uninstall with an absent plist: launchctl never bootstraps" "$(tail -n +$((n + 1)) "$WORK/launchctl.log" 2>/dev/null)" "bootstrap"
+assert_not_contains "uninstall with an absent plist: no error printed" "$out" "install:"
 
 # a fresh machine: settings.json absent
 rm -rf "$D" "$WORK/fixture-agent-repos"; mkdir -p "$D"; rm -f "$SETTINGS_FILE"
