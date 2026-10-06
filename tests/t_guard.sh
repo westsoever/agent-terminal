@@ -770,4 +770,242 @@ assert_eq "ordinary command latency stays low (10 runs in under 3 s)" "yes" "$([
 tdeny "rule 10: slack update_message (suffix pattern)" mcp__plugin_slack_slack__slack_update_message "$GR" '{"text":"hi"}'
 tallow "rule 10: gmail update_message_labels is a label tool" mcp__claude_ai_Gmail__update_message_labels "$GR" '{"messageId":"m","addLabelIds":["L"]}'
 tallow "rule 10: gmail update_label" mcp__claude_ai_Gmail__update_label "$GR" '{}'
+
+# ---------- rule 8: release tags are created locally, never pushed (miso's release.yml runs on v* tags) ----------
+TG=$(mk_repo tagpush); TGP=$(cd "$TG" && pwd -P)
+git -C "$TG" tag v1.2.3; git -C "$TG" tag -a vNext -m next; git -C "$TG" tag backup-1
+git -C "$TG" branch feature-v2; git -C "$TG" branch very-cool
+for c in 'git push origin v1.2.3' 'git push origin refs/tags/v1.2.3' 'git push origin tag v1.2.3' 'git push origin tag vNext' \
+         'git push origin HEAD:refs/tags/v1' 'git push origin v1.2.3:v1.2.3' 'git push origin refs/tags/vNext:vNext' 'git push origin vNext' \
+         'git push origin v2.0.0' 'git push origin tags/v1.2.3''git push origin feature-v2 v1.2.3' \
+         'git push origin :refs/tags/v1' 'git push origin :v1.2.3' 'git push origin --delete v1.2.3' 'git push --delete origin refs/tags/v1.2.3' \
+         'git push -d origin v1.2.3' 'git push --tags' 'git push origin --tags' 'git push --follow-tags origin feature-v2' \
+         'git -c push.followTags=true push origin feature-v2' 'git -c push.followtags push origin feature-v2' \
+         'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=push.followTags GIT_CONFIG_VALUE_0=true git push origin feature-v2' \
+         "GIT_CONFIG_PARAMETERS=\"'push.followTags'='true'\" git push origin feature-v2" \
+         'git -c remote.origin.push=refs/tags/v1:refs/tags/v1 push origin' 'git -c remote.origin.mirror=true push origin feature-v2' \
+         "git -C $TGP push origin v1.2.3" "cd $TGP && git push origin v1.2.3" 'env GIT_TERMINAL_PROMPT=0 git push origin v1.2.3' \
+         'command git push origin v1.2.3' 'bash -c "git push origin v1.2.3"' 'nohup git push origin --tags &' 'git push origin "v1.2.3"' \
+         'gh api repos/o/r/git/refs -f ref=refs/tags/v1 -f sha=abc' 'gh api -X POST repos/o/r/releases -f tag_name=v1' \
+         'gh api repos/o/r/releases --method=POST -f tag_name=v1'; do
+  gdeny_why "release tag push: $c" "$TG" "$c" "rule 8"
+done
+gdeny "release tag push: --mirror (also a force push)" "$TG" 'git push --mirror origin'
+gdeny "release tag push: +refs/tags/v1.2.3 (also a force push)" "$TG" 'git push origin +refs/tags/v1.2.3'
+for c in 'git tag v1.2.3' 'git tag -a v1.2.4 -m "release v1.2.4"' 'git push origin feature-v2' 'git push origin very-cool' \
+         'git push -u origin HEAD:feature-v2' 'git push origin backup-1' 'git ls-remote --tags origin' 'git fetch --tags' 'git fetch origin --tags' \
+         'git push --no-follow-tags origin feature-v2' 'git -c push.followTags=false push origin feature-v2' 'git log v1.2.3 -1' \
+         'git push origin refs/tags/v1.2.3:refs/heads/from-tag' 'gh api repos/o/r/releases' 'gh api repos/o/r/git/refs/tags' \
+         'gh release view v1.2.3' 'git describe --tags'; do
+  gallow "release tag: $c" "$TG" "$c"
+done
+# what git would do from its own config: push.followTags, a mirror remote, a tag push refspec
+git -C "$TG" config push.followTags true
+gdeny_why "release tag push: push.followTags=true in the repo config" "$TG" 'git push origin feature-v2' "rule 8"
+git -C "$TG" config --unset push.followTags
+git -C "$TG" config remote.origin.mirror true
+gdeny_why "release tag push: remote.origin.mirror in the repo config" "$TG" 'git push origin feature-v2' "rule 8"
+git -C "$TG" config --unset remote.origin.mirror
+git -C "$TG" checkout -q feature-v2
+git -C "$TG" config --add remote.origin.push 'refs/tags/*:refs/tags/*'
+gdeny_why "release tag push: a tag push refspec in the repo config, bare git push" "$TG" 'git push' "rule 8"
+git -C "$TG" config --unset-all remote.origin.push
+gallow "release tag: bare git push from a feature branch with a clean config" "$TG" 'git push'
+git -C "$TG" checkout -q main
+
+# ---------- quoted text of a data command is not split into commands (2026-10-06: grep -nE 'a|npm publish' was denied) ----------
+QD=$(mk_repo quotedata)
+while IFS= read -r c; do
+  [ -n "$c" ] && gallow "quoted data: $c" "$QD" "$c"
+done <<'EOF'
+grep -nE 'gh release create|npm publish' bin/guard.sh
+grep -n "npm publish|bun publish" f
+rg 'publish|gh pr close 5' .
+grep -E 'a;npm publish' f | head -5
+cat f | grep -E 'x|npm publish' | wc -l
+echo 'a; npm publish'
+printf '%s\n' 'x | gh pr close 5'
+grep -nE 'emit_deny\(\)|allow\(\)' bin/guard.sh && sed -n "$(grep -nE 'scan_text\(\)|npm publish' bin/guard.sh | cut -d: -f1),+5p" bin/guard.sh
+grep -n "readSheet\b\|readSheetNames\|export" node_modules/x/package.json | head
+grep -n "a\|export"
+git commit -m "fix: deny npm publish; allow npm pack | docs"
+git -C . commit -m 'docs: gh pr close 5 (never) & npm publish'
+gh pr create --title t --body 'Denies: npm publish; gh pr close 5 (both)'
+sudo grep 'a|npm publish' f
+env LC_ALL=C grep -E 'a|npm publish' f
+xargs grep -l 'x|npm publish' < list
+if grep -q 'a|npm publish' f; then echo y; fi
+export VAR=$(git rev-parse HEAD) && echo $VAR
+export A=$(grep -c 'a|gh pr close' f) && echo "$A"
+grep -n 'rm -rf /etc; git push --force origin main' notes.md
+diff <(grep 'a|npm publish' f) g
+grep -E 'x>y|a<b' .agent/GOAL.md
+EOF
+while IFS= read -r c; do
+  [ -n "$c" ] && gdeny "quoted code is still split: $c" "$QD" "$c"
+done <<'EOF'
+bash -c 'grep x f | npm publish'
+sh -c "echo a; npm publish"
+eval 'echo a; npm publish'
+watch 'echo a; npm publish'
+echo 'a' ; npm publish
+grep 'a' f; npm publish
+echo "$(npm publish)"
+grep "x$(npm publish)" f
+echo "a;b" `npm publish`
+grep 'a|b' f | sh
+git -c core.editor='true; npm publish' commit
+env -S 'echo a; npm publish'
+ssh host 'echo a; npm publish'
+parallel echo ::: 'a; npm publish'
+xargs sh -c 'echo a; npm publish'
+echo 'a' "b" ; gh pr close 5
+echo $'it\'s' ; npm publish
+echo "it's" ; npm publish
+echo it\'s ; npm publish
+echo "${x:-'a;b'}" ; npm publish
+echo 'unterminated ; npm publish
+sudo -s echo 'a; npm publish'
+FOO='a; npm publish' echo hi
+echo "$(bash -c 'a; npm publish')"
+grep -f <(npm publish) f
+echo x > >(npm publish)
+EOF
+# a quote opened on an earlier line must not make the real code after it look quoted
+gdeny "quoted code: a double quote spanning lines, then a real command" "$QD" "$(printf '%s\n' 'git commit -m "msg' "echo 'a\" ; npm publish ; echo '" "'")"
+gdeny "quoted code: an interpreter heredoc body with an apostrophe" "$QD" "$(printf '%s\n' 'cat <<EOF | python3' "it's" 'EOF' "echo x; npm publish; echo '" "'")"
+gdeny "quoted code: a multi-line single quote is not neutralised" "$QD" "$(printf '%s\n' "echo 'a" "b' ; npm publish")"
+
+# ---------- rule 8: the package manager's subcommand decides, not any `publish` word (CHECKPOINT-1.5 Task 9) ----------
+while IFS= read -r c; do
+  [ -n "$c" ] && gallow "rule 8 subcommand: $c" "$QD" "$c"
+done <<'EOF'
+npm publish --dry-run
+pnpm publish --dry-run --no-git-checks
+bun publish --dry-run
+yarn npm publish --dry-run
+bun test publish
+npm test -- publish
+npm t publish
+npm view publish
+npm info publish versions
+npm help publish
+npm search publish
+npm run test -- publish
+bun run lint publish
+yarn npm info publish
+EOF
+while IFS= read -r c; do
+  [ -n "$c" ] && gdeny_why "publish: $c" "$QD" "$c" "rule 8"
+done <<'EOF'
+npm publish
+bun publish
+pnpm publish
+yarn publish
+yarn npm publish
+npm publish --tag next
+npm publish --dry-run false
+npm publish --dry-run=false
+npm publish --no-dry-run
+npm publish --dry-run --no-dry-run
+npm --registry https://r.example publish
+npm --prefix test publish
+npm -w test publish
+pnpm -r publish
+pnpm --filter web publish
+npm run publish
+bun run publish:npm
+npm run-script prepublishOnly
+npm run --workspace x publish
+npx npm publish
+bunx npm publish
+npm exec npm publish
+bun x npm publish
+yarn workspace web publish
+sudo npm publish
+env NODE_ENV=production npm publish
+cd packages/x && npm publish
+bash -c "npm publish"
+npm test && npm publish
+bun test publish; bun publish
+npm unpublish x@1
+npm dist-tag add x@1 latest
+npm deprecate x "old"
+gh release create v1.0.0
+GH_REPO=o/r gh release create v1.0.0
+EOF
+
+# ---------- rule 5: a grep/rg pattern names no file (2026-10-06: grep -n "ching.env" bin/*.sh was denied) ----------
+while IFS= read -r c; do
+  [ -n "$c" ] && gallow "rule 5 pattern: $c" "$QD" "$c"
+done <<'EOF'
+grep -n "ching.env" bin/*.sh
+grep -rn '\.env' src
+grep -E 'API_KEY|\.env' README.md
+rg '.env' .
+rg -n ching.env bin
+grep -e .env -r src
+grep --regexp=.env.local src
+git grep -n ching.env
+cat notes.md | grep .env
+grep -c "load .env" docs/x.md
+grep -rn --include=*.ts '.env.local' src
+sudo grep -rn ching.env /etc/x
+ls; grep -n .env README.md
+EOF
+while IFS= read -r c; do
+  [ -n "$c" ] && gdeny_why "rule 5 file: $c" "$QD" "$c" "reading or copying .env"
+done <<'EOF'
+cat .env
+grep KEY .env
+grep -r KEY .env.local
+cp .env x
+source .env
+grep -n .env .env
+grep -e KEY .env
+grep .env -e KEY
+grep -f .env notes.md
+rg -g '*.env' KEY
+rg --glob '*.env' KEY
+rg KEY .env
+grep --include=.env -r KEY .
+grep -r KEY --include .env .
+cat grep .env
+grep -A 3 KEY .env
+echo x | grep KEY .env.production
+grep "$(cat .env)" f
+grep KEY<.env
+grep KEY < .env
+grep -e KEY -- .env
+grep -rne KEY .env
+rg -e KEY .env
+git grep KEY -- .env
+echo "$(cat "| grep "KEY .env " )")"
+EOF
+# a double quote opened on an earlier line: `grep KEY" .env "` is not a pattern there, cat reads .env
+gdeny_why "rule 5 file: a quote spanning lines does not make .env a grep pattern" "$QD" "$(printf '%s\n' 'cat "x' 'grep KEY" .env "' '"')" "reading or copying .env"
+
+# ---------- "GUARD: internal error (exit 1)": commands that hit it before 5fd969f reached the installed guard ----------
+# (export under set -e; the quote-blind split fed grep's `\|export` to it as a bare export). Each must be decided:
+# exit 0, and either allowed or a well-formed deny. The ordinary ones must be allowed.
+while IFS= read -r c; do
+  [ -n "$c" ] || continue
+  out=$(printf '%s' "$(bash_json "$QD" "$c")" | "$BIN/guard.sh" 2>&1); rc=$?
+  if [ "$rc" -eq 0 ] && { [ -z "$out" ] || [ "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)" = deny ]; }; then
+    pass "decided, no internal error: $c"
+  else fail "decided, no internal error: $c" "  rc=$rc"$'\n'"  guard said: $out"; fi
+done <<'EOF'
+cd sub && export T_ROOT=$(mktemp -d /tmp/ching-focus.XXXXXX) && TNAME=t_stop bash tests/t_stop.sh >"$T_ROOT/log" 2>&1; echo "rc=$?"; grep -E 'checkpoint|^FAIL' "$T_ROOT"/results.t_stop | head -20; rm -rf "$T_ROOT"
+W=/tmp/x/t_dash && export HOME=$W/home AGENT_HOME=$W/agent-home && ls $AGENT_HOME && bin/dash.sh --next
+EOF
+while IFS= read -r c; do
+  [ -n "$c" ] && gallow "no internal error: $c" "$QD" "$c"
+done <<'EOF'
+cd sub && export SPACES_ROOT=/tmp/x && echo "=== build ===" && bun run build 2>&1 | tail -15; echo "build exit: ${PIPESTATUS[0]}"
+sed -n 1,60p node_modules/x/README.md | head -80; grep -n "readSheet\b\|readSheetNames\|export" node_modules/x/package.json | head
+cd sub && export SPACES_ROOT=/tmp/x && echo "== typecheck" && (bun run typecheck 2>&1 | tail -15; echo "typecheck exit=${pipestatus[1]}")
+ls db/test | head -20; f=$(ls db/test | grep -iE "foundation|enrich" | head -1); [ -n "$f" ] && sed -n 1,70p db/test/$f | cut -c1-170; grep -nE "usage|--apply|export (async )?function|export const" scripts/db-migrate.ts | head -20
+grep -nE '^(write_goal|mk_repo|hook_json|assert_[a-z_]+)\(\)|NOTIFY_DRY_RUN|export ' tests/lib.sh | head -40; sed -n "$(grep -n '^write_goal()' tests/lib.sh | cut -d: -f1),+12p" tests/lib.sh
+export T_ROOT=$(mktemp -d /tmp/ching-tests.XXXXXX) && TNAME=t_install bash tests/t_install.sh >"$T_ROOT/t_install.log" 2>&1; echo "rc=$?"; grep '^FAIL' "$T_ROOT/results.t_install"
+EOF
 exit 0
