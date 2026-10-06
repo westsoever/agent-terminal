@@ -281,6 +281,71 @@ out=$(stop "$CR" cp-5)
 assert_eq "block-then-comply: second stop passes" "" "$out"
 assert_eq "block-then-comply: checkpoint event logged after the block" "cp-5" "$(jq -r 'select(.kind=="checkpoint" and .sid=="cp-5") | .sid' "$EVF")"
 assert_eq "block-then-comply: second stop ran to the end (stop_ok logged)" "cp-5" "$(jq -r 'select(.kind=="stop_ok" and .sid=="cp-5") | .sid' "$EVF")"
+# ---------- no verdict (F5, F9) ----------
+# When the hook cannot do its own bookkeeping it has no verdict: it allows the stop, says why on stderr,
+# exits 3 (a non-blocking hook error, so Claude Code shows the message) and logs stop_no_verdict when it can.
+# It never blocks with a misleading "done-check failed".
+stopx() { # cwd sid : run the hook with stdout in $WORK/nv.out, stderr in $WORK/nv.err; print the exit code
+  local rc=0
+  printf '%s' "$(hook_json Stop "$1" "$2" '{"stop_hook_active":false,"last_assistant_message":"x"}')" \
+    | "$BIN/stop-check.sh" >"$WORK/nv.out" 2>"$WORK/nv.err" || rc=$?
+  echo "$rc"
+}
+nv_event() { jq -r --arg s "$1" 'select(.kind=="stop_no_verdict" and .sid==$s) | .data.reason' "$EVF" 2>/dev/null; }
+NV=$(mk_repo nvrepo); write_goal "$NV" "false"
+mkdir -p "$AGENT_HOME/sessions"; chmod 500 "$AGENT_HOME/sessions"
+rc=$(stopx "$NV" nv-1)
+chmod 700 "$AGENT_HOME/sessions"
+assert_eq "unwritable sessions dir: exit 3 (no verdict)" "3" "$rc"
+assert_eq "unwritable sessions dir: no block" "" "$(cat "$WORK/nv.out")"
+assert_contains "unwritable sessions dir: stderr says no verdict" "$(cat "$WORK/nv.err")" "no verdict"
+assert_contains "unwritable sessions dir: stderr names the session dir" "$(cat "$WORK/nv.err")" "$AGENT_HOME/sessions/nv-1"
+assert_contains "unwritable sessions dir: stop_no_verdict event" "$(nv_event nv-1)" "session record"
+ROH="$WORK/ro-agent-home"; mkdir -p "$ROH"; chmod 500 "$ROH"
+rc=$(AGENT_HOME="$ROH" stopx "$NV" nv-2)
+chmod 700 "$ROH"
+assert_eq "unwritable AGENT_HOME: exit 3 (no verdict)" "3" "$rc"
+assert_eq "unwritable AGENT_HOME: no block" "" "$(cat "$WORK/nv.out")"
+assert_contains "unwritable AGENT_HOME: stderr says no verdict" "$(cat "$WORK/nv.err")" "no verdict"
+# a read-only escalation log costs log lines, never the verdict: a green check is still green
+write_goal "$NV" "true"
+touch "$AGENT_HOME/test-escalation.log"; chmod 400 "$AGENT_HOME/test-escalation.log"
+rc=$(stopx "$NV" nv-3)
+assert_eq "read-only escalation log, green check: allowed normally (exit 0)" "0" "$rc"
+assert_eq "read-only escalation log, green check: no false block" "" "$(cat "$WORK/nv.out")"
+write_goal "$NV" "exit 4"
+rc=$(stopx "$NV" nv-3b)
+chmod 600 "$AGENT_HOME/test-escalation.log"
+assert_contains "read-only escalation log, red check: blocks with the check's own exit code" "$(jq -r .reason "$WORK/nv.out")" "exit code 4"
+# a cwd that was deleted: the check cannot run there
+mkdir -p "$AGENT_HOME/defaults" "$WORK/gone-dir"
+printf 'test_command: true\n' >"$AGENT_HOME/defaults/GOAL.md"
+rmdir "$WORK/gone-dir"
+rc=$(stopx "$WORK/gone-dir" nv-4)
+rm -rf "$AGENT_HOME/defaults"
+assert_eq "deleted cwd: exit 3 (no verdict)" "3" "$rc"
+assert_eq "deleted cwd: no block" "" "$(cat "$WORK/nv.out")"
+assert_contains "deleted cwd: stderr says the folder is gone" "$(cat "$WORK/nv.err")" "no longer exists"
+assert_contains "deleted cwd: stop_no_verdict event" "$(nv_event nv-4)" "no longer exists"
+# any other failure of the hook itself (here: the retry counter is a directory) is a no verdict too
+write_goal "$NV" "false"
+mkdir -p "$AGENT_HOME/sessions/nv-6/retries"
+rc=$(stopx "$NV" nv-6)
+assert_eq "unexpected hook failure: exit 3 (no verdict)" "3" "$rc"
+assert_eq "unexpected hook failure: no block" "" "$(cat "$WORK/nv.out")"
+assert_contains "unexpected hook failure: stderr says no verdict" "$(cat "$WORK/nv.err")" "no verdict (unexpected failure"
+assert_contains "unexpected hook failure: stop_no_verdict event" "$(nv_event nv-6)" "unexpected failure"
+# F9: jq missing from the hook PATH: loud, and no shared nosession-<hash> record
+NOJQ="$WORK/nojq-bin"; mkdir -p "$NOJQ"
+ln -s /usr/bin/* "$NOJQ"/ 2>/dev/null; ln -s /bin/* "$NOJQ"/ 2>/dev/null; rm -f "$NOJQ/jq"
+write_goal "$NV" "false"
+J=$(hook_json Stop "$NV" nv-5 '{"stop_hook_active":false}')
+rc=0; printf '%s' "$J" | PATH="$NOJQ" "$BIN/stop-check.sh" >"$WORK/nv.out" 2>"$WORK/nv.err" || rc=$?
+assert_eq "no jq: exit 3 (no verdict)" "3" "$rc"
+assert_eq "no jq: no block" "" "$(cat "$WORK/nv.out")"
+assert_contains "no jq: stderr names jq" "$(cat "$WORK/nv.err")" "jq is not on the hook PATH"
+assert_eq "no jq: no shared nosession-<hash> record" "" "$(ls "$AGENT_HOME/sessions" | grep '^nosession-' || true)"
+
 # ---------- session ids (F12) ----------
 # a session id is a directory name under sessions/: one with ".." or "/" must not reach outside it
 SR=$(mk_repo sidrepo); write_goal "$SR" "false"

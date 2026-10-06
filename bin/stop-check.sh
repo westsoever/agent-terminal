@@ -7,6 +7,8 @@
 # Schemas confirmed in Phase 0: stdin has session_id, cwd, stop_hook_active, last_assistant_message;
 # block = {"decision":"block","reason":"..."} on stdout, exit 0. Claude Code's own cap is 8, ours is 3;
 # the per-session counter (not stop_hook_active) enforces it.
+# Exit codes: 0 (allowed, or a block on stdout); 3 = no verdict: the hook could not do its own bookkeeping,
+# the stop is allowed and stderr says why (see no_verdict below).
 # The check goes through test-escalate.sh (no model unless it fails; Haiku, then Sonnet).
 # One deadline covers the whole hook (check runs and model calls): install.sh gives the hook 900 s, and a hook
 # that Claude Code kills allows the stop and orphans its children. Each step gets what is left; a check cut
@@ -27,6 +29,27 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # instead of running the test_command again under a new session id without end.
 [ -z "${CHING_STOP_CHECK_RUNNING:-}" ] || exit 0
 
+# No verdict (exit 3): the hook cannot do its own bookkeeping (jq missing, the session record cannot be
+# written, the session folder is gone, any other unexpected failure). The stop is allowed, stderr says why
+# (Claude Code shows the stderr of a hook that exits non-zero but not 2) and a stop_no_verdict event is
+# logged when that still works. Never a block that blames the check for a failure of the hook.
+DONE=""; OUT=""
+no_verdict() { # reason
+  DONE=1
+  printf 'ching stop-check: no verdict (%s). The stop is allowed; no check result was recorded.\n' "$1" >&2
+  ev stop_no_verdict "$(jq -nc --arg r "$1" '{reason:$r}' 2>/dev/null || true)" 2>/dev/null || true
+  exit 3
+}
+on_exit() {
+  local rc=$?
+  if [ -n "$OUT" ]; then rm -f "$OUT"; fi
+  if [ "$rc" -ne 0 ] && [ -z "$DONE" ]; then no_verdict "unexpected failure, exit $rc; see the error above"; fi
+}
+trap on_exit EXIT
+# Without jq the hook cannot read its input: the session id would fall back to a nosession-<hash> shared by
+# every session in this folder. Say so instead of failing open in silence.
+command -v jq >/dev/null 2>&1 || no_verdict "jq is not on the hook PATH ($PATH); install jq or fix the PATH Claude Code runs hooks with"
+
 # Both caps are safety limits: a non-number falls back to the default, and neither may be below 1
 # (STOP_CHECK_TIMEOUT=0 would mean no alarm at all, STOP_CHECK_MAX_RETRIES=three would never be reached).
 MAX=${STOP_CHECK_MAX_RETRIES:-3}
@@ -43,6 +66,8 @@ DEADLINE=$((START + BUDGET))
 
 hook_init
 resolve_state
+# The session record holds the retry counter: without it the cap cannot work.
+{ mkdir -p "$SESS_DIR" && [ -w "$SESS_DIR" ]; } 2>/dev/null || no_verdict "cannot write the session record $SESS_DIR; check AGENT_HOME"
 LAST_MSG=$(jget last_assistant_message)
 
 notify() { # kind message
@@ -91,7 +116,7 @@ finish_ok() {
 TEST_CMD=$(goal_get "$GOAL_FILE" test_command)
 case "$TEST_CMD" in ''|'<'*) rm -f "$SESS_DIR/retries"; finish_ok ;; esac
 
-mkdir -p "$SESS_DIR"
+[ -d "$WORK_DIR" ] || no_verdict "the session folder $WORK_DIR no longer exists; the done-check cannot run there"
 COUNTER="$SESS_DIR/retries"
 PASS_FILE="$SESS_DIR/last-pass"
 
@@ -116,8 +141,7 @@ if [ -n "$ROOT" ] && [ -f "$PASS_FILE" ] && [ "$(cat "$PASS_FILE")" = "$FP" ]; t
   finish_ok
 fi
 
-OUT=$(mktemp "${TMPDIR:-/tmp}/ching-stop.XXXXXX")
-trap 'rm -f "$OUT"' EXIT
+OUT=$(mktemp "${TMPDIR:-/tmp}/ching-stop.XXXXXX")   # removed by on_exit
 
 # The retry count so far, read before the run: when it is already at the cap, this is the stop that will
 # be allowed whatever happens, so the paid model ladder must not run for it.
