@@ -172,7 +172,13 @@ compute_cmd_limit() { # CP_LIMIT = index of the command word: the first token th
 
 tokenize() {
   local s=$1
-  s=${s//\"/}; s=${s//\'/}; s=${s//\\/}
+  if [ "${#s}" -gt 2048 ]; then
+    # ${s//x/} is far worse than linear on bash 3.2 (10000 quote characters: 39 s, and bash cannot be interrupted
+    # inside it), so a long segment is cleaned by tr, which is the same three deletions
+    s=$(printf '%s' "$s" | tr -d "\"'\\\\")
+  else
+    s=${s//\"/}; s=${s//\'/}; s=${s//\\/}
+  fi
   TOKS=()
   read -r -a TOKS <<<"$s" || true
   NT=${#TOKS[@]}
@@ -777,7 +783,13 @@ strip_heredocs() {
       }
       return r
     }
+    function odd_trailing(line,   n, t) {   # an odd number of backslashes at the end (only the tail is looked at: a
+      # regex over a long run of backslashes is quadratic; size_verdict has already refused runs of 64 or more)
+      n = length(line); t = (n > 64) ? substr(line, n - 63) : line
+      return (match(t, /\\+$/) && RLENGTH % 2 == 1)
+    }
     function in_comment(line,   len, i, c, q) {   # does a shell comment start somewhere in this line?
+      if (index(line, "#") == 0) return 0   # no hash at all: nothing to walk (index is fast, the loop below is not)
       len = length(line); q = ""
       for (i = 1; i <= len; i++) {
         c = substr(line, i, 1)
@@ -839,7 +851,7 @@ strip_heredocs() {
     }
     {
       line = $0
-      if (jn) while (match(line, /\\+$/) && RLENGTH % 2 == 1 && !(jn == 2 && in_comment(line)) && (getline nx) > 0) line = substr(line, 1, length(line) - 1) nx
+      if (jn) while (odd_trailing(line) && !(jn == 2 && in_comment(line)) && (getline nx) > 0) line = substr(line, 1, length(line) - 1) nx
       print line
       if (index(line, "<<") > 0) { nw = 0; scan(line); if (nw > 0) { skip = 1; cur = 1; nb = 0 } }
     }
@@ -871,10 +883,38 @@ scan_text() { # scan one text (heredoc bodies already stripped); a deny exits, s
   done <<<"$segs"
 }
 
+size_verdict() { # stdin: the raw command -> prints "ok", or "big" when it cannot be scanned in time. One linear awk
+  # pass. The heredoc/join awk and the bash tokenizer cannot be interrupted by the 8 s ceiling, and a hook that
+  # times out (15 s) lets the call run, so what would take too long is refused up front:
+  #  - more than 256 KB, or more than 1000 backslash-newline continuations;
+  #  - a logical (joined) line over 64 KB, or a join workload (the sum of the joined-line lengths at each join,
+  #    which is what the comment-aware join costs) over 4.5 million characters;
+  #  - a line that ends in 64 or more backslashes.
+  LC_ALL=C awk -v maxbytes=262144 -v maxcont=1000 -v maxlogical=65536 -v maxwork=4500000 '
+    BEGIN { bytes = 0; cont = 0; acc = 0; grp = 0; work = 0; bad = 0 }
+    {
+      n = length($0); bytes += n + 1
+      if (bytes > maxbytes) { bad = 1; exit }
+      t = (n > 64) ? substr($0, n - 63) : $0
+      if (n >= 64 && match(t, /\\+$/) && RLENGTH >= 64) { bad = 1; exit }
+      if (substr(t, length(t), 1) == "\\") {
+        cont++; acc += n; work += acc; grp = 1
+        if (cont > maxcont || acc > maxlogical || work > maxwork) { bad = 1; exit }
+      } else {
+        if (grp && acc + n > maxlogical) { bad = 1; exit }
+        acc = 0; grp = 0
+      }
+    }
+    END { print (bad ? "big" : "ok") }'
+}
+
 check_bash() {
-  local raw plain joined prev
+  local raw plain joined prev verdict
   raw=$(jq -r '.tool_input.command // ""' <<<"$INPUT")
   [ -n "$raw" ] || allow
+  # before any view is computed: a command that cannot be scanned in time is refused (fail closed)
+  verdict=$(printf '%s\n' "$raw" | size_verdict) || { echo "GUARD: could not measure the command; failing closed" >&2; exit 2; }
+  if [ "$verdict" != ok ]; then emit_deny "command too large to check safely (over 256 KB, over 1000 line continuations, or a joined line over 64 KB). Split it into smaller commands or put the script in a file."; fi
   # Up to three views of the command, denied when any one is denied:
   #  - un-joined: every physical line stands alone (the shell does not continue a comment that ends in a
   #    backslash, so `ls # note \` + `gh pr close 5` runs both);

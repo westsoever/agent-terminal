@@ -550,6 +550,10 @@ gallow "cd -- into the repo, then rm -rf" "$R" "cd -- $RP && rm -rf dist"
 
 # F10: a failure after the decision or in the splitter must not allow the call
 BIGD="$WORK/fa7-big"; mkdir -p "$BIGD"
+with_alarm() { # seconds cmd...: run cmd and SIGKILL it after the limit (bash defers SIGALRM inside one long expansion)
+  perl -e '$s = shift; $p = fork; if (!$p) { exec @ARGV; exit 127 } $k = 0; $SIG{ALRM} = sub { $k = 1; kill 9, $p }; alarm $s;
+           $r = waitpid($p, 0); waitpid($p, 0) if $r != $p; exit($k ? 137 : $? >> 8)' "$@"
+}
 { printf 'rm -rf $'; head -c 1100000 /dev/zero | tr '\0' A; } >"$BIGD/cmd.txt"
 jq -Rs --arg d "$R" '{hook_event_name:"PreToolUse",tool_name:"Bash",cwd:$d,tool_input:{command:.}}' "$BIGD/cmd.txt" >"$BIGD/in.json"
 t0=$SECONDS
@@ -557,7 +561,14 @@ out=$("$BIN/guard.sh" <"$BIGD/in.json" 2>"$BIGD/err"); rc=$?
 t1=$((SECONDS - t0))
 assert_eq "1.1 MB token under rm -rf: exit 0" "0" "$rc"
 assert_eq "1.1 MB token under rm -rf: a valid deny on stdout" "deny" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)"
-assert_contains "1.1 MB token under rm -rf: denied by the delete rule, not by a timeout" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason' 2>/dev/null | head -c 200)" "unresolved variable"
+assert_contains "1.1 MB token under rm -rf: denied up front by the size cap (over 256 KB)" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason' 2>/dev/null | head -c 200)" "too large"
+# the same shape under the cap still goes through the delete rule, and its reason stays short
+{ printf 'rm -rf $'; head -c 200000 /dev/zero | tr '\0' A; } >"$BIGD/cmd200k.txt"
+jq -Rs --arg d "$R" '{hook_event_name:"PreToolUse",tool_name:"Bash",cwd:$d,tool_input:{command:.}}' "$BIGD/cmd200k.txt" >"$BIGD/in200k.json"
+out200=$(with_alarm 30 "$BIN/guard.sh" <"$BIGD/in200k.json" 2>/dev/null); rc200=$?
+assert_eq "200 KB token under rm -rf: exit 0" "0" "$rc200"
+assert_contains "200 KB token under rm -rf: denied by the delete rule" "$(printf '%s' "$out200" | jq -r '.hookSpecificOutput.permissionDecisionReason' 2>/dev/null | head -c 200)" "unresolved variable"
+assert_eq "200 KB token under rm -rf: the reason is short" "yes" "$([ "$(printf '%s' "$out200" | jq -r '.hookSpecificOutput.permissionDecisionReason | length' 2>/dev/null || echo 999999)" -le 700 ] && echo yes || echo no)"
 assert_eq "1.1 MB token under rm -rf: the reason is truncated" "yes" "$([ "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason | length' 2>/dev/null || echo 999999)" -le 700 ] && echo yes || echo no)"
 assert_eq "1.1 MB token under rm -rf: decided within 20 s" "yes" "$([ "$t1" -lt 20 ] && echo yes || echo "no ($t1 s)")"
 mkdir -p "$WORK/nosed"
@@ -707,6 +718,53 @@ for body in 'run npm publish after the review' 'git push --force is denied' 'we 
   done
 done
 assert_eq "synthetic prose messages through the quoted heredoc idiom: no denies ($n runs)" "0" "$bad"
+
+# ---------- fix wave FA, round 4: fail closed on commands too large or too continued to scan in time ----------
+# The awk that joins continuation lines runs outside the bash ceiling, so the size is checked up front. Each
+# fixture runs under a 30 s alarm (a hang is a failure, not a stuck suite) and is judged on decision and time.
+mk_big() { # name; the command text on stdin -> $BIGD/<name>.json
+  jq -Rs --arg d "$F3" '{hook_event_name:"PreToolUse",tool_name:"Bash",cwd:$d,tool_input:{command:.}}' >"$BIGD/$1.json"
+}
+big_decision() { # name fixture want(allow|deny|either) max-seconds
+  local out rc dec t0 t1 njson
+  t0=$SECONDS
+  out=$(with_alarm 30 "$BIN/guard.sh" <"$BIGD/$2.json" 2>"$BIGD/$2.err"); rc=$?
+  t1=$((SECONDS - t0))
+  dec=allow
+  if [ -n "$out" ]; then
+    dec=deny; njson=$(printf '%s' "$out" | jq -s 'length' 2>/dev/null || echo 0)
+    [ "$njson" = 1 ] || dec="deny-but-$njson-json-documents"
+  fi
+  [ "$rc" -eq 0 ] || dec="exit-$rc"
+  if { [ "$dec" = "$3" ] || { [ "$3" = either ] && { [ "$dec" = allow ] || [ "$dec" = deny ]; }; }; } && [ "$t1" -lt "$4" ]; then pass "$1 ($dec in ${t1}s)"
+  else fail "$1" "  wanted $3 in under $4 s, got $dec in ${t1}s"$'\n'"  stderr: $(head -c 200 "$BIGD/$2.err")"; fi
+}
+awk 'BEGIN { for (i = 0; i < 1500; i++) print "echo a \\"; print "end" }' | mk_big cont1500
+awk 'BEGIN { for (i = 0; i < 900; i++) print "echo a \\"; print "end" }' | mk_big cont900
+awk 'BEGIN { s = sprintf("%52s", ""); gsub(/ /, "a", s); for (i = 0; i < 1000; i++) print "echo " s " \\"; print "end" }' | mk_big cont1000x60
+{ printf 'echo '; head -c 300000 /dev/zero | tr '\0' a; echo; } | mk_big tok300k
+{ printf 'echo '; head -c 100000 /dev/zero | tr '\0' a; echo; } | mk_big tok100k
+{ printf 'echo '; head -c 70000 /dev/zero | tr '\0' a; printf ' \\\nls\n'; } | mk_big tok70k_cont
+{ printf 'echo '; head -c 1000000 /dev/zero | tr '\0' a; printf ' # c \\\ngh pr \\\nclose 5\n'; } | mk_big tok1m_comment
+{ printf 'echo '; head -c 12000 /dev/zero | tr '\0' '"'; echo; } | mk_big quotes12k
+{ printf 'echo '; head -c 100000 /dev/zero | tr '\0' '\\'; printf 'x\n'; } | mk_big bsrun100k
+{ printf 'echo '; head -c 100 /dev/zero | tr '\0' '\\'; printf '\nls\n'; } | mk_big bsend100
+big_decision "1500 harmless continuations are denied (too many)" cont1500 deny 5
+big_decision "300 KB single token is denied (too large)" tok300k deny 5
+big_decision "70 KB token joined to a next line is denied (logical line over 64 KB)" tok70k_cont deny 5
+big_decision "1000 short continuations adding up to 60 KB are denied (join work)" cont1000x60 deny 5
+big_decision "1 MB token, comment, backslash and a split command is denied" tok1m_comment deny 5
+big_decision "900 continuations of a harmless echo are allowed" cont900 allow 5
+big_decision "a 100 KB single-token echo is allowed" tok100k allow 5
+big_decision "12000 double quotes on a line are decided without a stall" quotes12k either 5
+big_decision "a 100 KB run of backslashes inside a line is decided without a stall" bsrun100k either 5
+big_decision "a line ending in 100 backslashes is denied" bsend100 deny 5
+out=$(printf '%s' "$(bash_json "$F3" 'ls -la')" | "$BIN/guard.sh" 2>&1)
+assert_eq "an ordinary command is still allowed" "" "$out"
+t0=$(perl -MTime::HiRes=time -e 'printf "%.0f", time * 1000')
+i=0; while [ "$i" -lt 10 ]; do printf '%s' "$(bash_json "$F3" 'ls -la')" | "$BIN/guard.sh" >/dev/null 2>&1; i=$((i + 1)); done
+t1=$(perl -MTime::HiRes=time -e 'printf "%.0f", time * 1000')
+assert_eq "ordinary command latency stays low (10 runs in under 3 s)" "yes" "$([ $((t1 - t0)) -lt 3000 ] && echo yes || echo "no ($((t1 - t0)) ms)")"
 
 # R2: Gmail's label tool is not a message update; Slack's update_message still is
 tdeny "rule 10: slack update_message (suffix pattern)" mcp__plugin_slack_slack__slack_update_message "$GR" '{"text":"hi"}'
