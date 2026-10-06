@@ -36,6 +36,13 @@ EOS
 chmod +x "$WORK/fake-launchctl"
 export LAUNCHCTL="$WORK/fake-launchctl"
 
+# Safe defaults for the nudge: no test can reach the real voice, the real idle read (ioreg) or the real
+# VoiceMode conch, whatever it forgets to set. A test that needs its own value sets it after sourcing this file.
+export SPEAK_CMD="${SPEAK_CMD:-true}"                        # no audio
+export HID_IDLE_CMD="${HID_IDLE_CMD:-echo 99999}"            # away from the keyboard
+export VOICEMODE_CONCH="${VOICEMODE_CONCH:-$WORK/no-such-conch}"
+export IOREG_CMD="${IOREG_CMD:-true}"                        # prints nothing: unreadable
+
 pass() { printf 'PASS\t%s\t%s\n' "$TNAME" "$1" >>"$RESULTS"; }
 fail() { printf 'FAIL\t%s\t%s\n' "$TNAME" "$1" >>"$RESULTS"; printf 'FAIL [%s]: %s\n%s\n' "$TNAME" "$1" "${2:-}" >&2; }
 

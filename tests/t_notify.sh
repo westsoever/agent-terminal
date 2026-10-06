@@ -155,4 +155,20 @@ assert_eq "no clock: no error output" "" "$(cat "$WORK/nc.err")"
 assert_contains "no clock: the event carries the reason" "$(jq -r 'select(.kind=="notify") | .data.reason' "$EVF" | tail -1)" "no-clock"
 printf '%s' "$(hook_json Notification "$R" nc2)" | PATH="$WORK/shim-noclock:$PATH" NOTIFY_NOW=$NOON "$BIN/notify.sh" blocked m
 assert_contains "no clock: an urgent alert is still delivered" "$(tail -1 "$LOG")" $'\tdry-run\t'
+
+# ---------- waiting (check-in nudge) ----------
+rm -rf "$AGENT_HOME/notify"; : >"$LOG"
+nt n1 waiting
+assert_contains "waiting is delivered" "$(tail -1 "$LOG")" $'\tdry-run\t'
+assert_contains "waiting has its own label" "$(tail -1 "$LOG")" "notifyrepo (main): Waiting for you"
+printf '%s' "$(hook_json Notification "$R" n1b)" | NOTIFY_NOW=$NOON "$BIN/notify.sh" waiting
+assert_contains "waiting has a default message" "$(tail -1 "$LOG")" "Finished and waiting for your next step."
+nt n1 waiting $((NOON + 600))
+assert_contains "waiting obeys the per-session cooldown" "$(tail -1 "$LOG")" "suppressed:cooldown"
+for s in n2 n3; do nt "$s" waiting; done
+nt n4 waiting
+assert_contains "waiting counts against the daily budget" "$(tail -1 "$LOG")" "suppressed:daily-budget"
+rm -rf "$AGENT_HOME/notify"
+nt n6 waiting $((NOON + 10 * 3600))
+assert_contains "waiting waits out quiet hours" "$(tail -1 "$LOG")" "suppressed:quiet-hours"
 exit 0

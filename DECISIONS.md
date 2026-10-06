@@ -10,6 +10,18 @@ Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are rec
 - **D21:** Before the pilot, fix the gaps from CHECKPOINT-1.5 section 6 that would hurt real sessions. These are the stop-check items F3, F4, F5, F8 (partial), F9 and F12, the ladder skip, the cheaper checkpoint rule, the false stall on resume, the zero-usage context reset, the `dash.sh` ranking, inbox and READY issues, the installer prompt on a non-tty run, and the rule 5 and rule 8 false positives on grep patterns. Everything else stays logged until the pilot shows it matters.
 - **D22:** miso is the first repo to opt in. The opt-in is the worktree `~/bbq/.worktrees/miso-ching-pilot` on branch `ching-pilot` (autonomy block and gitignore lines committed there, `.agent/GOAL.md` with `release_mode: confirm`), not the user's main miso checkout.
 
+## D19 (2026-10-05): Check-in nudges for waiting sessions
+
+**Decision (user):** Ching reminds the user when a session is waiting on them: a banner first, then one spoken note after about 5 minutes. The notch widget that opens on hover is deferred. It is built by extending the existing one-shot watcher, `ching-watch.sh`, and stays within D17 (no daemon, no AI calls).
+
+**Why:** The stall watcher watches sessions, not the user. Nothing noticed a finished session sitting in front of a user who had looked away.
+
+**How to apply:**
+- Waiting means `input`, `blocked`, or `done` with open work (a checkpoint blocker or next action that is not a "none" value, or a non-empty `NEXT.md`). A working session never nudges.
+- Keyboard and mouse idle time only gates the voice, never the banner.
+- The banner uses the shared alert budget (quiet hours, 4 a day, 45-minute cooldown). The spoken note is outside that budget. It is bounded by once per waiting spell, a 10-minute gap between notes, quiet hours, and the user being at the Mac, and it stays silent while VoiceMode is in use.
+- Spec and plan: `docs/superpowers/specs/2026-10-05-ching-nudge-design.md`, `docs/superpowers/plans/2026-10-05-ching-nudge.md`.
+
 ## D14-D18 (2026-10-05): Hermes harvest (Phase 1.5)
 
 **Decisions (user, in the brainstorming session that evaluated four Hermes Agent repos):**
