@@ -812,4 +812,67 @@ gdeny_why "release tag push: a tag push refspec in the repo config, bare git pus
 git -C "$TG" config --unset-all remote.origin.push
 gallow "release tag: bare git push from a feature branch with a clean config" "$TG" 'git push'
 git -C "$TG" checkout -q main
+
+# ---------- quoted text of a data command is not split into commands (2026-10-06: grep -nE 'a|npm publish' was denied) ----------
+QD=$(mk_repo quotedata)
+while IFS= read -r c; do
+  [ -n "$c" ] && gallow "quoted data: $c" "$QD" "$c"
+done <<'EOF'
+grep -nE 'gh release create|npm publish' bin/guard.sh
+grep -n "npm publish|bun publish" f
+rg 'publish|gh pr close 5' .
+grep -E 'a;npm publish' f | head -5
+cat f | grep -E 'x|npm publish' | wc -l
+echo 'a; npm publish'
+printf '%s\n' 'x | gh pr close 5'
+grep -nE 'emit_deny\(\)|allow\(\)' bin/guard.sh && sed -n "$(grep -nE 'scan_text\(\)|npm publish' bin/guard.sh | cut -d: -f1),+5p" bin/guard.sh
+grep -n "readSheet\b\|readSheetNames\|export" node_modules/x/package.json | head
+grep -n "a\|export"
+git commit -m "fix: deny npm publish; allow npm pack | docs"
+git -C . commit -m 'docs: gh pr close 5 (never) & npm publish'
+gh pr create --title t --body 'Denies: npm publish; gh pr close 5 (both)'
+sudo grep 'a|npm publish' f
+env LC_ALL=C grep -E 'a|npm publish' f
+xargs grep -l 'x|npm publish' < list
+if grep -q 'a|npm publish' f; then echo y; fi
+export VAR=$(git rev-parse HEAD) && echo $VAR
+export A=$(grep -c 'a|gh pr close' f) && echo "$A"
+grep -n 'rm -rf /etc; git push --force origin main' notes.md
+diff <(grep 'a|npm publish' f) g
+grep -E 'x>y|a<b' .agent/GOAL.md
+EOF
+while IFS= read -r c; do
+  [ -n "$c" ] && gdeny "quoted code is still split: $c" "$QD" "$c"
+done <<'EOF'
+bash -c 'grep x f | npm publish'
+sh -c "echo a; npm publish"
+eval 'echo a; npm publish'
+watch 'echo a; npm publish'
+echo 'a' ; npm publish
+grep 'a' f; npm publish
+echo "$(npm publish)"
+grep "x$(npm publish)" f
+echo "a;b" `npm publish`
+grep 'a|b' f | sh
+git -c core.editor='true; npm publish' commit
+env -S 'echo a; npm publish'
+ssh host 'echo a; npm publish'
+parallel echo ::: 'a; npm publish'
+xargs sh -c 'echo a; npm publish'
+echo 'a' "b" ; gh pr close 5
+echo $'it\'s' ; npm publish
+echo "it's" ; npm publish
+echo it\'s ; npm publish
+echo "${x:-'a;b'}" ; npm publish
+echo 'unterminated ; npm publish
+sudo -s echo 'a; npm publish'
+FOO='a; npm publish' echo hi
+echo "$(bash -c 'a; npm publish')"
+grep -f <(npm publish) f
+echo x > >(npm publish)
+EOF
+# a quote opened on an earlier line must not make the real code after it look quoted
+gdeny "quoted code: a double quote spanning lines, then a real command" "$QD" "$(printf '%s\n' 'git commit -m "msg' "echo 'a\" ; npm publish ; echo '" "'")"
+gdeny "quoted code: an interpreter heredoc body with an apostrophe" "$QD" "$(printf '%s\n' 'cat <<EOF | python3' "it's" 'EOF' "echo x; npm publish; echo '" "'")"
+gdeny "quoted code: a multi-line single quote is not neutralised" "$QD" "$(printf '%s\n' "echo 'a" "b' ; npm publish")"
 exit 0

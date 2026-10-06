@@ -939,7 +939,9 @@ scan_text() { # scan one text (heredoc bodies already stripped); a deny exits, s
     if [ "$NT" -gt 0 ]; then check_env_files; fi
   done <<<"$1"
   # A failed splitter must not look like "no segments": capture its output and fail closed if it errs.
-  segs=$(printf '%s\n' "$1" | sed -e 's/&&/\n/g' -e 's/||/\n/g' -e 's/[;|&()`]/\n/g') || { echo "GUARD: could not split the command; failing closed" >&2; exit 2; }
+  # quote-data.pl first blanks the separators inside quoted data (a grep pattern, an echo string, a commit
+  # message), so `grep -E 'a|npm publish' f` stays one command; quoted code (bash -c '...') is still split.
+  segs=$(printf '%s\n' "$1" | perl "$SELF_DIR/quote-data.pl" | sed -e 's/&&/\n/g' -e 's/||/\n/g' -e 's/[;|&()`]/\n/g') || { echo "GUARD: could not split the command; failing closed" >&2; exit 2; }
   while IFS= read -r seg; do   # pass 2: per simple command
     scan_segment "$seg"
   done <<<"$segs"
