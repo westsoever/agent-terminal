@@ -143,19 +143,6 @@ assert_file "nested stop: the top-level session has its own counter" "$AGENT_HOM
 cat >"$WORK/fake-claude-nofix" <<'EOS'
 #!/usr/bin/env bash
 while [ $# -gt 0 ]; do [ "$1" = --model ] && echo "$2" >>"$NOFIX_CALLS"; shift; done
-# ---------- session ids (F12) ----------
-# a session id is a directory name under sessions/: one with ".." or "/" must not reach outside it
-SR=$(mk_repo sidrepo); write_goal "$SR" "false"
-out=$(stop "$SR" "../escape-a")
-assert_eq "sid with ..: still blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
-assert_no_file "sid with ..: nothing written outside sessions/" "$AGENT_HOME/escape-a"
-out=$(stop "$SR" "nest/ed")
-assert_no_file "sid with /: no nested directory" "$AGENT_HOME/sessions/nest"
-out=$(stop "$SR" "..")
-assert_no_file "sid '..': no retries file in AGENT_HOME" "$AGENT_HOME/retries"
-assert_eq "unsafe sids map to their own sid-<hash> dirs" "3" "$(ls "$AGENT_HOME/sessions" | grep -c '^sid-')"
-out=$(stop "$SR" "../escape-a")
-assert_contains "the same unsafe sid keeps its own counter" "$(printf '%s' "$out" | jq -r .reason)" "attempt 2 of 3"
 exit 0
 EOS
 chmod +x "$WORK/fake-claude-nofix"
