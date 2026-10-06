@@ -57,8 +57,8 @@ Whenever Ching runs the tests, it first runs them with no AI at all. The AI is o
 
 **What we add:**
 - **A banner** when a finished helper still has something open, such as a next step or a blocker.
-- **One spoken sentence**, about 5 to 10 minutes later, if the helper is still waiting. It only speaks when you are at the Mac, nobody else is speaking, and it is not quiet hours.
+- **One spoken sentence**, about 5 to 10 minutes later, if the helper is still waiting. It only speaks when you are at the Mac, nobody is using VoiceMode, and it is not quiet hours.
 - **Silence for busy helpers.** A helper that is still working never triggers a reminder, even if you have been away for hours.
-- **The same alert budget** as every other alert, so the check-ins cannot flood you.
+- **Limits so it cannot flood you.** The banner uses the same alert budget as every other alert. The spoken sentence is outside that budget, so it has its own limits: once each time a helper starts waiting, at most one every 10 minutes, never in quiet hours, and only when you are at the Mac.
 
 Later: a small panel in the notch that you hover over to see the updates.

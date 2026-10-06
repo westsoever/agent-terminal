@@ -36,9 +36,9 @@ A new check in `ching-watch.sh` and one small script, `bin/speak.sh`.
 
 A registry session (state not `ended`) is **waiting** when all of these hold:
 
-1. meta `state` is `input` or `blocked`, or `done` with open work (the checkpoint has `blocker:` other than `none` or a `next_action:` other than `none`, or the session's `NEXT.md` is non-empty); and
+1. meta `state` is `input` or `blocked`, or `done` with open work (the checkpoint has a `blocker:` or `next_action:` that is not blank and not a "none" value: `none`, `(none)` or `none.`, any case; or the session's `NEXT.md` is non-empty); and
 2. the `updated` time is at least `WATCH_WAIT_GRACE_MINS` (default 2) ago; and
-3. the `updated` time is at most `WATCH_NUDGE_MAX_HOURS` (default 12) ago. Older sessions are stale, not waiting; this also keeps a backlog of old sessions from nagging on the first run.
+3. the `updated` time is at most `WATCH_NUDGE_MAX_HOURS` (default 12) ago. Older sessions are stale, not waiting; this also keeps a backlog of old sessions from nagging on the first run. `0` switches nudging off, and any knob that is not plain digits falls back to its default.
 
 `working` never waits. A new prompt or Stop changes `updated` (and `state`), so a waiting spell ends by itself and the next one starts clean. Spell identity is the `updated` value.
 
@@ -54,11 +54,11 @@ A registry session (state not `ended`) is **waiting** when all of these hold:
 For a waiting session whose `updated` is at least `WATCH_SPEAK_AFTER_MINS` (default 5) ago and whose meta `spoken_for` is not equal to the current `updated` value, speak when all hold:
 
 - the local hour is inside the same window as banners (`NOTIFY_QUIET_END` to `NOTIFY_QUIET_START`);
-- **presence:** keyboard or mouse used in the last `WATCH_PRESENT_MINS` (default 10), read from `ioreg -c IOHIDSystem` (`HIDIdleTime`, nanoseconds). Unreadable counts as absent;
-- **voice free:** `~/.voicemode/conch` does not have `held` true with `expires` in the future. A missing or unparseable file counts as free;
+- **presence:** keyboard or mouse used in the last `WATCH_PRESENT_MINS` (default 10), read from `/usr/sbin/ioreg -c IOHIDSystem` (`HIDIdleTime`, nanoseconds). The path is absolute because launchd's `PATH` has no `/usr/sbin`; tests replace it with `IOREG_CMD`. Unreadable counts as absent;
+- **voice free:** VoiceMode is not in use: `~/.voicemode/conch` is busy only when it is a JSON object whose `pid` is a number for a live process and either `held` is true with `expires` in the future (the short hold between turns) or `held` is not true and `acquired` is inside VoiceMode's own stale-call window (`VOICEMODE_CONCH_LOCK_EXPIRY`, default 300 s), which is how an active call is written for its whole length. Everything else counts as free: a missing, empty, corrupt, array or scalar file, a dead or non-numeric `pid`, an expired hold, a stale call, or a timestamp that does not parse;
 - **no pile-up:** nothing was spoken in the last `WATCH_SPEAK_GAP_MINS` (default 10), tracked by the epoch time stored in `~/.agent/notify/last-spoken`.
 
-The sentence is built from the checkpoint with no AI call: `<session name> has been waiting <n> minutes: <next_action, else blocker, else "it needs your input">.` On success set `spoken_for=<updated>`, touch `last-spoken`, and emit `nudge_spoken`. If a condition fails, nothing is set and the check repeats on the next tick.
+The sentence is built from the checkpoint with no AI call: `<session name> has been waiting <n> minutes: <next_action, else blocker, else "it needs your input" (or "it is blocked" for a blocked session)>.` On success set `spoken_for=<updated>`, touch `last-spoken`, and emit `nudge_spoken`. If a condition fails, nothing is set and the check repeats on the next tick. After one failed `speak.sh` the watcher tries no further session in that tick.
 
 ### 3.4 `bin/speak.sh`
 
@@ -90,7 +90,7 @@ Bash, with stubs for `speak.sh`, `HID_IDLE_CMD`, the conch file and `WATCH_NOW`:
 - A new Stop (new `updated`) re-arms the spell. A new prompt ends it.
 - A session older than the cap (25 h, and 12 h plus 1 s) never nudges; exactly 12 h still does; the cap is configurable.
 - A suppressed banner (quiet hours or budget) logs its reason and retries next tick.
-- Spoken note: user present and conch free speaks once, and a second tick does not repeat. User away, conch held, quiet hours, an unreadable `ioreg`, or a recent `last-spoken` each skip it without setting `spoken_for`. An expired conch counts as free.
+- Spoken note: user present and conch free speaks once, and a second tick does not repeat. User away, VoiceMode in use, quiet hours, an unreadable `ioreg`, or a recent `last-spoken` each skip it without setting `spoken_for`. VoiceMode in use means a live pid with an unexpired hold or an active call (`held:false`, started inside the stale window); an expired hold, a stale call, a dead pid and a corrupt, empty, array or missing file all count as free.
 - `speak.sh`: Kokoro down returns non-zero, and the request carries the 30-second limit.
 
 ## 6. Ordering and risks

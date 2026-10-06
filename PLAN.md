@@ -244,11 +244,11 @@ Built per D10: the shared contracts land first, then parallel implementers on di
 
 ### Phase 1.6: Check-in nudges (spec and plan in `docs/superpowers/`; D19)
 
-- [ ] **1.6.1** `speak.sh`: say a sentence through the local Kokoro service.
-- [ ] **1.6.2** `notify.sh`: the budgeted `waiting` kind.
-- [ ] **1.6.3** `ching-watch.sh`: detect waiting sessions and send the banner for finished sessions with open work.
-- [ ] **1.6.4** `ching-watch.sh`: one spoken note per waiting spell (presence, voice lock, quiet hours, speech gap).
-- [ ] **1.6.5** Live smoke section, docs, and the real-machine check from launchd.
+- [x] **1.6.1** `speak.sh`: say a sentence through the local Kokoro service.
+- [x] **1.6.2** `notify.sh`: the budgeted `waiting` kind.
+- [x] **1.6.3** `ching-watch.sh`: detect waiting sessions and send the banner for finished sessions with open work.
+- [x] **1.6.4** `ching-watch.sh`: one spoken note per waiting spell (presence, voice lock, quiet hours, speech gap).
+- [ ] **1.6.5** Live smoke section, docs, and the real-machine check from launchd. (real-machine check from launchd pending)
 
 **Checkpoint 1.6:** test output, the `ching-watch.sh` diff and the real-machine check. You approve before `nudge` merges into `main`.
 
