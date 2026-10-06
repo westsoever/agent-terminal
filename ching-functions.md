@@ -62,3 +62,13 @@ Whenever Ching runs the tests, it first runs them with no AI at all. The AI is o
 - **Limits so it cannot flood you.** The banner uses the same alert budget as every other alert. The spoken sentence is outside that budget, so it has its own limits: once each time a helper starts waiting, at most one every 10 minutes, never in quiet hours, and only when you are at the Mac.
 
 Later: a small panel in the notch that you hover over to see the updates.
+
+## 6. Talking to your helpers (voice, level A)
+
+**What works now:**
+- **Spoken status.** Run `~/.claude/ching/bin/dash.sh --speak` in any session. It prints one short summary that leads with how many helpers need you, for example "1 needs you. 5 active sessions out of 19. miso-app needs your input." The dispatcher uses the same command, and you can run it yourself.
+- **Voice permission.** The two VoiceMode `converse` tool names are on the permission allowlist, so a session that is allowed to speak does not stop to ask first. Only the dispatcher is meant to speak; workers stay silent.
+
+**Dictating into a helper (the fallback that always works):** type `/voice` in the helper you are looking at, hold the key to talk, and release to send. It is dictation only: you speak, the helper reads your words, and nothing is spoken back. It works in the terminal, the Desktop Code tab and VS Code. Use it whenever the dispatcher cannot reach a helper, or whenever you would rather say the instruction straight to that session.
+
+**Check before you send:** if you dictate something that deletes, pushes, deploys or migrates, read the text on screen before you submit it. Speech-to-text mishears, and the guard only catches what it recognises as dangerous.

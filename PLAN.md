@@ -250,14 +250,14 @@ Built per D10: the shared contracts land first, then parallel implementers on di
 - [x] **1.6.2** `notify.sh`: the budgeted `waiting` kind.
 - [x] **1.6.3** `ching-watch.sh`: detect waiting sessions and send the banner for finished sessions with open work.
 - [x] **1.6.4** `ching-watch.sh`: one spoken note per waiting spell (presence, voice lock, quiet hours, speech gap).
-- [ ] **1.6.5** Live smoke section, docs, and the real-machine check from launchd. (real-machine check from launchd pending)
+- [x] **1.6.5** Live smoke section, docs, and the real-machine check from launchd. *Real-machine check done 2026-10-06 16:00 on the `lyo` machine: `speak.sh` played through Kokoro, `ioreg` idle read 0 s, and a planted `input` session 400 s old made the launchd job log `nudge_spoken` (mins 6) and set `spoken_for`. Test session removed. Full suite 2072 passed; `t_escalate` (call limit) and `t_meta` (50 writes under 2 s) failed once under load average 8-17 and pass alone.*
 
 **Checkpoint 1.6:** test output, the `ching-watch.sh` diff and the real-machine check. You approve before `nudge` merges into `main`.
 
 ### Phase 2: Pilot on a couple of real sessions across different folders (2-3 days of real use)
 
 - [x] **2.1** Run `install.sh` on your real `~/.claude/settings.json` (machine-wide from this point; no per-repo setup is needed for hooks, state, notifications, `dash.sh` or the guardrails). *Done 2026-10-06 10:01 after the user chose "install as designed" (rule 10 denies Telegram/Discord/Gmail/Slack reply and send tools for sessions). Backup `~/.claude/settings.json.bak.ching.20261006-100147`; launchd job `org.ching.watch` loaded; a second run changed nothing; the watcher logged `context` events.*
-- [ ] **2.2** *(prepared 2026-10-06: miso opted in through the worktree `~/bbq/.worktrees/miso-ching-pilot`, branch `ching-pilot`, `release_mode: confirm`. miso's `bun test` has failed on main since 2026-10-02 (7 local-registry tests), so the first pilot task there is getting CI green. First task done locally 2026-10-06: the failing tests came from the root `overrides: { zod: ^4.4.3 }` forcing zod 4 onto shadcn, which needs zod 3 (`deepPartial`); dropping the override gives shadcn its own zod 3.25.76 and leaves everything else on zod 4.4.3. Commit 70b0869 on `ching-pilot` (not pushed; the full miso gate is green, 2612 tests). It still has to reach main through a normal feature branch and PR, since `ching-pilot` is never pushed. Pilot folders picked 2026-10-06: the miso worktree above, plus `~/bbq/bbqos` (plain repo on main, not opted in, so it exercises the machine-wide hooks without a `GOAL.md`). No real non-repo working folder exists on this machine (the AIW shared drive is a git repo), so the third slot stays open until real non-repo work comes up.)* Pick two or three real sessions in different folders (for example one repo, one worktree, one non-repo folder). Optionally, in one repo on a branch: add the autonomy block to `AGENTS.md`, add gitignore lines, write `.agent/GOAL.md` with the real test command (from `package.json`) to opt that repo into the Stop check and the release/migrate gates.
+- [ ] **2.2** *(prepared on the `lyo` machine 2026-10-06 16:20, which replaces the `clyde` paths below: miso-app opted in through the worktree `~/bbq/.worktrees/miso-app-ching-pilot`, branch `ching-pilot` (commit 70c5993: autonomy block and gitignore lines, local only), `.agent/GOAL.md` with `release_mode: confirm` and `test_command: SPACES_ROOT=$HOME/.miso bun scripts/install-spaces.ts && bun run build && bun run typecheck && bun test app`, which mirrors the CI gate and passes (479 tests). Without the `install-spaces.ts` step the typecheck and tests fail on `@miso/campaign-core`, also on plain main. Pilot folders on this machine: the miso-app worktree, `~/.miso` (plain repo on main, not opted in; a push there auto-deploys, so only the guard protects it), and `~/aiw/openoasis` (not a git repo, the non-repo slot). Earlier note from the other machine: miso opted in through the worktree `~/bbq/.worktrees/miso-ching-pilot`, branch `ching-pilot`, `release_mode: confirm`. miso's `bun test` has failed on main since 2026-10-02 (7 local-registry tests), so the first pilot task there is getting CI green. First task done locally 2026-10-06: the failing tests came from the root `overrides: { zod: ^4.4.3 }` forcing zod 4 onto shadcn, which needs zod 3 (`deepPartial`); dropping the override gives shadcn its own zod 3.25.76 and leaves everything else on zod 4.4.3. Commit 70b0869 on `ching-pilot` (not pushed; the full miso gate is green, 2612 tests). It still has to reach main through a normal feature branch and PR, since `ching-pilot` is never pushed. Pilot folders picked 2026-10-06: the miso worktree above, plus `~/bbq/bbqos` (plain repo on main, not opted in, so it exercises the machine-wide hooks without a `GOAL.md`). No real non-repo working folder exists on this machine (the AIW shared drive is a git repo), so the third slot stays open until real non-repo work comes up.)* Pick two or three real sessions in different folders (for example one repo, one worktree, one non-repo folder). Optionally, in one repo on a branch: add the autonomy block to `AGENTS.md`, add gitignore lines, write `.agent/GOAL.md` with the real test command (from `package.json`) to opt that repo into the Stop check and the release/migrate gates.
 - [ ] **2.3** Work normally with those sessions. Record the three metrics in section 7.
 - [ ] **2.4** Read miso's `release.yml` and fill in its release path in 5.2 *(done 2026-10-06; it is a tag-triggered npm publish, see 5.2)*. Run the browser verification step for real on one change *(open: needs a real change)*.
 - [ ] **2.5** If a migration is needed during the pilot, run it through `migrate-gate.sh` with you watching the first one.
@@ -267,9 +267,9 @@ Built per D10: the shared contracts land first, then parallel implementers on di
 
 ### Phase 3: Voice, level A (dictate + spoken status)
 
-- [ ] **3.1** Add `mcp__voicemode__converse` and the plugin's tool name to the permission allowlist.
-- [ ] **3.2** Make `dash.sh --speak` available as a command the dispatcher (and you) can run.
-- [ ] **3.3** Document the `/voice` push-to-talk fallback for dictating into the focused worker.
+- [x] **3.1** Add `mcp__voicemode__converse` and the plugin's tool name to the permission allowlist. *Done 2026-10-06 on `lyo`: both names are in `permissions.allow` (backup `settings.json.bak.ching.phase3.*`).*
+- [x] **3.2** Make `dash.sh --speak` available as a command the dispatcher (and you) can run. *`~/.claude/ching/bin/dash.sh --speak` runs from the install symlink and prints the summary (checked 2026-10-06).*
+- [x] **3.3** Document the `/voice` push-to-talk fallback for dictating into the focused worker. *`ching-functions.md` section 6.*
 
 **Checkpoint 3:** you try it for a day; tell me what feels slow or wrong.
 
@@ -277,8 +277,8 @@ Built per D10: the shared contracts land first, then parallel implementers on di
 
 Runs only if Phase 0.5 passed. If it failed, the dispatcher is status-only and relay stays manual via `/voice`.
 
-- [ ] **4.1** Create the dispatcher: `dispatcher/AGENTS.md` (short spoken replies, never edits code, read back and confirm destructive/deploy/push instructions, refuses to relay anything the guardrails would deny).
-- [ ] **4.2** Give it only: `dash.sh`, file reads of `STATE.md`, `ListAgents`, `SendMessage`, `converse`.
+- [x] **4.1** Create the dispatcher *(`dispatcher/AGENTS.md` exists and is installed with the kit; not yet tried by voice)*: `dispatcher/AGENTS.md` (short spoken replies, never edits code, read back and confirm destructive/deploy/push instructions, refuses to relay anything the guardrails would deny).
+- [x] **4.2** Give it only *(stated in `dispatcher/AGENTS.md`; the tool restriction itself is policy text, not enforced)*: `dash.sh`, file reads of `STATE.md`, `ListAgents`, `SendMessage`, `converse`.
 - [ ] **4.3** Acceptance test, spoken: "What's blocked?", "What did miso finish?", "Tell miso to run the tests again", and a risky one ("push miso-workspace") that must be read back and refused or confirmed.
 
 **Checkpoint 4:** you try the four acceptance phrases and judge.
@@ -287,7 +287,7 @@ Runs only if Phase 0.5 passed. If it failed, the dispatcher is status-only and r
 
 - [ ] **5.1** miso-app (guardrails 3 and 4 and the release gate must already be active and tested). `release_mode: confirm` for the first release, you watch it land, then switch to `auto`.
 - [ ] **5.2** miso-workspace, last. Add the `spaces.lock` / deploy-chain note to its `GOAL.md` so sessions know a push releases to production with no preview. Same `confirm`-then-`auto` rule.
-- [ ] **5.3** Add a cap reminder to `dash.sh`: warn when more than 5 sessions are active.
+- [x] **5.3** Add a cap reminder to `dash.sh`: warn when more than 5 sessions are active. *Already in `dash.sh` (table footer and `--speak`); covered by `t_dash`.*
 
 **Checkpoint 5:** a week of metrics across all three.
 
