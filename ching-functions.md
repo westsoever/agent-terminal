@@ -21,7 +21,7 @@ Throughout this page, a "session" means one AI helper working on one task.
 
 **What we take:**
 - **A standard progress note.** Every helper ends its notes with the same short summary: what happened, what's blocking it, what comes next, and which files changed. Ching can then read it without guessing.
-- **Only the important messages.** You hear only when a helper needs your input or is blocked. Finished work is handled quietly. The dashboard groups helpers into "needs your review", "blocked", and "ready".
+- **Only the important messages.** You hear only when a helper needs your input or is blocked. Finished work is handled quietly: it waits in the dashboard's inbox, and reading the inbox marks it as seen. The dashboard groups helpers into "needs your review", "blocked", and "ready".
 - **A "running out of room" signal.** AI helpers lose track of things when a conversation gets too long. Ching marks each helper as healthy, watch, or time-to-hand-off, and suggests passing the work to a fresh helper before it loses the thread.
 - **A safety check.** Its approval checklist showed us a few gaps in our own safety script, which we can now fix.
 

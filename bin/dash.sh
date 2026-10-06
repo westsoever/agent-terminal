@@ -7,9 +7,11 @@
 # plus the optional extra list in ~/.agent-repos.
 #   (default)  name, state, age, ctx (● healthy ◐ watch ○ handoff ? unknown), tokens today, folder, note
 #   --speak    short spoken summary that leads with how many need you; warns above 5 active sessions
-#   --inbox    NEEDS YOU (blocked/input), READY (release gate passed, waiting for --approve),
-#              FINISHED (done since the last --inbox)
-#   --next     top 5 by urgency x importance x recency, each with its checkpoint next_action
+#   --inbox    NEEDS YOU (blocked/input), READY (release gate passed for the current HEAD, waiting for --approve),
+#              FINISHED (done since the last --inbox). --inbox marks FINISHED as seen: it writes the time to
+#              $AGENT_HOME/inbox.seen, so the next --inbox does not list those again. One entry per session.
+#   --next     top 5 by urgency x importance x recency (blocked and input sessions stay above working ones),
+#              each with its checkpoint next_action
 # Notes come from the STATE.md checkpoint `blocker:` (unless none), else the first "## Blocked" bullet.
 # Env: AGENT_HOME CLAUDE_DIR AGENT_REPOS_FILE DASH_NOW (epoch, tests) DASH_ACTIVE_MINS (30)
 set -euo pipefail
@@ -25,7 +27,7 @@ while [ $# -gt 0 ]; do
     --next) MODE=next; shift ;;
     --hours) HOURS=${2:?}; shift 2 ;;
     --all) HOURS=720; shift ;;
-    -h|--help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "dash: unknown argument $1" >&2; exit 64 ;;
   esac
 done
@@ -152,14 +154,16 @@ if [ -d "$AGENT_HOME/sessions" ]; then
 fi
 
 # ---- 2. transcripts (sessions not in the registry) ----
-seen=$(cut -d$'\037' -f2 "$ROWS" | sort -u)
+# Ids are matched with case, not `printf ids | grep -q`: grep stops at its first hit, a long list makes printf die
+# of SIGPIPE, and under pipefail that reads as "not found" (a registered session listed again from its transcript).
+nl=$'\n'; seen="$nl$(cut -d$'\037' -f2 "$ROWS")$nl"
 if [ -d "$CLAUDE_DIR/projects" ]; then
   for t in "$CLAUDE_DIR"/projects/*/*.jsonl; do
     [ -f "$t" ] || continue
     tm=$(file_mtime "$t")
     [ "$tm" -ge "$CUTOFF" ] || continue
     sid=$(basename "$t" .jsonl)
-    if printf '%s\n' "$seen" | grep -qxF "$sid"; then continue; fi
+    case "$seen" in *"$nl$sid$nl"*) continue ;; esac
     cwd=$(grep -m1 -o '"cwd": *"[^"]*"' "$t" 2>/dev/null | head -1 | sed 's/^"cwd": *"//; s/"$//' || true)
     [ -n "$cwd" ] || cwd="?"
     root=""; branch=""
@@ -190,10 +194,11 @@ while IFS= read -r repo; do
   git -C "$repo" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | while IFS= read -r wt; do
     [ -f "$wt/.agent/STATE.md" ] || continue
     wt_phys=$(cd "$wt" && pwd -P)
-    if cut -d$'\037' -f3 "$ROWS" | grep -qxF "$wt_phys"; then continue; fi
+    # awk reads the whole file (a `cut | grep -q` would stop early and die of SIGPIPE on a big column)
+    if WT="$wt_phys" awk -F'\037' '$3 == ENVIRON["WT"] { f = 1 } END { exit !f }' "$ROWS"; then continue; fi
     upd=$(file_mtime "$wt/.agent/STATE.md")
     [ "$upd" -ge "$CUTOFF" ] || continue
-    st=$(sed -n 's/^status:[[:space:]]*//p' "$wt/.agent/STATE.md" | head -1)
+    st=$(sed -n '/^status:/{s/^status:[[:space:]]*//;p;q;}' "$wt/.agent/STATE.md")
     [ -n "$st" ] || st=idle
     note=$(state_note "$wt/.agent/STATE.md")
     [ -z "$note" ] || st=blocked
@@ -219,6 +224,14 @@ while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled
 done <"$TMP/sorted"
 
 label_of() { if [ -n "$2" ]; then printf '%s [%s]' "$1" "$2"; else printf '%s' "$1"; fi; }
+ready_for_head() { # repo root -> 0 when .agent/release-ready names the repo's current HEAD (sha=); the signature is --approve's job
+  local f="$1/.agent/release-ready" got want
+  [ -f "$f" ] || return 1
+  got=$(awk -F= '$1 == "sha" { print $2; exit }' "$f")
+  [ -n "$got" ] || return 1
+  want=$(git -C "$1" rev-parse HEAD 2>/dev/null) || return 1
+  [ "$got" = "$want" ]
+}
 
 case "$MODE" in
   table)
@@ -237,19 +250,33 @@ case "$MODE" in
     SEEN_F="$AGENT_HOME/inbox.seen"
     last_seen=$(cat "$SEEN_F" 2>/dev/null || echo 0); case "$last_seen" in ''|*[!0-9]*) last_seen=0 ;; esac
     : >"$TMP/needs"; : >"$TMP/ready"; : >"$TMP/fin"
+    # lane files hold  key US line US short-id  in newest-first order (sorted is newest first).
+    # The key is the session id (a worktree-only row has no session, so its folder), or the repo for READY.
     while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do
       label=$(label_of "$name" "$branch")
+      key=$sid; sid7=${sid:0:7}; if [ "$src" = worktree ]; then key="worktree:$cwd"; sid7=""; fi
       case "$state" in
-        blocked) printf '  %s: blocked%s\n' "$label" "${note:+ -- $note}" >>"$TMP/needs" ;;
-        input) printf '  %s: needs your input\n' "$label" >>"$TMP/needs" ;;
-        done) [ "$upd" -le "$last_seen" ] || printf '  %s%s\n' "$label" "${nexta:+ -- next: $nexta}" >>"$TMP/fin" ;;
+        blocked) printf '%s\037  %s: blocked%s\037%s\n' "$key" "$label" "${note:+ -- $note}" "$sid7" >>"$TMP/needs" ;;
+        input) printf '%s\037  %s: needs your input\037%s\n' "$key" "$label" "$sid7" >>"$TMP/needs" ;;
+        done) [ "$upd" -le "$last_seen" ] || printf '%s\037  %s%s\037%s\n' "$key" "$label" "${nexta:+ -- next: $nexta}" "$sid7" >>"$TMP/fin" ;;
       esac
       r=""; if [ -d "$cwd" ]; then r=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true); fi
-      if [ -n "$r" ] && [ -f "$r/.agent/release-ready" ]; then
-        printf '  %s: release gate passed; run release-gate.sh --approve in %s\n' "$(basename "$r")" "$r" >>"$TMP/ready"
+      if [ -n "$r" ] && ready_for_head "$r"; then
+        printf '%s\037  %s: release gate passed; run release-gate.sh --approve in %s\037\n' "$r" "$(basename "$r")" "$r" >>"$TMP/ready"
       fi
     done <"$TMP/sorted"
-    lane() { echo "$1"; if [ -s "$2" ]; then sort -u "$2"; else echo "  (nothing)"; fi; }
+    # One line per key, first (newest) occurrence wins. Identical lines from different sessions get the short
+    # session id, so two sessions with the same label and note stay two visible entries.
+    lane() {
+      echo "$1"
+      if [ -s "$2" ]; then
+        awk -F'\037' '
+          !seen[$1]++ { n++; line[n] = $2; id[n] = $3; cnt[$2]++ }
+          END { for (i = 1; i <= n; i++) print line[i] (cnt[line[i]] > 1 && id[i] != "" ? " (" id[i] ")" : "") }' "$2"
+      else
+        echo "  (nothing)"
+      fi
+    }
     lane "NEEDS YOU" "$TMP/needs"
     lane "READY" "$TMP/ready"
     lane "FINISHED (since last look)" "$TMP/fin"
@@ -259,17 +286,28 @@ case "$MODE" in
 
   next)
     if [ "$total" -eq 0 ]; then echo "no Claude sessions seen in the last ${HOURS}h"; exit 0; fi
+    # score = urgency x importance x recency. Recency is clamped to [floor, 1]: a future-dated row (clock skew)
+    # is no fresher than now. A working session loses recency over a day (floor 0.2). A blocked or waiting
+    # session is no less urgent for waiting, so it loses at most 10% (floor 0.9); 10 x 0.9 and 9 x 0.9 stay
+    # above the best working score (stalled, 8), so blocked and input outrank working sessions of equal or
+    # lower importance however long they have waited. Equal scores list the newest first.
     while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do
+      w=0
       case "$state" in
-        blocked) u=10 ;;
-        input) u=9 ;;
+        blocked) u=10; w=1 ;;
+        input) u=9; w=1 ;;
         *) if [ -n "$stalled" ]; then u=8; elif [ "$ctx" = handoff ]; then u=7; elif [ "$state" = working ]; then u=4; else u=2; fi ;;
       esac
-      printf '%s\037%s\037%s\037%s\037%s\n' "$u" "${imp:-1}" $((NOW - upd)) "$(label_of "$name" "$branch") ($state)" "${nexta:-$note}"
+      printf '%s\037%s\037%s\037%s\037%s\037%s\n' "$u" "${imp:-1}" $((NOW - upd)) "$w" "$(label_of "$name" "$branch") ($state)" "${nexta:-$note}"
     done <"$TMP/sorted" \
-      | awk -F'\037' '{ r = 1 - ($3 / 3600) / 24; if (r < 0.2) r = 0.2; printf "%.2f\037%s\037%s\n", $1 * $2 * r, $4, $5 }' \
-      | sort -t $'\037' -k1,1 -rn \
-      | awk -F'\037' 'NR <= 5 { printf "%d. %s  [score %s]%s\n", NR, $2, $1, ($3 != "" ? "  -- " $3 : "") }'
+      | awk -F'\037' '{
+          d = ($3 / 3600) / 24
+          if ($4 == 1) { r = 1 - d / 10; lo = 0.9 } else { r = 1 - d; lo = 0.2 }
+          if (r < lo) r = lo
+          if (r > 1) r = 1
+          printf "%.2f\037%d\037%s\037%s\n", $1 * $2 * r, $3, $5, $6 }' \
+      | sort -t $'\037' -k1,1rn -k2,2n \
+      | awk -F'\037' 'NR <= 5 { printf "%d. %s  [score %s]%s\n", NR, $3, $1, ($4 != "" ? "  -- " $4 : "") }'
     exit 0 ;;
 esac
 

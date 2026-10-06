@@ -11,6 +11,9 @@
 #   $CLAUDE_DIR/ching  -> symlink to this directory;  $CLAUDE_DIR/commands/{handoff,next}.md -> symlinks.
 #   ~/.agent-repos: created empty with a comment if absent (optional extra list for dash.sh).
 #   $LAUNCH_AGENTS_DIR/org.ching.watch.plist (default ~/Library/LaunchAgents): runs bin/ching-watch.sh every 300 s.
+# The preview shows the settings diff and the plist diff. Nothing is applied (settings, symlinks, plist,
+# launchctl) without --yes or a "y" at a terminal; with no terminal and no --yes it prints what it would
+# change and exits 1. --dry-run prints the same preview and exits 0.
 # It never edits or removes vscode-session-manager-hook.sh or its entries. The blanket osascript
 # "Session finished" popup is removed ONLY with --replace-popup.
 #
@@ -35,7 +38,7 @@ while [ $# -gt 0 ]; do
     --replace-popup) POPUP=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --install-prepush) PREPUSH=${2:?--install-prepush needs a repo path}; shift 2 ;;
-    -h|--help) sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "install: unknown argument $1" >&2; exit 64 ;;
   esac
 done
@@ -44,6 +47,9 @@ command -v jq >/dev/null 2>&1 || { echo "install: jq is required" >&2; exit 1; }
 
 say() { printf '%s\n' "$*"; }
 act() { if [ "$DRY" -eq 1 ]; then say "would: $*"; else say "did:   $*"; fi; }
+would() { say "would: $*"; }
+TMPD=""
+tmpd() { if [ -z "$TMPD" ]; then TMPD=$(mktemp -d "${TMPDIR:-/tmp}/ching-install.XXXXXX"); trap 'rm -rf "$TMPD"' EXIT; fi; }
 
 # ---------------- pre-push hook for one repo ----------------
 if [ -n "$PREPUSH" ]; then
@@ -116,8 +122,7 @@ if [ "$CHANGED" -eq 1 ]; then
   if [ -f "$SETTINGS_FILE" ] && [ "$(printf '%s' "$CURRENT" | jq --indent 2 .)" != "$CURRENT" ]; then
     say "(note: the file is not in jq's canonical formatting; the diff may include reformatting)"
   fi
-  TMPD=$(mktemp -d "${TMPDIR:-/tmp}/ching-install.XXXXXX")
-  trap 'rm -rf "$TMPD"' EXIT
+  tmpd
   printf '%s\n' "$CURRENT" >"$TMPD/before"; printf '%s\n' "$NEW" >"$TMPD/after"
   diff -u --label "$SETTINGS_FILE (current)" --label "$SETTINGS_FILE (after install)" "$TMPD/before" "$TMPD/after" || true
 else
@@ -147,21 +152,24 @@ LAUNCH_AGENTS_DIR=${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}
 LAUNCHCTL=${LAUNCHCTL:-launchctl}
 PLIST="$LAUNCH_AGENTS_DIR/org.ching.watch.plist"
 AH=${AGENT_HOME:-$HOME/.agent}
+# values go into XML text: & < > in a path would otherwise break the plist (launchd then refuses to load it)
+xml_esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+X_LINK=$(xml_esc "$LINK"); X_AH=$(xml_esc "$AH")
 PLIST_BODY=$(cat <<EOP
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key><string>org.ching.watch</string>
-  <key>ProgramArguments</key><array><string>/bin/bash</string><string>$LINK/bin/ching-watch.sh</string></array>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>$X_LINK/bin/ching-watch.sh</string></array>
   <key>StartInterval</key><integer>300</integer>
   <key>RunAtLoad</key><true/>
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-    <key>AGENT_HOME</key><string>$AH</string>
+    <key>AGENT_HOME</key><string>$X_AH</string>
   </dict>
-  <key>StandardOutPath</key><string>$AH/watch.log</string>
-  <key>StandardErrorPath</key><string>$AH/watch.log</string>
+  <key>StandardOutPath</key><string>$X_AH/watch.log</string>
+  <key>StandardErrorPath</key><string>$X_AH/watch.log</string>
 </dict>
 </plist>
 EOP
@@ -176,20 +184,39 @@ fi
 if [ "$CHANGED" -eq 0 ] && [ -z "$link_plan" ] && [ "$NEED_REPOS" -eq 0 ] && [ "$NEED_PLIST" -eq 0 ]; then
   say "nothing to do"; exit 0
 fi
-if [ "$DRY" -eq 1 ]; then
-  while IFS='|' read -r t l; do [ -z "$l" ] || act "symlink $l -> $t"; done <<<"$link_plan"
-  [ "$NEED_REPOS" -eq 0 ] || act "create $AGENT_REPOS_FILE (empty, optional)"
-  [ "$CHANGED" -eq 0 ] || act "back up and rewrite $SETTINGS_FILE"
-  [ "$NEED_PLIST" -eq 0 ] || { if [ "$UNINSTALL" -eq 1 ]; then act "launchctl bootout and remove $PLIST"; else act "write $PLIST and launchctl bootstrap it"; fi; }
-  exit 0
-fi
 
-if [ "$CHANGED" -eq 1 ] && [ "$YES" -eq 0 ]; then
+# The launchd job belongs in the preview too: show what replaces what, like the settings diff above.
+if [ "$NEED_PLIST" -eq 1 ]; then
+  say "== launchd: $PLIST"
+  tmpd
+  if [ "$UNINSTALL" -eq 1 ]; then
+    diff -u --label "$PLIST (current)" --label "$PLIST (removed)" "$PLIST" /dev/null || true
+  else
+    printf '%s\n' "$PLIST_BODY" >"$TMPD/plist.new"
+    if [ -f "$PLIST" ]; then
+      diff -u --label "$PLIST (current)" --label "$PLIST (after install)" "$PLIST" "$TMPD/plist.new" || true
+    else
+      diff -u --label "$PLIST (absent)" --label "$PLIST (after install)" /dev/null "$TMPD/plist.new" || true
+    fi
+  fi
+fi
+plan_lines() { # everything this run would do, whether or not settings.json changes
+  while IFS='|' read -r t l; do [ -z "$l" ] || would "symlink $l -> $t"; done <<<"$link_plan"
+  [ "$NEED_REPOS" -eq 0 ] || would "create $AGENT_REPOS_FILE (empty, optional)"
+  [ "$CHANGED" -eq 0 ] || would "back up and rewrite $SETTINGS_FILE"
+  [ "$NEED_PLIST" -eq 0 ] || { if [ "$UNINSTALL" -eq 1 ]; then would "launchctl bootout and remove $PLIST"; else would "write $PLIST and launchctl bootstrap it"; fi; }
+}
+if [ "$DRY" -eq 1 ]; then plan_lines; exit 0; fi
+
+# Nothing is applied without --yes or an answer at a terminal: not the settings, not the symlinks, and
+# not the launchd job (a changed or missing plist is replaced and loaded only after this point).
+if [ "$YES" -eq 0 ]; then
+  plan_lines
   if [ -t 0 ]; then
-    printf 'Apply this change? [y/N] '; read -r ans
+    printf 'Apply these changes? [y/N] '; read -r ans
     case "$ans" in y|Y|yes) ;; *) say "aborted"; exit 1 ;; esac
   else
-    echo "install: not a terminal; re-run with --yes to apply the diff above" >&2; exit 1
+    echo "install: not a terminal; re-run with --yes to apply the changes shown above" >&2; exit 1
   fi
 fi
 
