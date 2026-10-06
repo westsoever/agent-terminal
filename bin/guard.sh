@@ -14,7 +14,8 @@
 # the pushed commit | 4 vercel deploy, gh workflow run | 5 reading .env*, printing secrets | 6 Supabase
 # apply_migration / non-read-only execute_sql / Management API / CLI db push | 7 editing a committed
 # migration, db-migrate --record-only, --apply without a migrate token | 8 publishing (npm/bun/pnpm/yarn
-# publish, gh release, gh repo delete/visibility/public) | 9 closing PRs/issues | 10 sending email/chat
+# publish, gh release, gh repo delete/visibility/public, pushing a v* tag or all tags, tags/releases through
+# gh api) | 9 closing PRs/issues | 10 sending email/chat
 # (drafts only) | 11 gate settings in GOAL.md (review, release_mode, test_command). Extras: --no-verify,
 # hook/settings/token tampering, gh pr merge, piping into a shell.
 # The Monitor tool (it runs a shell command) goes through the Bash rules. A missing dependency, a failing
@@ -303,13 +304,64 @@ check_refspec() { # refspec gdir delete
   require_token "$sha" "$gdir" "$dst"
 }
 
+# ---------- rule 8: release tags (miso publishes on a v* tag push) ----------
+deny_tag_push() {
+  emit_deny "rule 8: pushing a release tag publishes a release (miso's release.yml runs on v* tags). Create the tag locally, then notify the user that it is ready. ($1)"
+}
+is_release_tag_ref() { # refspec gdir -> 0 when it pushes or deletes a v* tag
+  local r=${1#+} src dst
+  src=${r%%:*}
+  if [[ "$r" == *:* ]]; then dst=${r#*:}; else dst=$r; fi
+  case "$dst" in
+    refs/tags/v*|tags/v*) return 0 ;;
+    refs/*|tags/*) return 1 ;;
+  esac
+  # an unqualified name: a version-shaped name, or a local v* tag (git pushes it as a tag)
+  case "$dst" in v[0-9]*) return 0 ;; v*) ;; *) return 1 ;; esac
+  git -C "$2" show-ref --verify -q "refs/tags/$dst" 2>/dev/null && return 0
+  # src:dst with a tag as the source makes git create dst under refs/tags
+  case "$src" in refs/tags/*|tags/*) return 0 ;; esac
+  [ -n "$src" ] && git -C "$2" show-ref --verify -q "refs/tags/$src" 2>/dev/null && return 0
+  return 1
+}
+push_config_tags() { # any token that sets push.followTags (not to false), a remote push refspec or a mirror remote
+  # (git -c, GIT_CONFIG_KEY_n / GIT_CONFIG_PARAMETERS); only tokens that can match are lower-cased
+  local k=0 t
+  while [ "$k" -lt "$NT" ]; do
+    t=${TOKS[$k]}
+    case "$t" in
+      *[Ff][Oo][Ll][Ll][Oo][Ww][Tt][Aa][Gg][Ss]*|*[Rr][Ee][Mm][Oo][Tt][Ee].*)
+        t=$(printf '%s' "$t" | LC_ALL=C tr 'A-Z' 'a-z')
+        case "$t" in
+          *push.followtags=false|*push.followtags=no|*push.followtags=off|*push.followtags=0) ;;
+          *push.followtags*|*remote.*.push|*remote.*.push=*|*remote.*.mirror*) return 0 ;;
+        esac ;;
+    esac
+    k=$((k + 1))
+  done
+  return 1
+}
+check_push_tags() { # $1 = gdir, $2 = 1 when the command names refspecs; TOKS is the segment
+  local v
+  if push_config_tags; then deny_tag_push "push.followTags, a remote push refspec or a mirror remote set for this push can push tags"; fi
+  v=$(git -C "$1" config --bool --get push.followTags 2>/dev/null || true)
+  [ "$v" != true ] || deny_tag_push "push.followTags is true in this repo's config"
+  v=$(git -C "$1" config --bool --get-regexp '^remote\..*\.mirror$' 2>/dev/null || true)
+  case "$v" in *" true"*) deny_tag_push "a remote in this repo's config is a mirror" ;; esac
+  if [ "$2" -eq 0 ]; then   # without refspecs git uses remote.<name>.push from the config
+    v=$(git -C "$1" config --get-regexp '^remote\..*\.push$' 2>/dev/null || true)
+    case "$v" in *tags*) deny_tag_push "a remote push refspec in this repo's config pushes tags" ;; esac
+  fi
+}
+
 check_push() { # $1 = index of 'push' token, $2 = git dir
-  local gdir=$2 k a force=0 del=0 all=0 np=0 refs="" r cur up sha
+  local gdir=$2 k a force=0 del=0 all=0 np=0 refs="" r cur up sha prev=""
   k=$(( $1 + 1 ))
   if [ "$SIM_UNKNOWN" -eq 1 ]; then emit_deny "git push after a cd the guard cannot resolve. Use 'git -C <literal dir> push ...'."; fi
   while [ "$k" -lt "$NT" ]; do
     a=${TOKS[$k]}
     case "$a" in
+      --tags|--follow-tags) deny_tag_push "git push $a can push a release tag; push branches by name" ;;
       --force|--force-with-lease|--force-with-lease=*|--force-if-includes|--mirror) force=1 ;;
       --delete) del=1 ;;
       --all|--branches) all=1 ;;
@@ -324,6 +376,13 @@ check_push() { # $1 = index of 'push' token, $2 = git dir
   [ "$force" -eq 0 ] || emit_deny "force push is never allowed (--force, --force-with-lease, +refspec, --mirror). Push a new commit; to undo a release push a revert commit through the gate."
   DEFB=$(git -C "$gdir" symbolic-ref --short -q refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)
   [ "$all" -eq 0 ] || emit_deny "git push --all would push the protected branch without a release token. Push named branches."
+  if [ -n "$refs" ]; then check_push_tags "$gdir" 1; else check_push_tags "$gdir" 0; fi
+  while IFS= read -r r; do   # `tag <name>` is refs/tags/<name>
+    [ -n "$r" ] || continue
+    if [ "$prev" = tag ]; then case "$r" in v*) deny_tag_push "git push ... tag $r" ;; esac; fi
+    if is_release_tag_ref "$r" "$gdir"; then deny_tag_push "$r"; fi
+    prev=$r
+  done <<<"$refs"
   if [ -z "$refs" ]; then
     cur=$(git -C "$gdir" symbolic-ref --short -q HEAD 2>/dev/null || true)
     up=$(git -C "$gdir" rev-parse --abbrev-ref '@{u}' 2>/dev/null || true)
@@ -433,6 +492,9 @@ check_gh() { # $1 = index of gh
       local mm=0
       case "$method" in ''|[Gg][Ee][Tt]|[Hh][Ee][Aa][Dd]) ;; *) mut=1; mm=1 ;; esac
       if [ "$mut" -eq 1 ] && seg_matches '*state=closed*'; then emit_deny "rule 9: closing an issue or PR through the API is the user's call. Comment and notify instead."; fi
+      if [ "$mut" -eq 1 ] && { seg_matches '*refs/tags*' || seg_matches '*/releases' || seg_matches '*/releases/*'; }; then
+        emit_deny "rule 8: creating a tag or a release through the API publishes a release. Create the tag locally, then notify the user that it is ready."
+      fi
       if [ "$mut" -eq 1 ] && [ "$hit" -eq 1 ]; then emit_deny "gh api call that merges, dispatches workflows, or writes refs/contents bypasses the release gate."; fi
       if [ "$mm" -eq 1 ] && [ "$inp" -eq 1 ]; then emit_deny "gh api with a mutating method and --input sends a body the guard cannot read. Use the dedicated gh subcommand, or ask the user."; fi
       if [ "$inp" -eq 1 ] && seg_matches graphql; then emit_deny "gh api graphql --input sends a query the guard cannot read. Pass the query with -f query=... so it can be checked."; fi

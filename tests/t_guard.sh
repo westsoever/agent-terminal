@@ -770,4 +770,46 @@ assert_eq "ordinary command latency stays low (10 runs in under 3 s)" "yes" "$([
 tdeny "rule 10: slack update_message (suffix pattern)" mcp__plugin_slack_slack__slack_update_message "$GR" '{"text":"hi"}'
 tallow "rule 10: gmail update_message_labels is a label tool" mcp__claude_ai_Gmail__update_message_labels "$GR" '{"messageId":"m","addLabelIds":["L"]}'
 tallow "rule 10: gmail update_label" mcp__claude_ai_Gmail__update_label "$GR" '{}'
+
+# ---------- rule 8: release tags are created locally, never pushed (miso's release.yml runs on v* tags) ----------
+TG=$(mk_repo tagpush); TGP=$(cd "$TG" && pwd -P)
+git -C "$TG" tag v1.2.3; git -C "$TG" tag -a vNext -m next; git -C "$TG" tag backup-1
+git -C "$TG" branch feature-v2; git -C "$TG" branch very-cool
+for c in 'git push origin v1.2.3' 'git push origin refs/tags/v1.2.3' 'git push origin tag v1.2.3' 'git push origin tag vNext' \
+         'git push origin HEAD:refs/tags/v1' 'git push origin v1.2.3:v1.2.3' 'git push origin refs/tags/vNext:vNext' 'git push origin vNext' \
+         'git push origin v2.0.0' 'git push origin tags/v1.2.3''git push origin feature-v2 v1.2.3' \
+         'git push origin :refs/tags/v1' 'git push origin :v1.2.3' 'git push origin --delete v1.2.3' 'git push --delete origin refs/tags/v1.2.3' \
+         'git push -d origin v1.2.3' 'git push --tags' 'git push origin --tags' 'git push --follow-tags origin feature-v2' \
+         'git -c push.followTags=true push origin feature-v2' 'git -c push.followtags push origin feature-v2' \
+         'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=push.followTags GIT_CONFIG_VALUE_0=true git push origin feature-v2' \
+         "GIT_CONFIG_PARAMETERS=\"'push.followTags'='true'\" git push origin feature-v2" \
+         'git -c remote.origin.push=refs/tags/v1:refs/tags/v1 push origin' 'git -c remote.origin.mirror=true push origin feature-v2' \
+         "git -C $TGP push origin v1.2.3" "cd $TGP && git push origin v1.2.3" 'env GIT_TERMINAL_PROMPT=0 git push origin v1.2.3' \
+         'command git push origin v1.2.3' 'bash -c "git push origin v1.2.3"' 'nohup git push origin --tags &' 'git push origin "v1.2.3"' \
+         'gh api repos/o/r/git/refs -f ref=refs/tags/v1 -f sha=abc' 'gh api -X POST repos/o/r/releases -f tag_name=v1' \
+         'gh api repos/o/r/releases --method=POST -f tag_name=v1'; do
+  gdeny_why "release tag push: $c" "$TG" "$c" "rule 8"
+done
+gdeny "release tag push: --mirror (also a force push)" "$TG" 'git push --mirror origin'
+gdeny "release tag push: +refs/tags/v1.2.3 (also a force push)" "$TG" 'git push origin +refs/tags/v1.2.3'
+for c in 'git tag v1.2.3' 'git tag -a v1.2.4 -m "release v1.2.4"' 'git push origin feature-v2' 'git push origin very-cool' \
+         'git push -u origin HEAD:feature-v2' 'git push origin backup-1' 'git ls-remote --tags origin' 'git fetch --tags' 'git fetch origin --tags' \
+         'git push --no-follow-tags origin feature-v2' 'git -c push.followTags=false push origin feature-v2' 'git log v1.2.3 -1' \
+         'git push origin refs/tags/v1.2.3:refs/heads/from-tag' 'gh api repos/o/r/releases' 'gh api repos/o/r/git/refs/tags' \
+         'gh release view v1.2.3' 'git describe --tags'; do
+  gallow "release tag: $c" "$TG" "$c"
+done
+# what git would do from its own config: push.followTags, a mirror remote, a tag push refspec
+git -C "$TG" config push.followTags true
+gdeny_why "release tag push: push.followTags=true in the repo config" "$TG" 'git push origin feature-v2' "rule 8"
+git -C "$TG" config --unset push.followTags
+git -C "$TG" config remote.origin.mirror true
+gdeny_why "release tag push: remote.origin.mirror in the repo config" "$TG" 'git push origin feature-v2' "rule 8"
+git -C "$TG" config --unset remote.origin.mirror
+git -C "$TG" checkout -q feature-v2
+git -C "$TG" config --add remote.origin.push 'refs/tags/*:refs/tags/*'
+gdeny_why "release tag push: a tag push refspec in the repo config, bare git push" "$TG" 'git push' "rule 8"
+git -C "$TG" config --unset-all remote.origin.push
+gallow "release tag: bare git push from a feature branch with a clean config" "$TG" 'git push'
+git -C "$TG" checkout -q main
 exit 0

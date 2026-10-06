@@ -108,6 +108,11 @@ gdeny() { # name cwd command
   local out; out=$(printf '%s' "$(bash_json "$2" "$3")" | "$BIN/guard.sh" 2>&1)
   if is_deny "$out"; then pass "deny: $1"; else fail "deny: $1" "  command: $3"$'\n'"  guard said: ${out:-<allowed>}"; fi
 }
+gdeny_why() { # name cwd command prefix: denied, and the reason starts with "GUARD: <prefix>" (pins the rule)
+  local out why; out=$(printf '%s' "$(bash_json "$2" "$3")" | "$BIN/guard.sh" 2>&1)
+  why=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null || true)
+  case "$why" in "GUARD: $4"*) pass "deny ($4): $1" ;; *) fail "deny ($4): $1" "  command: $3"$'\n'"  guard said: ${out:-<allowed>}" ;; esac
+}
 gallow() {
   local out; out=$(printf '%s' "$(bash_json "$2" "$3")" | "$BIN/guard.sh" 2>&1)
   if [ -z "$out" ]; then pass "allow: $1"; else fail "allow: $1" "  command: $3"$'\n'"  guard said: $out"; fi
