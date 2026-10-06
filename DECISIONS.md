@@ -2,6 +2,14 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D20-D22 (2026-10-06): before the pilot
+
+**Decisions (user, choosing the orchestrator's recommended option for each question):**
+
+- **D20:** Sessions may create a `v*` release tag but never push it. Guard rule 8 now denies pushing `v*` tags, `--tags`, `--follow-tags` and config that pushes tags, in every repo. The GitHub `release` environment reviewer stays as the second gate for miso.
+- **D21:** Before the pilot, fix the gaps from CHECKPOINT-1.5 section 6 that would hurt real sessions. These are the stop-check items F3, F4, F5, F8 (partial), F9 and F12, the ladder skip, the cheaper checkpoint rule, the false stall on resume, the zero-usage context reset, the `dash.sh` ranking, inbox and READY issues, the installer prompt on a non-tty run, and the rule 5 and rule 8 false positives on grep patterns. Everything else stays logged until the pilot shows it matters.
+- **D22:** miso is the first repo to opt in. The opt-in is the worktree `~/bbq/.worktrees/miso-ching-pilot` on branch `ching-pilot` (autonomy block and gitignore lines committed there, `.agent/GOAL.md` with `release_mode: confirm`), not the user's main miso checkout.
+
 ## D14-D18 (2026-10-05): Hermes harvest (Phase 1.5)
 
 **Decisions (user, in the brainstorming session that evaluated four Hermes Agent repos):**

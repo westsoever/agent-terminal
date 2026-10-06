@@ -40,6 +40,7 @@ Success is measured in the pilot (section 7), not by whether the scripts exist.
 | D16 | Phase 1.5 (coordination + review hardening) is built **before** the pilot; the learning-loop ideas wait for Phase 6 and real pilot data. | User, v4 |
 | D17 | Stay in bash: an append-only event log (`~/.agent/events.jsonl`) plus a one-shot launchd watcher. No daemon, no cloud scheduler, no AI calls in Phase 1.5. | User, v4 |
 | D18 | Sessions may write **drafts only**. They never send email or chat messages (guard rule 10). | User, v4 |
+| D20-D22 | Sessions never push `v*` release tags (rule 8). The pilot-affecting gaps are fixed before the pilot. miso opts in first, in the `ching-pilot` worktree. Details in `DECISIONS.md`. | User, 2026-10-06 |
 
 Items marked "pending your OK" are the ones to challenge when you review.
 
@@ -140,7 +141,7 @@ Enforced by `guard.sh` as a `PreToolUse` hook, applies to every session. **Pleas
 6. Supabase MCP `apply_migration`, `execute_sql` with anything other than read-only SQL, and Management API DDL. They bypass the ledger (this is miso's own rule). Migrations go through section 5.3.
 7. Editing a migration file that is already committed, and `db-migrate.ts --record-only`. The runner refuses edited applied files anyway; `--record-only` needs human judgment.
 
-8. *(v4)* Publishing: `npm`/`bun`/`pnpm`/`yarn` publish, `gh release create|delete|edit`, `gh repo delete`, `gh repo edit --visibility`, `gh repo create --public`.
+8. *(v4)* Publishing: `npm`/`bun`/`pnpm`/`yarn` publish, `gh release create|delete|edit`, `gh repo delete`, `gh repo edit --visibility`, `gh repo create --public`, and *(D20)* pushing `v*` release tags.
 9. *(v4)* Closing other people's items: `gh pr close`, `gh issue close|delete`, `gh api` calls that set `state=closed`. Commenting stays allowed.
 10. *(v4, D18)* Sending: MCP send/reply/forward/post tools for Gmail, Slack, Discord and Telegram. Drafts stay allowed.
 11. *(v4)* Gate settings: sessions may not add or change `review:`, `release_mode:` or `test_command:` in any `GOAL.md` (repo `.agent/` or `~/.agent/defaults/`).
@@ -159,7 +160,7 @@ What exists today (read from the repos):
 | miso-app | `bun run build`, `typecheck`, `bun test app`, then a smoke test of `/api/config` after deploy | Deploys to production. A pull request builds a **preview that uses the real data**. |
 | miso-workspace | `bun test packages` (local) | Triggers miso-app's Deploy, which moves `spaces.lock`, runs miso-app's gate, deploys. No pull request, no preview. |
 
-**miso differs from the steps below (found in Phase 2.4):** a push to `main` is not a release, so the token flow in steps 4-5 gates only the merge. The release itself is a tag push, and `guard.sh` does not deny `git push origin v*` or `--tags` (probed 2026-10-06; rule 8 denies `gh release create` and package publishing commands, not tags). What stops a bad publish is the `release` environment's required reviewer on GitHub. Open decision for the user: keep it that way, or add a guard rule that denies tag pushes matching `v*` so a session can only prepare the tag. Until decided, a session in miso must not push a release tag; `GOAL.md` for miso should say so.
+**miso differs from the steps below (found in Phase 2.4):** a push to `main` is not a release, so the token flow in steps 4-5 gates only the merge. The release itself is a tag push, and `guard.sh` does not deny `git push origin v*` or `--tags` (probed 2026-10-06; rule 8 denies `gh release create` and package publishing commands, not tags). What stops a bad publish is the `release` environment's required reviewer on GitHub. **Decided 2026-10-06 (D20):** guard rule 8 denies pushing `v*` tags (and `--tags`, `--follow-tags`, tag-pushing config). A session prepares the tag locally and notifies; the user pushes it, and the `release` environment reviewer still approves the publish.
 
 The steps a session follows before shipping:
 
@@ -245,7 +246,7 @@ Built per D10: the shared contracts land first, then parallel implementers on di
 ### Phase 2: Pilot on a couple of real sessions across different folders (2-3 days of real use)
 
 - [x] **2.1** Run `install.sh` on your real `~/.claude/settings.json` (machine-wide from this point; no per-repo setup is needed for hooks, state, notifications, `dash.sh` or the guardrails). *Done 2026-10-06 10:01 after the user chose "install as designed" (rule 10 denies Telegram/Discord/Gmail/Slack reply and send tools for sessions). Backup `~/.claude/settings.json.bak.ching.20261006-100147`; launchd job `org.ching.watch` loaded; a second run changed nothing; the watcher logged `context` events.*
-- [ ] **2.2** Pick two or three real sessions in different folders (for example one repo, one worktree, one non-repo folder). Optionally, in one repo on a branch: add the autonomy block to `AGENTS.md`, add gitignore lines, write `.agent/GOAL.md` with the real test command (from `package.json`) to opt that repo into the Stop check and the release/migrate gates.
+- [ ] **2.2** *(prepared 2026-10-06: miso opted in through the worktree `~/bbq/.worktrees/miso-ching-pilot`, branch `ching-pilot`, `release_mode: confirm`. miso's `bun test` has failed on main since 2026-10-02 (7 local-registry tests), so the first pilot task there is getting CI green.)* Pick two or three real sessions in different folders (for example one repo, one worktree, one non-repo folder). Optionally, in one repo on a branch: add the autonomy block to `AGENTS.md`, add gitignore lines, write `.agent/GOAL.md` with the real test command (from `package.json`) to opt that repo into the Stop check and the release/migrate gates.
 - [ ] **2.3** Work normally with those sessions. Record the three metrics in section 7.
 - [ ] **2.4** Read miso's `release.yml` and fill in its release path in 5.2 *(done 2026-10-06; it is a tag-triggered npm publish, see 5.2)*. Run the browser verification step for real on one change *(open: needs a real change)*.
 - [ ] **2.5** If a migration is needed during the pilot, run it through `migrate-gate.sh` with you watching the first one.

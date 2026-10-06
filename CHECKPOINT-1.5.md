@@ -269,6 +269,41 @@ share the 4-a-day budget with the "context almost full" alert.
 Everything below is deferred on purpose (Minor or out of scope in review) or a lens finding that was triaged to "log, do not fix now" (R10). The fix wave closed several of these; the
 per-task lists below keep the original wording, and a line that starts with FIXED says it is done.
 
+### Fixed in the fix-soon wave before the pilot (2026-10-06, D21; integration branch `fixsoon`)
+
+Four parallel agents, then an independent review of the merged result. Details are in the commit messages.
+
+- Stop hook and ladder:
+  - F3: one deadline for the whole hook (`STOP_CHECK_DEADLINE`, 780 s), and a time limit plus `--max-turns` on every `claude -p` call.
+  - F4: a timed-out run is killed as a whole process group.
+  - F5: bookkeeping failures give "no verdict" (exit 3, the stop is allowed, with a `stop_no_verdict` event) instead of a silent fail-open or a false block.
+  - F9: a missing `jq` gives a loud no-verdict.
+  - F12: unsafe session ids are hashed, and `meta_set` is serialised.
+  - The ladder is skipped for a tree that already failed it.
+  - F8 (partial): the fingerprint is taken before the run, there is a skip TTL, and a `check_skipped` event is logged.
+- Checkpoint rule cost: it asks only for the six-line block, skips unchanged turns, and is off for `claude -p` (`CLAUDE_CODE_ENTRYPOINT=sdk-*`) or with `CHING_NO_CHECKPOINT=1`.
+- Notifications:
+  - A session is `idle` after startup or resume until its first prompt, so there is no false stall.
+  - Zero-usage (synthetic) records no longer reset `ctx_level`.
+  - `handoff` is outside the daily budget, still with quiet hours.
+- `dash.sh`:
+  - `--next` keeps blocked and input sessions above working ones and clamps recency.
+  - The inbox dedupes by session id, newest first.
+  - READY requires the marker's sha to equal HEAD.
+  - SIGPIPE false negatives under pipefail are fixed.
+  - The docs say `--inbox` marks FINISHED as seen.
+- Installer:
+  - Nothing is applied without `--yes` or a tty "y".
+  - The plist diff appears in the preview.
+  - Plist values are XML-escaped.
+  - Dry-run plist and absent-plist tests were added, and `LAUNCH_AGENTS_DIR` is exported in `tests/lib.sh`.
+- Guard:
+  - D20: rule 8 denies `v*` tag pushes, and `gh api` release/tag mutations.
+  - Quoted data (grep/rg/echo/printf arguments, commit and tag messages, gh bodies) is no longer split into fake commands (`bin/quote-data.pl`).
+  - Rule 8 reads the package manager's subcommand (`npm publish --dry-run`, `npm view publish` and similar are allowed).
+  - Rule 5 does not take a grep/rg pattern such as `ching.env` for a file.
+  - The "internal error (exit 1)" reports are traced to the `export` bug fixed in `5fd969f`, with regression tests.
+
 ### Fixed in the fix wave (listed as gaps before)
 
 - Task 4: a failing `date -r` bypassed quiet hours (FC1: budgeted alerts are suppressed as `no-clock`). Task 5: `TOKEN_BUDGET_DAILY` leading zero, `0`, quotes, `export` (FC1). Task 7: `head -5` under pipefail (FC1).
