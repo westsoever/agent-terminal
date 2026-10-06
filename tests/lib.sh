@@ -22,6 +22,7 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export CHING_TEST_MODELS=""   # tests never call a real model; t_escalate.sh sets its own fake
 unset TMPDIR CHING_ALLOW_PUSH CHING_STOP_CHECK_RUNNING CHING_ESCALATING   # recursion markers inherited from a live stop-check.sh run
+unset CLAUDE_CODE_ENTRYPOINT CHING_NO_CHECKPOINT   # the session running the tests must not switch the checkpoint gate off
 mkdir -p "$AGENT_HOME" "$CLAUDE_DIR"
 
 # install.sh calls $LAUNCHCTL: a test must never reach the real launchd

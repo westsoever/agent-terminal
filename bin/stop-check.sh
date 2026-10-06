@@ -16,6 +16,7 @@
 # Env: STOP_CHECK_MAX_RETRIES (3) STOP_CHECK_TIMEOUT (one check run, 900 s)
 #      STOP_CHECK_DEADLINE (the whole hook, 780 s: 2 minutes of margin under the 900 s hook timeout)
 #      STOP_CHECK_SKIP_TTL (1800 s: how long an unchanged tree's green run is trusted; 0 = always run)
+#      CHING_NO_CHECKPOINT=1 (scripted runs: never ask for the checkpoint; see checkpoint_gate)
 #      CHING_TEST_MODELS CHING_TEST_CALL_TIMEOUT CHING_TEST_MAX_TURNS (see test-escalate.sh)
 set -euo pipefail
 START=$(date +%s)
@@ -79,10 +80,39 @@ notify() { # kind message
 }
 set_state() { meta_set state "$1"; meta_set updated "$(date +%s)"; }
 
+# tree_changed_since EPOCH: true when the work tree may have changed at or after EPOCH: HEAD moved (a commit,
+# checkout or reset writes its reflog), or a changed, staged, untracked or deleted path has an mtime at or
+# after it. Anything it cannot tell (a git error, a deleted path) counts as changed.
+tree_changed_since() {
+  local logs
+  logs=$(git -C "$ROOT" rev-parse --git-path logs/HEAD 2>/dev/null) || return 0
+  case "$logs" in /*) ;; *) logs="$ROOT/$logs" ;; esac
+  if [ -f "$logs" ]; then [ "$(file_mtime "$logs")" -lt "$1" ] || return 0
+  else [ "$(git -C "$ROOT" log -1 --format=%ct 2>/dev/null || echo 0)" -lt "$1" ] || return 0; fi   # no reflog
+  (cd "$ROOT" && perl -e '
+    my $p = shift;
+    open(my $fh, "-|", qw(git status --porcelain -z --untracked-files=all)) or exit 0;
+    local $/ = "\0"; my $skip = 0;
+    while (my $e = <$fh>) {
+      chomp $e;
+      if ($skip) { $skip = 0; next }            # the old name of a rename or copy
+      my ($xy, $path) = (substr($e, 0, 2), substr($e, 3));
+      $skip = 1 if $xy =~ /[RC]/;
+      my @s = lstat $path;
+      exit 0 if !@s || $s[9] >= $p;
+    }
+    close $fh or exit 0;
+    exit 1;
+  ' "$1")
+}
+
 # Repo mode only, and only once a prompt was recorded: block ONCE per prompt when STATE.md has no
 # checkpoint block or it was not updated since that prompt. The meta key makes the next Stop pass.
 # A fresh checkpoint is checked first so the checkpoint event is logged whether the model wrote it
-# unprompted or after the one block.
+# unprompted or after the one block. Not asked: when the turn changed nothing in the tree (a question
+# answered), and in scripted runs, where the block would replace the run's answer: CHING_NO_CHECKPOINT=1, or
+# CLAUDE_CODE_ENTRYPOINT=sdk-* (Claude Code sets sdk-cli for claude -p, sdk-ts/sdk-py for the Agent SDK,
+# cli for an interactive session; seen in the 2.1 binary, not documented, hence the explicit switch too).
 checkpoint_gate() {
   [ "$REPO_MODE" -eq 1 ] || return 0
   local prompted st status
@@ -96,10 +126,13 @@ checkpoint_gate() {
       '{status:$s,blocker:$b,next_action:$n}')"
     return 0
   fi
+  [ "${CHING_NO_CHECKPOINT:-}" != 1 ] || return 0
+  case "${CLAUDE_CODE_ENTRYPOINT:-}" in sdk-*) return 0 ;; esac
   [ "$(meta_get "$SESS_DIR/meta" checkpoint_blocked_for)" != "$prompted" ] || return 0   # already asked once for this prompt
+  tree_changed_since "$prompted" || return 0
   meta_set checkpoint_blocked_for "$prompted"
   ev stop_blocked '{"retry":1,"reason":"checkpoint"}'
-  jq -n --arg r "Do not stop yet: update the checkpoint block in $st for this turn (run /handoff: result, blocker, next_action, files_changed, examined, not_examined). This is asked once per prompt." \
+  jq -n --arg r "Do not stop yet: update the checkpoint block in $st for this turn. Edit only the six lines between <!-- ching:checkpoint --> and <!-- /ching:checkpoint --> (add the block if it is missing): result, blocker, next_action, files_changed, examined, not_examined. Nothing else is needed. This is asked once per prompt." \
     '{decision:"block", reason:$r}'
   exit 0
 }

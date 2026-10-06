@@ -287,10 +287,14 @@ assert_contains "events: a green stop logs stop_ok" "$(jq -r 'select(.kind=="sto
 # ---------- checkpoint rule (Phase 1.5) ----------
 CR=$(mk_repo cprepo); write_goal "$CR" "true"
 touch_prompt() { printf '%s' "$(hook_json UserPromptSubmit "$1" "$2")" | "$BIN/session-start.sh" touch; }
-touch_prompt "$CR" cp-1
+work() { echo "$2" >>"$1/work.txt"; }   # repo text : the turn changes the tree (the gate only asks after a change)
+touch_prompt "$CR" cp-1; work "$CR" cp-1
 out=$(stop "$CR" cp-1)
 assert_eq "checkpoint missing: blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
-assert_contains "checkpoint missing: reason names /handoff" "$(printf '%s' "$out" | jq -r .reason)" "/handoff"
+r=$(printf '%s' "$out" | jq -r .reason)
+assert_contains "checkpoint reason: asks only for the checkpoint block" "$r" "Edit only the six lines"
+assert_contains "checkpoint reason: names the six keys" "$r" "result, blocker, next_action, files_changed, examined, not_examined"
+assert_not_contains "checkpoint reason: no /handoff (a full handoff is not needed)" "$r" "/handoff"
 out=$(stop "$CR" cp-1)
 assert_eq "checkpoint: asked only once per prompt" "" "$out"
 # the first cp-1 stop exited at the block, so the only stop_ok for cp-1 comes from this second stop reaching its normal end
@@ -301,7 +305,7 @@ out=$(stop "$CR" cp-2)
 assert_eq "fresh checkpoint: no block" "" "$out"
 assert_contains "fresh checkpoint: checkpoint event" "$(jq -r 'select(.kind=="checkpoint") | .sid' "$AGENT_HOME/events.jsonl")" "cp-2"
 touch -t 202001010000 "$CR/.agent/STATE.md"
-touch_prompt "$CR" cp-2
+touch_prompt "$CR" cp-2; work "$CR" cp-2
 out=$(stop "$CR" cp-2)
 assert_eq "stale checkpoint (older than the prompt): blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
 CP="$WORK/cp plain"; mkdir -p "$CP"
@@ -314,7 +318,7 @@ out=$(stop "$NR" cp-4)
 assert_eq "no recorded prompt: never blocks for a checkpoint" "" "$out"
 assert_eq "no recorded prompt: stop ran to the end (stop_ok logged)" "cp-4" "$(jq -r 'select(.kind=="stop_ok" and .sid=="cp-4") | .sid' "$EVF")"
 # block once, the model then writes the checkpoint: the next stop passes AND the checkpoint event is logged
-touch_prompt "$CR" cp-5
+touch_prompt "$CR" cp-5; work "$CR" cp-5
 out=$(stop "$CR" cp-5)
 assert_eq "block-then-comply: first stop blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
 assert_eq "block-then-comply: no checkpoint event yet" "" "$(jq -r 'select(.kind=="checkpoint" and .sid=="cp-5") | .sid' "$EVF")"
@@ -323,6 +327,35 @@ out=$(stop "$CR" cp-5)
 assert_eq "block-then-comply: second stop passes" "" "$out"
 assert_eq "block-then-comply: checkpoint event logged after the block" "cp-5" "$(jq -r 'select(.kind=="checkpoint" and .sid=="cp-5") | .sid' "$EVF")"
 assert_eq "block-then-comply: second stop ran to the end (stop_ok logged)" "cp-5" "$(jq -r 'select(.kind=="stop_ok" and .sid=="cp-5") | .sid' "$EVF")"
+# a turn that changed nothing in the tree (a question answered, a plan explained) is not asked for a checkpoint
+CU=$(mk_repo cpunchanged); write_goal "$CU" "true"
+echo old >"$CU/old.txt"   # dirty, but from before the prompt
+age_tree() { touch -t 202001010000 "$CU/.git/logs/HEAD" "$CU/old.txt" "$CU/README.md"; }
+age_tree; touch_prompt "$CU" cu-1
+out=$(stop "$CU" cu-1)
+assert_eq "unchanged since the prompt: no checkpoint block" "" "$out"
+assert_eq "unchanged since the prompt: stop ran to the end (stop_ok logged)" "cu-1" "$(jq -r 'select(.kind=="stop_ok" and .sid=="cu-1") | .sid' "$EVF")"
+age_tree; touch_prompt "$CU" cu-2; echo edit >>"$CU/README.md"
+out=$(stop "$CU" cu-2)
+assert_eq "a tracked file edited after the prompt: blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+git -C "$CU" checkout -q README.md
+age_tree; touch_prompt "$CU" cu-3; commit_file "$CU" new.txt x
+out=$(stop "$CU" cu-3)
+assert_eq "a commit after the prompt (clean tree): blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+age_tree; touch -t 202001010000 "$CU/new.txt"; touch_prompt "$CU" cu-4; rm "$CU/new.txt"
+out=$(stop "$CU" cu-4)
+assert_eq "a tracked file deleted after the prompt: blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+# scripted runs opt out: CHING_NO_CHECKPOINT=1, or a non-interactive Claude Code run (claude -p sets
+# CLAUDE_CODE_ENTRYPOINT=sdk-cli; the Agent SDK sets sdk-ts / sdk-py)
+touch_prompt "$CR" cp-6; work "$CR" cp-6
+out=$(CHING_NO_CHECKPOINT=1 stop "$CR" cp-6)
+assert_eq "CHING_NO_CHECKPOINT=1: no checkpoint block" "" "$out"
+touch_prompt "$CR" cp-7; work "$CR" cp-7
+out=$(CLAUDE_CODE_ENTRYPOINT=sdk-cli stop "$CR" cp-7)
+assert_eq "claude -p (CLAUDE_CODE_ENTRYPOINT=sdk-cli): no checkpoint block" "" "$out"
+touch_prompt "$CR" cp-8; work "$CR" cp-8
+out=$(CLAUDE_CODE_ENTRYPOINT=cli stop "$CR" cp-8)
+assert_eq "interactive claude (CLAUDE_CODE_ENTRYPOINT=cli): still asked" "block" "$(printf '%s' "$out" | jq -r .decision)"
 # ---------- no verdict (F5, F9) ----------
 # When the hook cannot do its own bookkeeping it has no verdict: it allows the stop, says why on stderr,
 # exits 3 (a non-blocking hook error, so Claude Code shows the message) and logs stop_no_verdict when it can.
