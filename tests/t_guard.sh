@@ -984,4 +984,28 @@ echo "$(cat "| grep "KEY .env " )")"
 EOF
 # a double quote opened on an earlier line: `grep KEY" .env "` is not a pattern there, cat reads .env
 gdeny_why "rule 5 file: a quote spanning lines does not make .env a grep pattern" "$QD" "$(printf '%s\n' 'cat "x' 'grep KEY" .env "' '"')" "reading or copying .env"
+
+# ---------- "GUARD: internal error (exit 1)": commands that hit it before 5fd969f reached the installed guard ----------
+# (export under set -e; the quote-blind split fed grep's `\|export` to it as a bare export). Each must be decided:
+# exit 0, and either allowed or a well-formed deny. The ordinary ones must be allowed.
+while IFS= read -r c; do
+  [ -n "$c" ] || continue
+  out=$(printf '%s' "$(bash_json "$QD" "$c")" | "$BIN/guard.sh" 2>&1); rc=$?
+  if [ "$rc" -eq 0 ] && { [ -z "$out" ] || [ "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)" = deny ]; }; then
+    pass "decided, no internal error: $c"
+  else fail "decided, no internal error: $c" "  rc=$rc"$'\n'"  guard said: $out"; fi
+done <<'EOF'
+cd sub && export T_ROOT=$(mktemp -d /tmp/ching-focus.XXXXXX) && TNAME=t_stop bash tests/t_stop.sh >"$T_ROOT/log" 2>&1; echo "rc=$?"; grep -E 'checkpoint|^FAIL' "$T_ROOT"/results.t_stop | head -20; rm -rf "$T_ROOT"
+W=/tmp/x/t_dash && export HOME=$W/home AGENT_HOME=$W/agent-home && ls $AGENT_HOME && bin/dash.sh --next
+EOF
+while IFS= read -r c; do
+  [ -n "$c" ] && gallow "no internal error: $c" "$QD" "$c"
+done <<'EOF'
+cd sub && export SPACES_ROOT=/tmp/x && echo "=== build ===" && bun run build 2>&1 | tail -15; echo "build exit: ${PIPESTATUS[0]}"
+sed -n 1,60p node_modules/x/README.md | head -80; grep -n "readSheet\b\|readSheetNames\|export" node_modules/x/package.json | head
+cd sub && export SPACES_ROOT=/tmp/x && echo "== typecheck" && (bun run typecheck 2>&1 | tail -15; echo "typecheck exit=${pipestatus[1]}")
+ls db/test | head -20; f=$(ls db/test | grep -iE "foundation|enrich" | head -1); [ -n "$f" ] && sed -n 1,70p db/test/$f | cut -c1-170; grep -nE "usage|--apply|export (async )?function|export const" scripts/db-migrate.ts | head -20
+grep -nE '^(write_goal|mk_repo|hook_json|assert_[a-z_]+)\(\)|NOTIFY_DRY_RUN|export ' tests/lib.sh | head -40; sed -n "$(grep -n '^write_goal()' tests/lib.sh | cut -d: -f1),+12p" tests/lib.sh
+export T_ROOT=$(mktemp -d /tmp/ching-tests.XXXXXX) && TNAME=t_install bash tests/t_install.sh >"$T_ROOT/t_install.log" 2>&1; echo "rc=$?"; grep '^FAIL' "$T_ROOT/results.t_install"
+EOF
 exit 0
