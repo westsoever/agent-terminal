@@ -52,28 +52,28 @@ resolve_state() {
 }
 
 # meta_set key value : single-line key=value registry for the current session. The hooks and the watcher
-# write the same file, so each read-modify-write holds a mkdir lock (portable: macOS has no flock). A lock
-# older than 5 s belongs to a writer that died and is taken over; after about 10 s of waiting the write goes
-# ahead anyway, so a hook never hangs here. Fails (non-zero) when the session dir cannot be written.
+# write the same file, so the whole read-modify-write is one perl call holding flock on .meta.flock (perl's
+# flock works on macOS, which has no flock(1)). The kernel drops the lock when its holder dies, so there are
+# no stale locks. A holder that hangs is waited for 2 s at most (UserPromptSubmit hooks get 5 s), then the
+# write goes ahead. The key is matched literally. Fails (non-zero) when the session dir cannot be written.
 meta_set() {
-  local f="$SESS_DIR/meta" lock="$SESS_DIR/.meta.lock" tmp m i=0 rc=0
-  mkdir -p "$SESS_DIR" || return 1
-  until mkdir "$lock" 2>/dev/null; do
-    [ -w "$SESS_DIR" ] || return 1
-    i=$((i + 1))
-    if [ $((i % 20)) -eq 0 ]; then
-      m=$(file_mtime "$lock")
-      if [ "$m" -gt 0 ] && [ $(($(date +%s) - m)) -gt 5 ]; then rmdir "$lock" 2>/dev/null || true; continue; fi
-    fi
-    [ "$i" -lt 500 ] || { lock=""; break; }
-    sleep 0.01
-  done
-  tmp=$(mktemp "$SESS_DIR/.meta.XXXXXX") || rc=1
-  if [ "$rc" -eq 0 ]; then
-    { { if [ -f "$f" ]; then grep -v "^$1=" "$f" || true; fi; printf '%s=%s\n' "$1" "$2"; } >"$tmp" && mv "$tmp" "$f"; } || { rc=1; rm -f "$tmp"; }
-  fi
-  if [ -n "$lock" ]; then rmdir "$lock" 2>/dev/null || true; fi
-  return "$rc"
+  mkdir -p "$SESS_DIR" 2>/dev/null || return 1
+  perl -e '
+    use Fcntl qw(:flock);
+    my ($d, $k, $v) = @ARGV;
+    open(my $l, ">>", "$d/.meta.flock") or exit 1;
+    for (1 .. 200) { last if flock($l, LOCK_EX | LOCK_NB); select undef, undef, undef, 0.01 }
+    my @keep;
+    if (open(my $in, "<", "$d/meta")) {
+      for (<$in>) { next if index($_, "$k=") == 0; $_ .= "\n" unless /\n\z/; push @keep, $_ }
+      close $in;
+    }
+    my $tmp = "$d/.meta.$$";
+    open(my $out, ">", $tmp) or exit 1;
+    print $out @keep, "$k=$v\n";
+    close $out and rename($tmp, "$d/meta") and exit 0;
+    unlink $tmp; exit 1;
+  ' "$SESS_DIR" "$1" "$2" 2>/dev/null
 }
 
 meta_get() { # file key
