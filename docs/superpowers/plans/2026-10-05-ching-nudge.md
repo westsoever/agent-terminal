@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-05-ching-nudge-design.md`. Read it first, especially section 2 (what the review found).
 
-**Status (2026-10-06):** Tasks 1-5 are implemented on branch `nudge` (worktree `~/bbq/.worktrees/ching-nudge`): Task 1 `d771d75`, Task 2 `99966f2`, Task 3 `1d7c8a9`, Task 4 `1557fee`, Task 5 steps 1, 2 and 6 `9c882db`. The suite there passes (1057 passed, 0 failed). Still open: Task 6 (stale-session cap, found in final review), Task 5 steps 3-5 (full verification and the real-machine check), the rebase onto the Phase 1.5 fix wave (Task 0 step 4), and Checkpoint 1.6.
+**Status (2026-10-06, 12:40):** Tasks 0-6 are done on branch `nudge` (worktree `~/bbq/.worktrees/ching-nudge`), rebased onto `main` after the Phase 1.5 fix wave was merged (`3f94bef`). Commits after the rebase: speak.sh `0fbfe21`, notify `8f7a95c`, banner `cf67de0`, spoken note `2df81ea`, docs and live smoke `f3d4d25`, stale cap (Task 6) `a4d2cd1`, final-review fix wave `560e457`, `6858a6f`, `0342023`. The suite there passes (1573 passed, 0 failed). Task 5 step 4 (spec coverage) was run by a separate verifier and its gaps went into the fix wave. The whole-branch review and a scoped re-review are clean. Still open: Task 5 step 5 (real-machine check from launchd; it needs the nudge code on `main`, because the launchd job runs the `main` checkout) and the user's approval at Checkpoint 1.6 before `nudge` merges.
 
 ## Global Constraints
 
@@ -45,7 +45,7 @@
 1. **A new Stop must re-arm the nudge.** The spell is identified by `updated`; a session that waits, gets a prompt, and waits again must be nudged again, and one waiting spell must never nudge twice. Tests in Tasks 3 and 4.
 2. **A banner that notify suppressed (budget, quiet hours) must be retried, not lost or marked as sent.** Test in Task 3.
 3. **Text with quotes, backslashes or newlines** (a session name or next action containing them) must reach Kokoro as valid JSON and never break the script. Test in Task 1.
-4. **A corrupt, expired or `held:false` conch file** must count as "voice free"; only a live, unexpired hold blocks speech. Test in Task 4.
+4. **A corrupt, empty, expired or dead-holder conch file** must count as "voice free". Only a live holder blocks speech: an unexpired `held:true` hold, or a `held:false` call lock inside VoiceMode's own lock-expiry window (VoiceMode writes `held:false` for the whole of an active call and deletes the file on release; amended in the final review, I2). Test in Task 4.
 5. **Presence at the boundary and when unreadable.** 599 s idle speaks, exactly 600 s does not, and an unreadable or non-numeric `ioreg` result counts as absent. Test in Task 4.
 6. **Old sessions must never nudge.** Registry sessions pile up (the Phase 1.5 watcher skips any whose meta is older than 48 h). A session left `done`, `input` or `blocked` for days with a non-empty `NEXT.md` would otherwise get a banner on the first tick after install, and a spoken "has been waiting 4320 minutes" whenever the user is at the Mac. A spell older than `WATCH_NUDGE_MAX_HOURS` (default 12) is not a check-in. Test in Task 6.
 
