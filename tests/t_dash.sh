@@ -93,7 +93,7 @@ mkdir -p "$AGENT_HOME/sessions/sidH"
 printf '# State\nstatus: working\n<!-- ching:checkpoint -->\nblocker: none\n<!-- /ching:checkpoint -->\n\n## Blocked\n- stale bullet from yesterday\n' >"$AGENT_HOME/sessions/sidH/STATE.md"
 assert_not_contains "blocker: none is not blocked" "$(printf '%s\n' "$("$BIN/dash.sh")" | grep '^~ ')" "blocked"
 reg sidP "$PLAIN" done
-mkdir -p "$C/.agent"; printf 'kind=release-ready\n' >"$C/.agent/release-ready"
+mkdir -p "$C/.agent"; printf 'kind=release-ready\nsha=%s\n' "$(head_of "$C")" >"$C/.agent/release-ready"
 ib=$("$BIN/dash.sh" --inbox)
 assert_contains "inbox: needs-you lane" "$ib" "repoB [main]: blocked -- need the Supabase token"
 assert_contains "inbox: ready lane from a release-ready marker" "$(printf '%s\n' "$ib" | sed -n '/^READY/,/^FINISHED/p')" "repoC"
@@ -206,4 +206,53 @@ assert_contains "next: a future-dated blocked row scores 10.00, not more" "$(pri
 ND="$WORK/nx-d"
 nxmeta "$ND" d1 nb50 blocked 50; nxmeta "$ND" d2 nb30 blocked 30; nxmeta "$ND" d3 nb40 blocked 40
 assert_eq "next: blocked sessions at the same score list the newest first" "nb30 nb40 nb50 " "$(nxrun "$ND" | nxorder)"
+
+# ---------- fix wave FD-2/3: inbox lanes: one entry per session, newest first; READY only for the current HEAD ----------
+IAH="$WORK/ib-ah"; mkdir -p "$IAH"
+ibmeta() { # sid folder state hours_old [blocker]  (a plain folder: the label is the folder name)
+  local d="$IAH/sessions/$1"; mkdir -p "$d" "$WORK/$2"
+  printf 'cwd=%s\nroot=\nbranch=main\nstate=%s\nupdated=%s\n' "$WORK/$2" "$3" "$((NOW - $4 * 3600))" >"$d/meta"
+  if [ -n "${5:-}" ]; then printf '# State\n<!-- ching:checkpoint -->\nblocker: %s\nnext_action: none\n<!-- /ching:checkpoint -->\n' "$5" >"$d/STATE.md"; fi
+}
+ibrun() { AGENT_HOME="$IAH" CLAUDE_DIR="$WORK/ib-claude" AGENT_REPOS_FILE="${IB_REPOS:-$WORK/none}" DASH_NOW="$NOW" "$BIN/dash.sh" --inbox --hours 100; }
+lane_of() { printf '%s\n' "$1" | sed -n "/^$2/,/^[A-Z]/p" | grep '^  ' || true; }   # lines of one lane (up to the next heading)
+# two distinct sessions with the same folder, branch and blocker, plus a newer one with another name (sorts after it)
+ibmeta sidDup1-long afirst blocked 3 "need the token"
+ibmeta sidDup2-long afirst blocked 2 "need the token"
+ibmeta sidZ-long zlast blocked 1 "need the other token"
+ibmeta sidFin1-long fdone done 3; ibmeta sidFin2-long fdone done 2
+ib=$(ibrun)
+needs=$(lane_of "$ib" "NEEDS YOU")
+assert_eq "inbox: three blocked sessions give three lines (equal label+note is not merged)" "3" "$(printf '%s\n' "$needs" | grep -c .)"
+assert_eq "inbox: needs-you lane is newest first, not alphabetical" "zlast afirst afirst " "$(printf '%s\n' "$needs" | sed 's/^  \([^ ]*\) .*/\1/' | tr '\n' ' ')"
+assert_contains "inbox: two equal lines get the short session id" "$needs" "afirst [main]: blocked -- need the token (sidDup1)"
+assert_contains "inbox: the other equal line gets its own id" "$needs" "afirst [main]: blocked -- need the token (sidDup2)"
+assert_not_contains "inbox: a unique line carries no id" "$(printf '%s\n' "$needs" | grep zlast)" "(sid"
+fin=$(lane_of "$ib" "FINISHED")
+assert_eq "inbox: two finished sessions with the same label are two entries" "2" "$(printf '%s\n' "$fin" | grep -c fdone)"
+# worktree-only rows have no session id: two different worktrees must both stay
+W1="$WORK/ibwt1"; W2="$WORK/ibwt2"; git init -q -b main "$W1"; git init -q -b main "$W2"
+for w in "$W1" "$W2"; do mkdir -p "$w/.agent"; printf '# State\nstatus: blocked\n<!-- ching:checkpoint -->\nblocker: stuck on %s\nnext_action: none\n<!-- /ching:checkpoint -->\n' "$(basename "$w")" >"$w/.agent/STATE.md"; done
+printf '%s\n%s\n' "$W1" "$W2" >"$WORK/ib-repos"
+needs=$(IB_REPOS="$WORK/ib-repos" ibrun | sed -n '/^NEEDS YOU/,/^READY/p')
+assert_contains "inbox: first worktree-only row is listed" "$needs" "ibwt1 [main]: blocked -- stuck on ibwt1"
+assert_contains "inbox: second worktree-only row is listed" "$needs" "ibwt2 [main]: blocked -- stuck on ibwt2"
+
+# READY: the marker must be for the repo's current HEAD. Two sessions in one repo give one line.
+RR=$(cd "$(mk_repo ibready)" && pwd -P)
+for s in sidR1-long sidR2-long; do
+  mkdir -p "$IAH/sessions/$s"
+  printf 'cwd=%s\nroot=%s\nbranch=main\nstate=working\nupdated=%s\n' "$RR" "$RR" "$((NOW - 3600))" >"$IAH/sessions/$s/meta"
+done
+mkdir -p "$RR/.agent"
+printf 'kind=release-ready\nsha=%s\ntime=1\nsig=x\n' "$(head_of "$RR")" >"$RR/.agent/release-ready"
+ready=$(lane_of "$(ibrun)" "READY")
+assert_eq "inbox: a marker for HEAD gives one READY line for two sessions of that repo" "1" "$(printf '%s\n' "$ready" | grep -c ibready)"
+assert_contains "inbox: the READY line names the repo and the approve command" "$ready" "ibready: release gate passed; run release-gate.sh --approve in $RR"
+commit_file "$RR" f.txt "new work" "move HEAD"
+assert_eq "inbox: a marker for an older commit is not READY" "0" "$(lane_of "$(ibrun)" "READY" | grep -c ibready)"
+printf 'kind=release-ready\ntime=1\nsig=x\n' >"$RR/.agent/release-ready"
+assert_eq "inbox: a marker without a sha is not READY" "0" "$(lane_of "$(ibrun)" "READY" | grep -c ibready)"
+printf 'kind=release-ready\nsha=%s\ntime=1\nsig=x\n' "$(head_of "$RR")" >"$RR/.agent/release-ready"
+assert_eq "inbox: a marker for the new HEAD is READY again" "1" "$(lane_of "$(ibrun)" "READY" | grep -c ibready)"
 exit 0

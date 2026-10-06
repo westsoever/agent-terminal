@@ -219,6 +219,14 @@ while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled
 done <"$TMP/sorted"
 
 label_of() { if [ -n "$2" ]; then printf '%s [%s]' "$1" "$2"; else printf '%s' "$1"; fi; }
+ready_for_head() { # repo root -> 0 when .agent/release-ready names the repo's current HEAD (sha=); the signature is --approve's job
+  local f="$1/.agent/release-ready" got want
+  [ -f "$f" ] || return 1
+  got=$(awk -F= '$1 == "sha" { print $2; exit }' "$f")
+  [ -n "$got" ] || return 1
+  want=$(git -C "$1" rev-parse HEAD 2>/dev/null) || return 1
+  [ "$got" = "$want" ]
+}
 
 case "$MODE" in
   table)
@@ -237,19 +245,33 @@ case "$MODE" in
     SEEN_F="$AGENT_HOME/inbox.seen"
     last_seen=$(cat "$SEEN_F" 2>/dev/null || echo 0); case "$last_seen" in ''|*[!0-9]*) last_seen=0 ;; esac
     : >"$TMP/needs"; : >"$TMP/ready"; : >"$TMP/fin"
+    # lane files hold  key US line US short-id  in newest-first order (sorted is newest first).
+    # The key is the session id (a worktree-only row has no session, so its folder), or the repo for READY.
     while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do
       label=$(label_of "$name" "$branch")
+      key=$sid; sid7=${sid:0:7}; if [ "$src" = worktree ]; then key="worktree:$cwd"; sid7=""; fi
       case "$state" in
-        blocked) printf '  %s: blocked%s\n' "$label" "${note:+ -- $note}" >>"$TMP/needs" ;;
-        input) printf '  %s: needs your input\n' "$label" >>"$TMP/needs" ;;
-        done) [ "$upd" -le "$last_seen" ] || printf '  %s%s\n' "$label" "${nexta:+ -- next: $nexta}" >>"$TMP/fin" ;;
+        blocked) printf '%s\037  %s: blocked%s\037%s\n' "$key" "$label" "${note:+ -- $note}" "$sid7" >>"$TMP/needs" ;;
+        input) printf '%s\037  %s: needs your input\037%s\n' "$key" "$label" "$sid7" >>"$TMP/needs" ;;
+        done) [ "$upd" -le "$last_seen" ] || printf '%s\037  %s%s\037%s\n' "$key" "$label" "${nexta:+ -- next: $nexta}" "$sid7" >>"$TMP/fin" ;;
       esac
       r=""; if [ -d "$cwd" ]; then r=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true); fi
-      if [ -n "$r" ] && [ -f "$r/.agent/release-ready" ]; then
-        printf '  %s: release gate passed; run release-gate.sh --approve in %s\n' "$(basename "$r")" "$r" >>"$TMP/ready"
+      if [ -n "$r" ] && ready_for_head "$r"; then
+        printf '%s\037  %s: release gate passed; run release-gate.sh --approve in %s\037\n' "$r" "$(basename "$r")" "$r" >>"$TMP/ready"
       fi
     done <"$TMP/sorted"
-    lane() { echo "$1"; if [ -s "$2" ]; then sort -u "$2"; else echo "  (nothing)"; fi; }
+    # One line per key, first (newest) occurrence wins. Identical lines from different sessions get the short
+    # session id, so two sessions with the same label and note stay two visible entries.
+    lane() {
+      echo "$1"
+      if [ -s "$2" ]; then
+        awk -F'\037' '
+          !seen[$1]++ { n++; line[n] = $2; id[n] = $3; cnt[$2]++ }
+          END { for (i = 1; i <= n; i++) print line[i] (cnt[line[i]] > 1 && id[i] != "" ? " (" id[i] ")" : "") }' "$2"
+      else
+        echo "  (nothing)"
+      fi
+    }
     lane "NEEDS YOU" "$TMP/needs"
     lane "READY" "$TMP/ready"
     lane "FINISHED (since last look)" "$TMP/fin"
