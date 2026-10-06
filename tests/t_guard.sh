@@ -866,7 +866,6 @@ echo it\'s ; npm publish
 echo "${x:-'a;b'}" ; npm publish
 echo 'unterminated ; npm publish
 sudo -s echo 'a; npm publish'
-FOO='a; npm publish' echo hi
 echo "$(bash -c 'a; npm publish')"
 grep -f <(npm publish) f
 echo x > >(npm publish)
@@ -1000,6 +999,35 @@ echo "$(cat "| grep "KEY .env " )")"
 EOF
 # a double quote opened on an earlier line: `grep KEY" .env "` is not a pattern there, cat reads .env
 gdeny_why "rule 5 file: a quote spanning lines does not make .env a grep pattern" "$QD" "$(printf '%s\n' 'cat "x' 'grep KEY" .env "' '"')" "reading or copying .env"
+
+# ---------- a quoted ; | or space in a leading assignment's value does not hide the command after it ----------
+while IFS= read -r c; do
+  [ -n "$c" ] && gdeny "assignment value: $c" "$QD" "$c"
+done <<'EOF'
+FOO="a; b" npm publish
+env FOO="a;b" npm publish
+FOO="a;b" git push --force origin x
+FOO='a|b' gh pr close 5
+FOO="a b" gh pr close 5
+A=1 FOO="x && y" npm publish
+sudo FOO="a;b" npm publish
+FOO="a;b" bash -c 'npm publish'
+FOO=$'a\'; b' gh pr close 5
+> 'a b' npm publish
+FOO="a;b" rm -rf /usr/lib
+sudo -u 'a b' npm publish
+EOF
+gdeny "assignment value: a value spanning lines" "$QD" "$(printf '%s\n' 'FOO="a' 'b" npm publish')"
+while IFS= read -r c; do
+  [ -n "$c" ] && gallow "assignment value: $c" "$QD" "$c"
+done <<'EOF'
+FOO="a;b" echo ok
+FOO='a; npm publish' echo hi
+FOO="a b" ls
+FOO='a|b' bun test
+env FOO="a;b" echo ok
+NODE_OPTIONS="--max-old-space-size=4096 --enable-source-maps" bun run build
+EOF
 
 # ---------- "GUARD: internal error (exit 1)": commands that hit it before 5fd969f reached the installed guard ----------
 # (export under set -e; the quote-blind split fed grep's `\|export` to it as a bare export). Each must be decided:
