@@ -217,6 +217,16 @@ echo "real change" >>"$LR/README.md"
 out=$(lstop sess-SAME)
 assert_eq "changed tree: the ladder runs again" "4" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
 git -C "$LR" checkout -q README.md
+# a tree is recorded only when a model was really called: a ladder held back by the daily ceiling or by the
+# deadline has not failed on it
+echo "skipped-ladder tree" >>"$LR/README.md"; : >"$NOFIX_CALLS"
+out=$(CHING_TEST_LADDER_DAILY=0 CHING_CLAUDE_BIN="$WORK/fake-claude-try" CHING_TEST_MODELS="cheap strong" stop "$LR" sess-NOREC)
+assert_eq "daily ceiling 0: no model call" "0" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+out=$(STOP_CHECK_DEADLINE=20 lstop sess-NOREC)
+assert_eq "deadline too near: no model call" "0" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+out=$(lstop sess-NOREC)
+assert_eq "a tree no model was called on is not recorded: the ladder runs on it later" "2" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
+git -C "$LR" checkout -q README.md; rm -f "$LR/attempt.txt"
 
 # F6: a non-numeric or zero cap must not switch the safety limit off.
 for i in 1 2 3; do
@@ -252,6 +262,31 @@ assert_contains "process group: the timeout still blocks with timed out" "$(prin
 pg_pid=$(cat "$PGF" 2>/dev/null || echo 0)
 if [ "$pg_pid" -gt 0 ] && gone "$pg_pid"; then pass "process group: the forked sleeper is gone"; else fail "process group: the forked sleeper is gone" "  pid $pg_pid still alive"; fi
 [ "$pg_pid" -gt 0 ] && kill -9 "$pg_pid" 2>/dev/null
+# A TERM to the hook itself (what Claude Code sends on its hook timeout or on Esc) takes the whole check down:
+# test-escalate.sh, the test run and everything it forked. The hook ends as a no verdict.
+cat >"$WORK/slowcheck.sh" <<'EOS'
+#!/usr/bin/env bash
+echo "$$" >"$1.bash"
+sleep 97 &
+echo "$!" >"$1"
+wait
+EOS
+TP="$WORK/term-pids"; rm -f "$TP" "$TP.bash"
+write_goal "$R" "bash $WORK/slowcheck.sh $TP"
+hook_json Stop "$R" sess-TERM '{"stop_hook_active":false}' >"$WORK/term.json"
+"$BIN/stop-check.sh" <"$WORK/term.json" >"$WORK/term.out" 2>"$WORK/term.err" &
+hp=$!
+for i in $(seq 1 50); do [ -s "$TP" ] && break; sleep 0.1; done
+s=$(date +%s); kill -TERM "$hp"; rc=0; wait "$hp" || rc=$?; e=$(date +%s)
+assert_eq "TERM to the hook: it ends within 3 s" "1" "$([ $((e - s)) -le 3 ] && echo 1 || echo 0)"
+assert_eq "TERM to the hook: no verdict (exit 3)" "3" "$rc"
+assert_eq "TERM to the hook: no block" "" "$(cat "$WORK/term.out")"
+assert_contains "TERM to the hook: stderr says it was interrupted" "$(cat "$WORK/term.err")" "interrupted"
+for f in "$TP" "$TP.bash"; do
+  p=$(cat "$f" 2>/dev/null || echo 0)
+  if [ "$p" -gt 0 ] && gone "$p"; then pass "TERM to the hook: $(basename "$f") process is gone"; else fail "TERM to the hook: $(basename "$f") process is gone" "  pid $p"; fi
+  [ "$p" -gt 0 ] && kill -9 "$p" 2>/dev/null
+done
 
 # F3: one deadline for the whole hook (STOP_CHECK_DEADLINE, default 780 s, under the 900 s hook timeout).
 # A check cut off at the deadline has no verdict: the model is not told to fix anything. The stop is allowed
@@ -362,6 +397,13 @@ assert_eq "claude -p (CLAUDE_CODE_ENTRYPOINT=sdk-cli): no checkpoint block" "" "
 touch_prompt "$CR" cp-8; work "$CR" cp-8
 out=$(CLAUDE_CODE_ENTRYPOINT=cli stop "$CR" cp-8)
 assert_eq "interactive claude (CLAUDE_CODE_ENTRYPOINT=cli): still asked" "block" "$(printf '%s' "$out" | jq -r .decision)"
+# the gate looks at the tree as it was before the test run: files the check itself writes are not the turn's work
+git -C "$CU" checkout -q new.txt
+write_goal "$CU" "echo gen >$CU/gen-by-test.out"
+age_tree; touch -t 202001010000 "$CU/new.txt"; touch_prompt "$CU" cu-5
+out=$(stop "$CU" cu-5)
+assert_eq "a check that writes into the tree does not make the turn look changed" "" "$out"
+assert_file "the check did write into the tree" "$CU/gen-by-test.out"
 # ---------- no verdict (F5, F9) ----------
 # When the hook cannot do its own bookkeeping it has no verdict: it allows the stop, says why on stderr,
 # exits 3 (a non-blocking hook error, so Claude Code shows the message) and logs stop_no_verdict when it can.

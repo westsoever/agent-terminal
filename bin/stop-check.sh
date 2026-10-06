@@ -46,7 +46,7 @@ no_verdict() { # reason
 }
 on_exit() {
   local rc=$?
-  if [ -n "$OUT" ]; then rm -f "$OUT"; fi
+  if [ -n "$OUT" ]; then rm -f "$OUT" "$OUT.report"; fi
   if [ "$rc" -ne 0 ] && [ -z "$DONE" ]; then no_verdict "unexpected failure, exit $rc; see the error above"; fi
 }
 trap on_exit EXIT
@@ -117,11 +117,24 @@ tree_changed_since() {
 # answered), and in scripted runs, where the block would replace the run's answer: CHING_NO_CHECKPOINT=1, or
 # CLAUDE_CODE_ENTRYPOINT=sdk-* (Claude Code sets sdk-cli for claude -p, sdk-ts/sdk-py for the Agent SDK,
 # cli for an interactive session; seen in the 2.1 binary, not documented, hence the explicit switch too).
+# prompt_state: set PROMPTED (epoch of the last prompt, '' when none or not in repo mode) and TREE_CHANGED
+# (1/0) once. Called before the test run, so files the check itself writes do not count as the turn's work.
+PROMPTED=""; TREE_CHANGED=""
+prompt_state() {
+  [ -z "$TREE_CHANGED" ] || return 0
+  TREE_CHANGED=0
+  [ "$REPO_MODE" -eq 1 ] || return 0
+  [ -f "$SESS_DIR/meta" ] || return 0   # meta_get on a missing file fails under pipefail and set -e would end the hook
+  PROMPTED=$(meta_get "$SESS_DIR/meta" prompted)
+  [ -n "$PROMPTED" ] || return 0
+  if tree_changed_since "$PROMPTED"; then TREE_CHANGED=1; fi
+}
+
 checkpoint_gate() {
   [ "$REPO_MODE" -eq 1 ] || return 0
   local prompted st status
-  [ -f "$SESS_DIR/meta" ] || return 0   # meta_get on a missing file fails under pipefail and set -e would end the hook
-  prompted=$(meta_get "$SESS_DIR/meta" prompted)
+  prompt_state
+  prompted=$PROMPTED
   [ -n "$prompted" ] || return 0
   st="$STATE_DIR/STATE.md"
   if [ -f "$st" ] && grep -qF '<!-- ching:checkpoint -->' "$st" && [ "$(file_mtime "$st")" -ge "$prompted" ]; then
@@ -133,7 +146,7 @@ checkpoint_gate() {
   [ "${CHING_NO_CHECKPOINT:-}" != 1 ] || return 0
   case "${CLAUDE_CODE_ENTRYPOINT:-}" in sdk-*) return 0 ;; esac
   [ "$(meta_get "$SESS_DIR/meta" checkpoint_blocked_for)" != "$prompted" ] || return 0   # already asked once for this prompt
-  tree_changed_since "$prompted" || return 0
+  [ "$TREE_CHANGED" -eq 1 ] || return 0
   meta_set checkpoint_blocked_for "$prompted"
   ev stop_blocked '{"retry":1,"reason":"checkpoint"}'
   jq -n --arg r "Do not stop yet: update the checkpoint block in $st for this turn. Edit only the six lines between <!-- ching:checkpoint --> and <!-- /ching:checkpoint --> (add the block if it is missing): result, blocker, next_action, files_changed, examined, not_examined. Nothing else is needed. This is asked once per prompt." \
@@ -222,12 +235,35 @@ elif [ -n "$ROOT" ] && [ -f "$LADDER_FAILED" ] && grep -qxF "$FP" "$LADDER_FAILE
   export CHING_TEST_MODELS=""
   ev ladder_skipped '{"reason":"same-tree"}'
 fi
-LADDER_ON=0; [ -z "${CHING_TEST_MODELS-x}" ] || LADDER_ON=1
+prompt_state   # before the run: files the check writes are not the turn's work (checkpoint gate)
 RUN_AT=$(date +%s)
+# test-escalate.sh runs in a session (process group) of its own. A TERM/INT/HUP to this hook (Claude Code's
+# hook timeout, Esc) takes that whole group down, TERM and then KILL, so no check run or model call outlives
+# the hook; the hook then ends as a no verdict. `wait` returns at once when a trapped signal arrives.
+ESC_PID=""
+on_signal() { # name
+  local _i
+  if [ -n "$ESC_PID" ]; then
+    kill -TERM -- "-$ESC_PID" 2>/dev/null || true
+    for _i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+      kill -0 -- "-$ESC_PID" 2>/dev/null || break; sleep 0.1
+    done
+    kill -KILL -- "-$ESC_PID" 2>/dev/null || true
+  fi
+  no_verdict "interrupted by SIG$1; the done-check and its children were stopped"
+}
+trap 'on_signal TERM' TERM; trap 'on_signal INT' INT; trap 'on_signal HUP' HUP
 # --timeout kills the whole process group of a run that takes too long (exit 142), not only its top bash;
-# --deadline makes every run and model call fit in what is left of the hook's budget.
-CHING_TEST_NOTIFY=0 "$SELF_DIR/test-escalate.sh" -C "$WORK_DIR" --timeout "$TIMEOUT" --deadline "$DEADLINE" -- \
-  bash -c "$TEST_CMD" >"$OUT" 2>&1 </dev/null || rc=$?
+# --deadline makes every run and model call fit in what is left of the hook's budget; --report lists the
+# models really called.
+CHING_TEST_NOTIFY=0 perl -e 'use POSIX (); POSIX::setsid() or setpgrp(0, 0); exec { $ARGV[0] } @ARGV or exit 127' \
+  "$SELF_DIR/test-escalate.sh" -C "$WORK_DIR" --timeout "$TIMEOUT" --deadline "$DEADLINE" --report "$OUT.report" -- \
+  bash -c "$TEST_CMD" >"$OUT" 2>&1 </dev/null &
+ESC_PID=$!
+wait "$ESC_PID" || rc=$?
+ESC_PID=""
+trap - TERM INT HUP
+TRIED=$(cat "$OUT.report" 2>/dev/null || true)
 
 if [ "$rc" -eq 0 ]; then
   # Record the tree as it was before the run, and only when the run (and any model fix) left it unchanged:
@@ -244,8 +280,9 @@ if [ "$rc" -eq 142 ] && [ "$(date +%s)" -ge "$DEADLINE" ]; then
   notify blocked "Done-check out of time after ${BUDGET}s (STOP_CHECK_DEADLINE), no verdict: $TEST_CMD"
   no_verdict "out of time: the done-check did not finish within the hook's ${BUDGET}s budget (STOP_CHECK_DEADLINE)"
 fi
-# Still failing after the ladder: remember the tree before the run and the tree the models left behind.
-if [ "$LADDER_ON" -eq 1 ] && [ -n "$ROOT" ]; then
+# Still failing after a model was really called: remember the tree before the run and the tree the models
+# left behind. A ladder held back (daily ceiling, deadline, caller gone) has not failed on this tree.
+if [ -n "$TRIED" ] && [ -n "$ROOT" ]; then
   FP_AFTER=$(fingerprint)
   if [ "$FP_AFTER" = "$FP" ]; then remember_ladder_failed "$FP"; else remember_ladder_failed "$FP" "$FP_AFTER"; fi
 fi

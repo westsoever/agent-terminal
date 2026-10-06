@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# test-escalate.sh [-C DIR] [--timeout SECS] [--deadline EPOCH] [-- TEST_COMMAND...]
+# test-escalate.sh [-C DIR] [--timeout SECS] [--deadline EPOCH] [--report FILE] [-- TEST_COMMAND...]
 # Run the tests; spend model tokens only when they fail, starting with the cheapest model.
 #   0. run the test command with no model at all; pass -> exit 0
 #   1. fail -> ask each model in the ladder, cheapest first, to fix it; re-run the tests after each try
 #   2. a model's fix makes the tests pass -> stop (the stronger models are never called)
 #   3. the whole ladder fails -> notify "blocked" (unless CHING_TEST_NOTIFY=0), exit with the tests' exit code
-# Every test run and every model call runs in a process group of its own; when its time is up the whole
-# group is killed (TERM, then KILL) and the exit code is 142.
+# Every test run and every model call runs in a session (process group) of its own with no terminal, stdin
+# /dev/null; when its time is up the whole group is killed (TERM, then KILL) and the exit code is 142. No
+# model call starts once the caller ($PPID, e.g. stop-check.sh) is gone: nobody would wait for its edits.
+#   --report FILE     write the models really called (one line, empty when none) to FILE at the end
 #   --timeout SECS    the most one test run may take (0 = no limit of its own)
 #   --deadline EPOCH  everything ends by then (stop-check.sh passes its hook deadline). A test run is cut at the
 #                     deadline; a model call starts only while 30 s for itself plus the last run's time (for the
@@ -28,12 +30,13 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 digits() { # value default max_len : the value when it is digits only and not too long, else the default
   case "$1" in ''|*[!0-9]*) echo "$2" ;; *) if [ "${#1}" -le "$3" ]; then echo $((10#$1)); else echo "$2"; fi ;; esac
 }
-DIR=$PWD; TIMEOUT=0; DEADLINE=0
+DIR=$PWD; TIMEOUT=0; DEADLINE=0; REPORT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -C) DIR=$2; shift 2 ;;
     --timeout) TIMEOUT=$(digits "${2:-}" 0 6); shift 2 ;;
     --deadline) DEADLINE=$(digits "${2:-}" 0 12); shift 2 ;;
+    --report) REPORT=$2; shift 2 ;;
     --) shift; break ;;
     *) break ;;
   esac
@@ -100,17 +103,18 @@ run_limited() {
     my $t = shift @ARGV;
     my $pid = fork;
     defined $pid or die "fork: $!\n";
-    if (!$pid) { setpgrp(0, 0); exec { $ARGV[0] } @ARGV; print STDERR "exec $ARGV[0]: $!\n"; POSIX::_exit(127); }
-    setpgrp($pid, $pid);
+    # setsid: a new session is also a new process group, and it has no controlling terminal, so a test that
+    # reads the tty fails at once instead of being stopped (SIGTTIN) until the time limit.
+    if (!$pid) { POSIX::setsid() or setpgrp(0, 0); exec { $ARGV[0] } @ARGV; print STDERR "exec $ARGV[0]: $!\n"; POSIX::_exit(127); }
     my $reaped = 0;
     my $down = sub {
-      kill "TERM", -$pid;
+      kill "TERM", -$pid; kill "TERM", $pid;
       for (1 .. 10) {
         $reaped ||= waitpid($pid, WNOHANG) != 0;
         last if $reaped && !kill(0, -$pid);
         select undef, undef, undef, 0.1;
       }
-      kill "KILL", -$pid;
+      kill "KILL", -$pid; kill "KILL", $pid;
       waitpid($pid, 0) unless $reaped;
     };
     $SIG{ALRM} = sub { $down->(); exit 142 };
@@ -127,7 +131,9 @@ left() { # seconds until the deadline (a large number when there is none)
 }
 
 OUT=$(mktemp /tmp/ching-test-escalate.XXXXXX)
-trap 'rm -f "$OUT"' EXIT
+TRIED=""
+# --report FILE gets the models really called (one line, empty when none), whatever the outcome
+trap 'rm -f "$OUT"; if [ -n "$REPORT" ]; then printf "%s\n" "$TRIED" >"$REPORT" 2>/dev/null || true; fi' EXIT
 RC=0; DUR=0
 run_tests() { # step : one test run, cut at --timeout or at the deadline, whichever comes first
   local l lim=$TIMEOUT s
@@ -139,7 +145,7 @@ run_tests() { # step : one test run, cut at --timeout or at the deadline, whiche
   fi
   if [ "$lim" -eq 0 ] || [ "$lim" -gt "$l" ]; then lim=$l; fi
   s=$(date +%s)
-  (cd "$DIR" && run_limited "$lim" "${TEST_CMD[@]}") >"$OUT" 2>&1 || RC=$?
+  (cd "$DIR" && run_limited "$lim" "${TEST_CMD[@]}") </dev/null >"$OUT" 2>&1 || RC=$?
   DUR=$(($(date +%s) - s))
   if [ "$RC" -eq 142 ] && [ "$(left)" -le 0 ]; then log "deadline step=$1 (the tests were cut at the deadline)"; fi
   return "$RC"
@@ -147,8 +153,8 @@ run_tests() { # step : one test run, cut at --timeout or at the deadline, whiche
 
 if run_tests check; then log "pass model=none"; echo "tests pass (no model used)"; exit 0; fi
 
-TRIED=""
 for m in $MODELS; do
+  if ! kill -0 "$PPID" 2>/dev/null; then log "ladder-skip model=$m reason=parent-gone"; break; fi
   # A call starts only when it gets at least 30 s and the re-check after it still fits before the deadline.
   lim=$CALL_TIMEOUT; l=$(left); room=$((l - DUR - 5))
   if [ "$room" -lt 30 ]; then

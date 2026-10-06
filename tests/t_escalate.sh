@@ -191,4 +191,38 @@ assert_contains "deadline near: ladder-skip logged" "$(cat "$CHING_TEST_LOG")" "
 out=$(CHING_TEST_LADDER_DAILY=100 "$BIN/test-escalate.sh" -C "$R" --deadline $(($(date +%s) - 1)) -- "${T[@]}" 2>&1); rc=$?
 assert_eq "deadline passed: nothing runs, exit 142" "142" "$rc"
 assert_contains "deadline passed: logged" "$(cat "$CHING_TEST_LOG")" "deadline step=check"
+
+# ---------- the caller is gone: no model call (Important 1) ----------
+# A model call edits the repo; when the hook that started this script has died (killed without a chance to
+# clean up), nobody waits for the result and the user may be working in the repo. Checked before every call.
+: >"$CALLS"; rm -f "$R/fixed"
+bash -c '"$0" -C "$1" -- bash -c "sleep 1; exit 1" >/dev/null 2>&1 & exit 0' "$BIN/test-escalate.sh" "$R"
+for i in $(seq 1 50); do grep -q 'reason=parent-gone' "$CHING_TEST_LOG" && break; sleep 0.1; done
+assert_contains "parent gone: the ladder stops, logged" "$(cat "$CHING_TEST_LOG")" "ladder-skip model=cheap reason=parent-gone"
+assert_eq "parent gone: no model call" "0" "$(ncalls)"
+
+# ---------- --report: which models were really called (minor 3) ----------
+REP="$WORK/report"
+rm -f "$REP"; : >"$CALLS"
+CHING_TEST_LADDER_DAILY=100 "$BIN/test-escalate.sh" -C "$R" --report "$REP" -- "${T[@]}" >/dev/null 2>&1
+assert_eq "report: the models called" "cheap strong" "$(cat "$REP")"
+rm -f "$REP"
+CHING_TEST_LADDER_DAILY=0 "$BIN/test-escalate.sh" -C "$R" --report "$REP" -- "${T[@]}" >/dev/null 2>&1
+assert_eq "report: empty when no model was called" "" "$(cat "$REP" 2>/dev/null)"
+assert_file "report: written even then" "$REP"
+
+# ---------- the test run never reads the terminal (minor 5) ----------
+# In a process group of its own, a run that reads the tty would be stopped (SIGTTIN) until its timeout.
+# Its stdin is /dev/null and it has no controlling terminal, so such a read fails at once.
+if command -v script >/dev/null 2>&1; then
+  for how in stdin tty; do
+    if [ "$how" = tty ]; then c='read -r x </dev/tty; echo "rc=$?"'; else c='read -r x; echo "rc=$?"'; fi
+    s=$(date +%s)
+    script -q /dev/null env CHING_TEST_MODELS="" "$BIN/test-escalate.sh" -C "$R" --timeout 8 -- bash -c "$c" </dev/null >/dev/null 2>&1
+    e=$(date +%s)
+    assert_eq "under a terminal, a $how read in the test run does not hang until the timeout" "1" "$([ $((e - s)) -lt 5 ] && echo 1 || echo 0)"
+  done
+else
+  echo "script(1) missing: tty tests skipped" >>"$T_ROOT/skipped.t_escalate"
+fi
 exit 0
