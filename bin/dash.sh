@@ -7,9 +7,11 @@
 # plus the optional extra list in ~/.agent-repos.
 #   (default)  name, state, age, ctx (● healthy ◐ watch ○ handoff ? unknown), tokens today, folder, note
 #   --speak    short spoken summary that leads with how many need you; warns above 5 active sessions
-#   --inbox    NEEDS YOU (blocked/input), READY (release gate passed, waiting for --approve),
-#              FINISHED (done since the last --inbox)
-#   --next     top 5 by urgency x importance x recency, each with its checkpoint next_action
+#   --inbox    NEEDS YOU (blocked/input), READY (release gate passed for the current HEAD, waiting for --approve),
+#              FINISHED (done since the last --inbox). --inbox marks FINISHED as seen: it writes the time to
+#              $AGENT_HOME/inbox.seen, so the next --inbox does not list those again. One entry per session.
+#   --next     top 5 by urgency x importance x recency (blocked and input sessions stay above working ones),
+#              each with its checkpoint next_action
 # Notes come from the STATE.md checkpoint `blocker:` (unless none), else the first "## Blocked" bullet.
 # Env: AGENT_HOME CLAUDE_DIR AGENT_REPOS_FILE DASH_NOW (epoch, tests) DASH_ACTIVE_MINS (30)
 set -euo pipefail
@@ -25,7 +27,7 @@ while [ $# -gt 0 ]; do
     --next) MODE=next; shift ;;
     --hours) HOURS=${2:?}; shift 2 ;;
     --all) HOURS=720; shift ;;
-    -h|--help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "dash: unknown argument $1" >&2; exit 64 ;;
   esac
 done

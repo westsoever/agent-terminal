@@ -279,4 +279,12 @@ assert_eq "pipefail: 450 long rows exit 0" "0" "$rc"
 assert_eq "pipefail: a registered session is not listed again from its transcript" "-- 450 session(s), 450 active" "$(printf '%s\n' "$out" | grep '^-- ')"
 assert_eq "pipefail: the worktree holding a session gets no row of its own" "0" "$(printf '%s\n' "$out" | grep -c '^spwt .* idle ')"
 assert_eq "pipefail: no broken-pipe noise on stderr" "" "$(cat "$WORK/sp.err")"
+
+# ---------- fix wave FD-5: --inbox marks FINISHED as seen, and the docs say so ----------
+help=$("$BIN/dash.sh" --help)
+assert_contains "help: --inbox marks FINISHED as seen" "$help" "--inbox marks FINISHED as seen"
+assert_contains "help: the whole header is printed (ends with the Env line)" "$help" "DASH_ACTIVE_MINS (30)"
+assert_not_contains "help: does not print code" "$help" "set -euo pipefail"
+assert_contains "dispatcher doc: --inbox marks FINISHED as seen" "$(cat "$KIT/dispatcher/AGENTS.md")" "marks FINISHED as seen"
+assert_contains "ching-functions.md: reading the inbox marks finished work as seen" "$(cat "$KIT/ching-functions.md")" "marks it as seen"
 exit 0
