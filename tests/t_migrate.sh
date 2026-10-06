@@ -105,6 +105,9 @@ gdeny "rm a committed migration" "$M" 'rm db/migrations/0001_init.sql'
 gdeny "mv a committed migration" "$M" 'mv db/migrations/0001_init.sql db/migrations/0001_renamed.sql'
 gdeny "tee into a committed migration" "$M" 'echo x | tee db/migrations/0001_init.sql'
 gdeny "edit committed migration via cd" "/tmp" "cd $MP/db/migrations && sed -i '' 's/a/b/' 0001_init.sql"
+gdeny "attached redirect into a committed migration" "$M" 'echo "-- x" >>db/migrations/0001_init.sql'
+gallow "read a committed migration into a /tmp file" "$M" 'cat db/migrations/0001_init.sql > /tmp/mig-copy.sql'
+gallow "grep a committed migration with 2>&1" "$M" 'grep -n create db/migrations/0001_init.sql 2>&1 | head'
 tallow "Write tool: a NEW migration file is fine" Write "$M" "$(jq -n --arg p "$MP/db/migrations/0005_new.sql" '{file_path:$p,content:"select 1;"}')"
 tallow "Edit tool on an uncommitted migration" Edit "$M" "$(jq -n --arg p "$MP/db/migrations/0002_a.sql" '{file_path:$p,old_string:"a",new_string:"b"}')"
 newmig 0004_x.sql 'select 1;'

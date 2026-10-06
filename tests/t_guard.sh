@@ -1029,6 +1029,34 @@ env FOO="a;b" echo ok
 NODE_OPTIONS="--max-old-space-size=4096 --enable-source-maps" bun run build
 EOF
 
+# ---------- running a ching script with a redirect is not a write to it (2026-10-06: dash.sh 2>&1 | head was denied) ----------
+while IFS= read -r c; do
+  [ -n "$c" ] && gallow "redirect while running a ching script: $c" "$QD" "$c"
+done <<'EOF'
+~/.claude/ching/bin/dash.sh 2>&1 | head -8
+~/.claude/ching/bin/dash.sh 2>/dev/null
+~/.claude/ching/bin/dash.sh --next >/tmp/dash-out.txt
+~/.claude/ching/bin/dash.sh > /tmp/dash-out.txt 2>&1
+~/.claude/ching/bin/dash.sh >&2
+bash ~/.claude/ching/bin/dash.sh --inbox 2>&1 | tail -3
+cat ~/.claude/settings.json > /tmp/settings-copy.json
+EOF
+while IFS= read -r c; do
+  [ -n "$c" ] && gdeny_why "write to a protected path: $c" "$QD" "$c" "editing hooks, settings or the guard"
+done <<'EOF'
+echo x > ~/.claude/ching/bin/dash.sh
+cat a >> ~/.claude/settings.json
+tee ~/.claude/ching/bin/x
+echo x >~/.claude/settings.json
+echo x 2>~/.claude/ching/bin/dash.sh
+echo x &> ~/.claude/settings.json
+echo x >& ~/.claude/settings.json
+exec 3<>~/.claude/settings.json
+cp /tmp/x ~/.claude/ching/bin/dash.sh 2>/dev/null
+~/.claude/ching/bin/dash.sh > ~/.claude/ching/bin/dash.sh
+sed -i '' 's/a/b/' ~/.claude/settings.json 2>&1
+EOF
+
 # ---------- "GUARD: internal error (exit 1)": commands that hit it before 5fd969f reached the installed guard ----------
 # (export under set -e; the quote-blind split fed grep's `\|export` to it as a bare export). Each must be decided:
 # exit 0, and either allowed or a well-formed deny. The ordinary ones must be allowed.
