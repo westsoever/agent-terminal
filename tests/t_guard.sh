@@ -934,4 +934,54 @@ npm deprecate x "old"
 gh release create v1.0.0
 GH_REPO=o/r gh release create v1.0.0
 EOF
+
+# ---------- rule 5: a grep/rg pattern names no file (2026-10-06: grep -n "ching.env" bin/*.sh was denied) ----------
+while IFS= read -r c; do
+  [ -n "$c" ] && gallow "rule 5 pattern: $c" "$QD" "$c"
+done <<'EOF'
+grep -n "ching.env" bin/*.sh
+grep -rn '\.env' src
+grep -E 'API_KEY|\.env' README.md
+rg '.env' .
+rg -n ching.env bin
+grep -e .env -r src
+grep --regexp=.env.local src
+git grep -n ching.env
+cat notes.md | grep .env
+grep -c "load .env" docs/x.md
+grep -rn --include=*.ts '.env.local' src
+sudo grep -rn ching.env /etc/x
+ls; grep -n .env README.md
+EOF
+while IFS= read -r c; do
+  [ -n "$c" ] && gdeny_why "rule 5 file: $c" "$QD" "$c" "reading or copying .env"
+done <<'EOF'
+cat .env
+grep KEY .env
+grep -r KEY .env.local
+cp .env x
+source .env
+grep -n .env .env
+grep -e KEY .env
+grep .env -e KEY
+grep -f .env notes.md
+rg -g '*.env' KEY
+rg --glob '*.env' KEY
+rg KEY .env
+grep --include=.env -r KEY .
+grep -r KEY --include .env .
+cat grep .env
+grep -A 3 KEY .env
+echo x | grep KEY .env.production
+grep "$(cat .env)" f
+grep KEY<.env
+grep KEY < .env
+grep -e KEY -- .env
+grep -rne KEY .env
+rg -e KEY .env
+git grep KEY -- .env
+echo "$(cat "| grep "KEY .env " )")"
+EOF
+# a double quote opened on an earlier line: `grep KEY" .env "` is not a pattern there, cat reads .env
+gdeny_why "rule 5 file: a quote spanning lines does not make .env a grep pattern" "$QD" "$(printf '%s\n' 'cat "x' 'grep KEY" .env "' '"')" "reading or copying .env"
 exit 0

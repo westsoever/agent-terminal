@@ -943,16 +943,20 @@ join_continuations() { # backslash-newline is a line continuation: `git push \` 
 
 CMD_ALL=""   # the text being scanned (for checks that span segments)
 scan_text() { # scan one text (heredoc bodies already stripped); a deny exits, so this only returns when it is clean
-  local seg segs
+  local seg segs p1=$1
   # every piece of per-scan state starts fresh: the simulated cd, the redirect carry-over; the time ceiling
   # (SECONDS) keeps counting across scans
   SIM_CWD=$CWD_PHYS; SIM_UNKNOWN=0; SEG_RAW=""; SEG_AFTER_REDIR=0; NEXT_AFTER_REDIR=0; DEFB=""
   CMD_ALL=$1
+  # a grep/rg pattern names no file (grep -n "ching.env" f): quote-data.pl masks the pattern words for pass 1
+  case "$1" in
+    *grep*|*rg*) p1=$(printf '%s\n' "$1" | perl "$SELF_DIR/quote-data.pl" patterns) || { echo "GUARD: could not read the grep patterns; failing closed" >&2; exit 2; } ;;
+  esac
   while IFS= read -r seg; do   # pass 1: per line, for rules that need the whole line (.env readers)
     ceiling
     SEG_RAW=$seg; tokenize "$seg"
     if [ "$NT" -gt 0 ]; then check_env_files; fi
-  done <<<"$1"
+  done <<<"$p1"
   # A failed splitter must not look like "no segments": capture its output and fail closed if it errs.
   # quote-data.pl first blanks the separators inside quoted data (a grep pattern, an echo string, a commit
   # message), so `grep -E 'a|npm publish' f` stays one command; quoted code (bash -c '...') is still split.
