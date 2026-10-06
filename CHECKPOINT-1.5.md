@@ -281,6 +281,14 @@ Four parallel agents, then an independent review of the merged result. Details a
   - F12: unsafe session ids are hashed, and `meta_set` is serialised.
   - The ladder is skipped for a tree that already failed it.
   - F8 (partial): the fingerprint is taken before the run, there is a skip TTL, and a `check_skipped` event is logged.
+- After the review of the merged wave:
+  - TERM, INT or HUP to the hook kills the check's process group and ends as no verdict.
+  - test-escalate starts no model call once its caller is gone.
+  - A check cut off at the deadline is no verdict (the stop is allowed, with one notice), not three futile blocks. `STOP_CHECK_TIMEOUT` now defaults to 600 s.
+  - A tree is recorded as "ladder failed" only when a model really ran.
+  - `meta_set` holds `flock` in one perl call (no stale locks, 2 s cap).
+  - Test runs get no controlling tty.
+  - Handoff notices have a 2 h per-session cooldown (`NOTIFY_HANDOFF_COOLDOWN_MINS`).
 - Checkpoint rule cost: it asks only for the six-line block, skips unchanged turns, and is off for `claude -p` (`CLAUDE_CODE_ENTRYPOINT=sdk-*`) or with `CHING_NO_CHECKPOINT=1`.
 - Notifications:
   - A session is `idle` after startup or resume until its first prompt, so there is no false stall.
