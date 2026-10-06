@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-05-hermes-harvest-design.md`. Read its section 12 (amendments made during planning) first.
 
+**Status (2026-10-06): COMPLETE.** Tasks 0-12 are built, reviewed and merged to `main`: the first merge `b73af38`, then the fix wave (guard fix waves 1-3, watcher/dash/notify hardening, release-gate placeholder checks, escalation daily ceiling, final Checkpoint 1.5 report) as `3f94bef`. Final suite on the merged tip: 1349 passed, 0 failed. Task 12 step 7 done: `vendor-eval/` removed, the merged `phase-1.5-*` worktrees and branches deleted. Deviations from this text are in `CHECKPOINT-1.5.md` (Task 0.5 recursion guard, task 12a lens fixes, fix-wave rulings). Left for the user: re-run `./install.sh` so the guard matcher also covers `Monitor` (one-line change in the fix wave), and the open items in `CHECKPOINT-1.5.md` section 6.
+
 ## Global Constraints
 
 - Bash 3.2 compatible: no associative arrays, no `${var,,}`, no `mapfile`/`readarray`, no `&>>`.
@@ -66,19 +68,19 @@
 
 **Files:** none changed.
 
-- [ ] **Step 1: Wait for the other session's in-flight work to land on `main`**
+- [x] **Step 1: Wait for the other session's in-flight work to land on `main`**
 
 Run: `git -C ~/bbq/ching status --short bin/stop-check.sh tests/lib.sh tests/t_stop.sh bin/test-escalate.sh tests/t_escalate.sh`
 Expected: empty output, meaning that work is committed. If anything is listed, STOP. Tell the user: "Phase 1.5 edits stop-check.sh and tests/lib.sh, which another session has uncommitted changes to. Please let it commit first." Do not continue until it is clean.
 
-- [ ] **Step 2: Create the worktree**
+- [x] **Step 2: Create the worktree**
 
 ```bash
 git -C ~/bbq/ching worktree add ~/bbq/.worktrees/ching-harvest -b phase-1.5-harvest main
 cd ~/bbq/.worktrees/ching-harvest
 ```
 
-- [ ] **Step 3: Baseline suite**
+- [x] **Step 3: Baseline suite**
 
 Run: `tests/run.sh`
 Expected: `TOTAL: N passed, 0 failed`. Write N down; every later task must keep 0 failed.
@@ -95,7 +97,7 @@ Expected: `TOTAL: N passed, 0 failed`. Write N down; every later task must keep 
 - Produces: `ev KIND [DATA_JSON]` appends `{"ts","sid","name","cwd","kind","data"}` to `$AGENT_HOME/events.jsonl`. It reads the globals `SID`, `NAME` and `CWD` if set, and always returns 0.
 - Produces: `checkpoint_get FILE KEY` prints the value of the first `KEY:` line between `<!-- ching:checkpoint -->` and `<!-- /ching:checkpoint -->`, or nothing.
 
-- [ ] **Step 1: Write the failing test** `tests/t_events.sh`
+- [x] **Step 1: Write the failing test** `tests/t_events.sh`
 
 ```bash
 #!/usr/bin/env bash
@@ -166,12 +168,12 @@ assert_eq "checkpoint_get: ignores keys outside the block" "" "$(checkpoint_get 
 exit 0
 ```
 
-- [ ] **Step 2: Run it and confirm it fails**
+- [x] **Step 2: Run it and confirm it fails**
 
 Run: `tests/run.sh 2>&1 | grep -E 't_events|TOTAL'`
 Expected: `t_events` shows failures (`ev: command not found`).
 
-- [ ] **Step 3: Implement.** Append to `bin/lib.sh`:
+- [x] **Step 3: Implement.** Append to `bin/lib.sh`:
 
 ```bash
 # ev KIND [DATA_JSON]: append one line to $AGENT_HOME/events.jsonl, the input contract for the Phase 6
@@ -201,12 +203,12 @@ checkpoint_get() { # file key -> value of the first `key:` line inside the ching
 }
 ```
 
-- [ ] **Step 4: Run all tests and confirm they pass**
+- [x] **Step 4: Run all tests and confirm they pass**
 
 Run: `tests/run.sh`
 Expected: `TOTAL: … 0 failed`. `t_events` passes all its checks.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add bin/lib.sh tests/t_events.sh
@@ -228,7 +230,7 @@ Claude-Session: https://claude.ai/code/session_01DTe7KG79qGGq128Pk6pA9R"
 - Consumes: `ev` and the `SID`/`NAME`/`CWD` globals set by `hook_init` (Task 1).
 - Produces: meta key `prompted=<epoch>`, written on every UserPromptSubmit and used by Task 3. Event kinds `session_start`, `prompt`, `session_end`, `compact`, `stop_ok`, `stop_blocked`, `release`, `migrate`.
 
-- [ ] **Step 1: Write the failing tests.** Append before the final `exit 0` of `tests/t_session.sh`:
+- [x] **Step 1: Write the failing tests.** Append before the final `exit 0` of `tests/t_session.sh`:
 
 ```bash
 # ---------- events (Phase 1.5) ----------
@@ -270,12 +272,12 @@ Append before the final `exit 0` of `tests/t_migrate.sh`:
 assert_contains "events: migrate gate outcome logged" "$(jq -r 'select(.kind=="migrate") | .data.outcome' "$AGENT_HOME/events.jsonl")" "gate-"
 ```
 
-- [ ] **Step 2: Run and confirm they fail**
+- [x] **Step 2: Run and confirm they fail**
 
 Run: `tests/run.sh 2>&1 | grep -E 'events|TOTAL'`
 Expected: FAIL lines for each `events:` assertion.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `bin/session-start.sh`, replace the `case "$MODE"` block with:
 
@@ -341,12 +343,12 @@ ev release "$(jq -nc --arg s "$SHA" --arg o "$RESULT" '{sha:$s,outcome:("deploy-
    ev migrate "$(jq -nc --argjson n "$n" '{outcome:"gate-pass",files:$n}')"
    ```
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `tests/run.sh`
 Expected: `0 failed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add bin/session-start.sh bin/pre-compact.sh bin/stop-check.sh bin/post-release.sh bin/migrate-gate.sh tests/t_session.sh tests/t_stop.sh tests/t_post_release.sh tests/t_migrate.sh
@@ -369,7 +371,7 @@ Claude-Session: https://claude.ai/code/session_01DTe7KG79qGGq128Pk6pA9R"
 - Produces: meta key `checkpoint_blocked_for=<prompted epoch>`; event `checkpoint{status,blocker,next_action}`; event `stop_blocked{reason:"checkpoint"}`. The STATE.md checkpoint keys are `result`, `blocker`, `next_action`, `files_changed`, `examined`, `not_examined`.
 - Rule: only applies when `REPO_MODE=1` **and** meta has `prompted`.
 
-- [ ] **Step 1: Write the failing tests.** Append before the final `exit 0` of `tests/t_stop.sh`:
+- [x] **Step 1: Write the failing tests.** Append before the final `exit 0` of `tests/t_stop.sh`:
 
 ```bash
 # ---------- checkpoint rule (Phase 1.5) ----------
@@ -399,12 +401,12 @@ out=$(stop "$NR" cp-4)
 assert_eq "no recorded prompt: never blocks for a checkpoint" "" "$out"
 ```
 
-- [ ] **Step 2: Run and confirm it fails**
+- [x] **Step 2: Run and confirm it fails**
 
 Run: `tests/run.sh 2>&1 | grep -E 'checkpoint|TOTAL'`
 Expected: FAIL on "checkpoint missing: blocks".
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `bin/stop-check.sh`: add this function directly above `finish_ok() {`:
 
@@ -475,12 +477,12 @@ not_examined: (none)
 
 (Keep the rest of the original step 2 sentence after "Keep the sections …" exactly as it was.)
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `tests/run.sh`
 Expected: `0 failed`. Existing t_stop tests are unaffected, because they never record a prompt.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add bin/stop-check.sh templates/STATE.md commands/handoff.md tests/t_stop.sh
@@ -506,7 +508,7 @@ Claude-Session: https://claude.ai/code/session_01DTe7KG79qGGq128Pk6pA9R"
   - Event `notify{kind,outcome,reason}`.
   - Env `NOTIFY_NOW` (epoch) for tests.
 
-- [ ] **Step 1: Update the existing tests and add the new ones** in `tests/t_notify.sh`
+- [x] **Step 1: Update the existing tests and add the new ones** in `tests/t_notify.sh`
 
 1. Directly after the `. "$(dirname …)/lib.sh"` line, add (budgeted alerts in the old tests then always fall at noon):
    ```bash
@@ -558,12 +560,12 @@ assert_contains "events: suppressed alert with reason" "$(jq -r 'select(.kind=="
 assert_contains "events: inbox routing" "$(jq -r 'select(.kind=="notify") | .data.reason' "$EVF")" "routed-to-inbox"
 ```
 
-- [ ] **Step 2: Run and confirm the new tests fail**
+- [x] **Step 2: Run and confirm the new tests fail**
 
 Run: `tests/run.sh 2>&1 | grep -E 't_notify|TOTAL'`
 Expected: failures, starting with "done goes to the inbox".
 
-- [ ] **Step 3: Implement.** Replace `bin/notify.sh` entirely with:
+- [x] **Step 3: Implement.** Replace `bin/notify.sh` entirely with:
 
 ```bash
 #!/usr/bin/env bash
@@ -682,12 +684,12 @@ esac
 exit 0
 ```
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `tests/run.sh`
 Expected: `0 failed`. Existing t_stop/t_post_release assertions on "…: Done" still pass, because inbox lines are still logged with their title.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add bin/notify.sh tests/t_notify.sh
@@ -712,7 +714,7 @@ Claude-Session: https://claude.ai/code/session_01DTe7KG79qGGq128Pk6pA9R"
   - flag files `$AGENT_HOME/tokens/<day>.alert80` and `.alert100`;
   - events `stall`, `context` and `tokens`.
 
-- [ ] **Step 1: Write the failing test** `tests/t_watch.sh`
+- [x] **Step 1: Write the failing test** `tests/t_watch.sh`
 
 ```bash
 #!/usr/bin/env bash
@@ -815,12 +817,12 @@ assert_eq "one rotated file kept" "1" "$(ls "$AGENT_HOME"/events-*.jsonl | wc -l
 exit 0
 ```
 
-- [ ] **Step 2: Run and confirm it fails**
+- [x] **Step 2: Run and confirm it fails**
 
 Run: `tests/run.sh 2>&1 | grep -E 't_watch|TOTAL'`
 Expected: failures (`ching-watch.sh: No such file`).
 
-- [ ] **Step 3: Implement** `bin/ching-watch.sh` (then `chmod +x bin/ching-watch.sh`)
+- [x] **Step 3: Implement** `bin/ching-watch.sh` (then `chmod +x bin/ching-watch.sh`)
 
 ```bash
 #!/usr/bin/env bash
@@ -942,12 +944,12 @@ fi
 exit 0
 ```
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `tests/run.sh`
 Expected: `0 failed`. Includes `t_lint` (shellcheck and strict mode on the new script).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add bin/ching-watch.sh tests/t_watch.sh
@@ -969,7 +971,7 @@ Claude-Session: https://claude.ai/code/session_01DTe7KG79qGGq128Pk6pA9R"
 - Consumes: the `bin/ching-watch.sh` path (Task 5); the file doesn't need to exist for these tests.
 - Produces: `~/Library/LaunchAgents/org.ching.watch.plist`; env overrides `LAUNCHCTL` and `LAUNCH_AGENTS_DIR`; the `GUARD_MATCHER` now includes messaging MCP tools (used by Task 9's rule 10 in real sessions).
 
-- [ ] **Step 1: Make tests unable to reach the real launchd.** In `tests/lib.sh`, directly after `mkdir -p "$AGENT_HOME" "$CLAUDE_DIR"`, add:
+- [x] **Step 1: Make tests unable to reach the real launchd.** In `tests/lib.sh`, directly after `mkdir -p "$AGENT_HOME" "$CLAUDE_DIR"`, add:
 
 ```bash
 # install.sh calls $LAUNCHCTL: a test must never reach the real launchd
@@ -981,7 +983,7 @@ chmod +x "$WORK/fake-launchctl"
 export LAUNCHCTL="$WORK/fake-launchctl"
 ```
 
-- [ ] **Step 2: Write the failing tests** in `tests/t_install.sh`. Insert directly after the assertion line containing `dry-run after install: nothing to do`:
+- [x] **Step 2: Write the failing tests** in `tests/t_install.sh`. Insert directly after the assertion line containing `dry-run after install: nothing to do`:
 
 ```bash
 # ---------- launchd watcher (Phase 1.5) ----------
@@ -1008,12 +1010,12 @@ assert_no_file "uninstall removes the watcher plist" "$HOME/Library/LaunchAgents
 assert_contains "uninstall boots the watcher out (last launchctl call)" "$(tail -1 "$WORK/launchctl.log")" "bootout gui/"
 ```
 
-- [ ] **Step 3: Run and confirm they fail**
+- [x] **Step 3: Run and confirm they fail**
 
 Run: `tests/run.sh 2>&1 | grep -E 't_install|TOTAL'`
 Expected: FAIL "watcher plist installed".
 
-- [ ] **Step 4: Implement** in `install.sh`
+- [x] **Step 4: Implement** in `install.sh`
 
 1. Replace the `GUARD_MATCHER=` line with:
    ```bash
@@ -1091,12 +1093,12 @@ fi
    `#   $LAUNCH_AGENTS_DIR/org.ching.watch.plist (default ~/Library/LaunchAgents): runs bin/ching-watch.sh every 300 s.`
    and add `LAUNCHCTL, LAUNCH_AGENTS_DIR` to the "Overrides (for tests)" line.
 
-- [ ] **Step 5: Run all tests**
+- [x] **Step 5: Run all tests**
 
 Run: `tests/run.sh`
 Expected: `0 failed`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add install.sh tests/lib.sh tests/t_install.sh
@@ -1118,7 +1120,7 @@ Claude-Session: https://claude.ai/code/session_01DTe7KG79qGGq128Pk6pA9R"
 - Consumes: `checkpoint_get` (Task 1); meta `ctx_level` and `stalled_at` plus the tokens file (Task 5); `<repo>/.agent/release-ready` (existing release-gate confirm mode).
 - Produces: the `dash.sh --inbox` lanes `NEEDS YOU`, `READY` and `FINISHED (since last look)`; the `dash.sh --next` ranked list; the state file `$AGENT_HOME/inbox.seen`.
 
-- [ ] **Step 1: Write the failing tests.** Append before the final `exit 0` of `tests/t_dash.sh`:
+- [x] **Step 1: Write the failing tests.** Append before the final `exit 0` of `tests/t_dash.sh`:
 
 ```bash
 # ---------- Phase 1.5: columns, checkpoint, inbox, next ----------
@@ -1150,12 +1152,12 @@ assert_eq "next: at most 5 lines" "yes" "$([ "$(printf '%s\n' "$nx" | wc -l | tr
 assert_contains "speak: leads with how many need you" "$("$BIN/dash.sh" --speak)" "needs you."
 ```
 
-- [ ] **Step 2: Run and confirm it fails**
+- [x] **Step 2: Run and confirm it fails**
 
 Run: `tests/run.sh 2>&1 | grep -E 't_dash|TOTAL'`
 Expected: FAIL "ctx column: handoff shows ○".
 
-- [ ] **Step 3: Implement.** Replace `bin/dash.sh` entirely with:
+- [x] **Step 3: Implement.** Replace `bin/dash.sh` entirely with:
 
 ```bash
 #!/usr/bin/env bash
@@ -1418,12 +1420,12 @@ echo "$out"
 - Replace the "What did X finish?" bullet with: `- "What finished?" / "What did X finish?": run dash.sh --inbox and read the FINISHED lane (for X, its STATE.md Done list, last two items). Never announce finished sessions unprompted; only NEEDS YOU items are worth interrupting for.`
 - After it, add: `- "What should I do next?": run dash.sh --next and read the first two lines without the scores.`
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `tests/run.sh`
 Expected: `0 failed`. The existing t_dash assertions still hold: "5 active sessions out of 8." is now preceded by "1 needs you. ".
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add bin/dash.sh dispatcher/AGENTS.md tests/t_dash.sh
@@ -1453,7 +1455,7 @@ Claude-Session: https://claude.ai/code/session_01DTe7KG79qGGq128Pk6pA9R"
 - Produces: the GOAL.md key `review:`. Only exactly `off` disables review; empty or any other value means required.
 - Produces: event `release{sha,outcome}` with outcome `gate-pass-auto`, `gate-pass-confirm` or `gate-fail`.
 
-- [ ] **Step 1: Write the failing tests** in `tests/t_release.sh`
+- [x] **Step 1: Write the failing tests** in `tests/t_release.sh`
 
 1. In `mk_evidence`, directly before the line `echo "## exercised"; …`, add:
    ```bash
@@ -1514,12 +1516,12 @@ assert_contains "REVIEW.md template has blocking:" "$(cat "$KIT/templates/REVIEW
 assert_contains "VERIFY.md template has not examined" "$(cat "$KIT/templates/VERIFY.md")" "## not examined"
 ```
 
-- [ ] **Step 2: Run and confirm they fail**
+- [x] **Step 2: Run and confirm they fail**
 
 Run: `tests/run.sh 2>&1 | grep -E 't_release|TOTAL'`
 Expected: FAIL on "evidence without not-examined is rejected" and the other new checks. Existing checks still pass.
 
-- [ ] **Step 3: Implement** `bin/release-gate.sh`
+- [x] **Step 3: Implement** `bin/release-gate.sh`
 
 1. Directly after `HEAD_SHA=$(git rev-parse HEAD)`, add:
    ```bash
@@ -1645,12 +1647,12 @@ done
 
 Then read each generated file. Confirm that it has no Hermes-specific instructions (`skill_view`, `~/.hermes`) and that the lens body is intact.
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `tests/run.sh`
 Expected: `0 failed`. Existing release tests pass because `mk_evidence` now also writes a valid review.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add bin/release-gate.sh templates/VERIFY.md templates/REVIEW.md templates/review-lenses tests/t_release.sh
@@ -1672,7 +1674,7 @@ Claude-Session: https://claude.ai/code/session_01DTe7KG79qGGq128Pk6pA9R"
 - Consumes: `ev` from `bin/lib.sh`, sourced in a subshell only after a decision is printed.
 - Produces: event `deny{rule,tool}`. Deny reasons start with `GUARD: rule 8:`, `GUARD: rule 9:` or `GUARD: rule 10:`.
 
-- [ ] **Step 1: Write the failing tests.** Append before the final `exit 0` of `tests/t_guard.sh`:
+- [x] **Step 1: Write the failing tests.** Append before the final `exit 0` of `tests/t_guard.sh`:
 
 ```bash
 # ---------- Phase 1.5: rules 8-10 ----------
@@ -1714,12 +1716,12 @@ assert_contains "events: deny logged with the session id" "$(jq -r 'select(.kind
 assert_contains "events: deny names the rule" "$(jq -r 'select(.kind=="deny" and .sid=="g-ev") | .data.rule' "$AGENT_HOME/events.jsonl")" "rule 8"
 ```
 
-- [ ] **Step 2: Run and confirm they fail**
+- [x] **Step 2: Run and confirm they fail**
 
 Run: `tests/run.sh 2>&1 | grep -E 't_guard|TOTAL'`
 Expected: FAIL on the `rule 8/9/10` deny cases. The allow cases already pass.
 
-- [ ] **Step 3: Implement** in `bin/guard.sh`
+- [x] **Step 3: Implement** in `bin/guard.sh`
 
 1. Replace `emit_deny()` with:
    ```bash
@@ -1781,12 +1783,12 @@ Expected: FAIL on the `rule 8/9/10` deny cases. The allow cases already pass.
    ```
 5. In the header comment, extend the rules line: `| 8 publishing (npm/bun/pnpm/yarn publish, gh release, gh repo delete/visibility/public) | 9 closing PRs/issues | 10 sending email/chat (drafts only)`.
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `tests/run.sh`
 Expected: `0 failed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add bin/guard.sh tests/t_guard.sh
@@ -1813,7 +1815,7 @@ Claude-Session: https://claude.ai/code/session_01DTe7KG79qGGq128Pk6pA9R"
   - **Write of a new file:** `review` may only be `required` or absent, and `release_mode` only `confirm` or absent.
   - **Any Bash write** to a protected path is denied.
 
-- [ ] **Step 1: Write the failing tests.** Append before the final `exit 0` of `tests/t_guard.sh`:
+- [x] **Step 1: Write the failing tests.** Append before the final `exit 0` of `tests/t_guard.sh`:
 
 ```bash
 # ---------- rule 11: gate settings in GOAL.md ----------
@@ -1837,12 +1839,12 @@ gdeny "rule 11: cp over GOAL.md" "$G11" "cp /tmp/x .agent/GOAL.md"
 gallow "rule 11: reading GOAL.md" "$G11" "cat .agent/GOAL.md"
 ```
 
-- [ ] **Step 2: Run and confirm they fail**
+- [x] **Step 2: Run and confirm they fail**
 
 Run: `tests/run.sh 2>&1 | grep -E 'rule 11|TOTAL'`
 Expected: FAIL on the `rule 11` deny cases.
 
-- [ ] **Step 3: Implement** in `bin/guard.sh`
+- [x] **Step 3: Implement** in `bin/guard.sh`
 
 1. Add directly above `tamper_bash() {`:
    ```bash
@@ -1895,12 +1897,12 @@ Expected: FAIL on the `rule 11` deny cases.
    ```
 4. Extend the header rules line with `| 11 gate settings in GOAL.md (review, release_mode, test_command)`.
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `tests/run.sh`
 Expected: `0 failed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add bin/guard.sh tests/t_guard.sh
@@ -1921,7 +1923,7 @@ Claude-Session: https://claude.ai/code/session_01DTe7KG79qGGq128Pk6pA9R"
 **Interfaces:**
 - Consumes: templates from Tasks 3, 7 and 8; `checkpoint_get` (Task 1).
 
-- [ ] **Step 1: Write the failing test** `tests/t_templates.sh`
+- [x] **Step 1: Write the failing test** `tests/t_templates.sh`
 
 ```bash
 #!/usr/bin/env bash
@@ -1946,12 +1948,12 @@ assert_contains "dispatcher uses next" "$(cat "$KIT/dispatcher/AGENTS.md")" "das
 exit 0
 ```
 
-- [ ] **Step 2: Run and confirm it fails**
+- [x] **Step 2: Run and confirm it fails**
 
 Run: `tests/run.sh 2>&1 | grep -E 't_templates|TOTAL'`
 Expected: the `autonomy:` checks fail.
 
-- [ ] **Step 3: Implement** `templates/AGENTS-autonomy-block.md`
+- [x] **Step 3: Implement** `templates/AGENTS-autonomy-block.md`
 
 1. Replace the bullet starting `- At the end of every turn update` with:
    ```markdown
@@ -1971,12 +1973,12 @@ Expected: the `autonomy:` checks fail.
    ```
    and renumber the remaining steps to 6 and 7.
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `tests/run.sh`
 Expected: `0 failed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add templates/AGENTS-autonomy-block.md tests/t_templates.sh
@@ -1997,12 +1999,12 @@ Claude-Session: https://claude.ai/code/session_01DTe7KG79qGGq128Pk6pA9R"
 
 This task is run by an agent that did **not** implement Tasks 1-11.
 
-- [ ] **Step 1: Full suite plus shellcheck**
+- [x] **Step 1: Full suite plus shellcheck**
 
 Run: `tests/run.sh`
 Expected: `TOTAL: N passed, 0 failed`, with N greater than the Task 0 baseline. If `t_lint` reports shellcheck skipped, run `python3 -m venv /tmp/sc-venv && /tmp/sc-venv/bin/pip install -q shellcheck-py` and re-run until the shellcheck checks pass.
 
-- [ ] **Step 2: Live smoke shows events.** In `tests/live-smoke.sh`, directly after the line `echo "ok-file exists: …"`, add:
+- [x] **Step 2: Live smoke shows events.** In `tests/live-smoke.sh`, directly after the line `echo "ok-file exists: …"`, add:
 
 ```bash
 echo "events logged: $(jq -r .kind "$AGENT_HOME/events.jsonl" 2>/dev/null | sort | uniq -c | tr -s ' \n' ' ')"
@@ -2014,9 +2016,9 @@ Expected:
 - "events logged:" lists `session_start`, `prompt`, `stop_blocked` and `stop_ok`;
 - the Stop hook asks once for the checkpoint, because the test repo has a GOAL.md.
 
-- [ ] **Step 3: Error-resilience lens over the guardrails.** Dispatch a fresh read-only reviewer subagent with `templates/review-lenses/error-resilience.md`, `bin/guard.sh` and `bin/stop-check.sh`. Ask for fail-open paths: inputs where a deny should fire but the script allows, or where an error lets a stop or call through. For every finding, either write a failing test plus a fix (TDD) or log it in `CHECKPOINT-1.5.md` under "Known gaps" with a reason.
+- [x] **Step 3: Error-resilience lens over the guardrails.** Dispatch a fresh read-only reviewer subagent with `templates/review-lenses/error-resilience.md`, `bin/guard.sh` and `bin/stop-check.sh`. Ask for fail-open paths: inputs where a deny should fire but the script allows, or where an error lets a stop or call through. For every finding, either write a failing test plus a fix (TDD) or log it in `CHECKPOINT-1.5.md` under "Known gaps" with a reason.
 
-- [ ] **Step 4: Dry-run the installer against a copy of the real settings** (writes nothing real)
+- [x] **Step 4: Dry-run the installer against a copy of the real settings** (writes nothing real)
 
 ```bash
 mkdir -p /tmp/cp15 && cp ~/.claude/settings.json /tmp/cp15/settings.json
@@ -2026,7 +2028,7 @@ CLAUDE_DIR=$HOME/.claude SETTINGS_FILE=/tmp/cp15/settings.json AGENT_REPOS_FILE=
 
 Expected: a diff that only changes the guard matcher, plus "would: write …org.ching.watch.plist and launchctl bootstrap it". Save the output for the report.
 
-- [ ] **Step 5: Write `CHECKPOINT-1.5.md`** with these sections:
+- [x] **Step 5: Write `CHECKPOINT-1.5.md`** with these sections:
   1. What was built, per task.
   2. The `tests/run.sh` table.
   3. Live-smoke output.
@@ -2034,9 +2036,9 @@ Expected: a diff that only changes the guard matcher, plus "would: write …org.
   5. Lens findings and their fixes or known gaps.
   6. What the user does next: run `./install.sh` (it widens the guard matcher and loads the watcher), optionally set `TOKEN_BUDGET_DAILY` in `~/.agent/defaults/ching.env`, then start the Phase 2 pilot.
 
-- [ ] **Step 6: Tick Phase 1.5 in PLAN.md.** Change `- [ ] **1.5.1**` … `- [ ] **1.5.10**` to `- [x]`, and append to the Checkpoint 1.5 line: ` Report: CHECKPOINT-1.5.md.`
+- [x] **Step 6: Tick Phase 1.5 in PLAN.md.** Change `- [ ] **1.5.1**` … `- [ ] **1.5.10**` to `- [x]`, and append to the Checkpoint 1.5 line: ` Report: CHECKPOINT-1.5.md.`
 
-- [ ] **Step 7: Commit, then remove the evaluation clones**
+- [x] **Step 7: Commit, then remove the evaluation clones**
 
 ```bash
 git add tests/live-smoke.sh PLAN.md CHECKPOINT-1.5.md
@@ -2047,4 +2049,4 @@ Claude-Session: https://claude.ai/code/session_01DTe7KG79qGGq128Pk6pA9R"
 rm -rf /Users/clyde/bbq/ching/vendor-eval
 ```
 
-- [ ] **Step 8: Integrate and stop at the checkpoint.** Use superpowers:finishing-a-development-branch to merge `phase-1.5-harvest` into `main`; `main` may have moved because of the other session. **Do not run `install.sh` on the real settings.** Stop and show the user `CHECKPOINT-1.5.md`. Checkpoint 1.5 requires their approval.
+- [x] **Step 8: Integrate and stop at the checkpoint.** Use superpowers:finishing-a-development-branch to merge `phase-1.5-harvest` into `main`; `main` may have moved because of the other session. **Do not run `install.sh` on the real settings.** Stop and show the user `CHECKPOINT-1.5.md`. Checkpoint 1.5 requires their approval.
