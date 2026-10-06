@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # notify.sh KIND [MESSAGE]
-# KIND: done | input | blocked | ready | idle | stall | handoff | tokens
+# KIND: done | input | blocked | ready | idle | waiting | stall | handoff | tokens
 # Routing (Phase 1.5): input, blocked and ready are urgent and always delivered. done goes to the inbox
 # (dash.sh --inbox) and is not pushed (NOTIFY_PUSH_DONE=1 restores the push). Every other kind is
 # budgeted: delivered only between NOTIFY_QUIET_END (9) and NOTIFY_QUIET_START (21) local time, at most
@@ -35,6 +35,7 @@ case "$KIND" in
   blocked) LABEL="Blocked";             DEFAULT="Stopped and needs you." ;;
   ready)   LABEL="Ready to push";       DEFAULT="Release gate passed; waiting for your approval." ;;
   idle)    LABEL="Waiting";             DEFAULT="Idle, waiting for you." ;;
+  waiting) LABEL="Waiting for you";     DEFAULT="Finished and waiting for your next step." ;;
   stall)   LABEL="Stalled";             DEFAULT="No progress for a while." ;;
   handoff) LABEL="Context almost full"; DEFAULT="Run /handoff and continue in a fresh session." ;;
   tokens)  LABEL="Token budget";        DEFAULT="Token use crossed a daily budget mark." ;;

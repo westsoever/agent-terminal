@@ -5,6 +5,13 @@
 # events.jsonl rotation. It never touches a session: it writes meta keys, $AGENT_HOME/tokens/<UTC day>,
 # events and notifications only.
 # Meta keys written: tok_offset tok_last_mid ctx_level ctx_pct stalled_at
+# Check-in nudges (3b): sessions waiting on the user get a `waiting` banner (finished sessions with open
+# work) and, after a delay, one spoken note. Meta keys: nudged_for spoken_for. Env: WATCH_WAIT_GRACE_MINS (2)
+# WATCH_NUDGE_MAX_HOURS (12; 0 switches nudging off) WATCH_SPEAK_AFTER_MINS (5) WATCH_PRESENT_MINS (10)
+# WATCH_SPEAK_GAP_MINS (10) NOTIFY_QUIET_START (21) NOTIFY_QUIET_END (9). A knob that is not plain digits
+# falls back to its default. For tests: SPEAK_CMD, HID_IDLE_CMD (a shell command that prints idle seconds),
+# IOREG_CMD (default /usr/sbin/ioreg: launchd's PATH has no /usr/sbin), VOICEMODE_CONCH (the conch file),
+# VOICEMODE_CONCH_LOCK_EXPIRY (VoiceMode's own active-call window, default 300 s).
 # Env: AGENT_HOME WATCH_NOW (epoch, tests) WATCH_STALL_MINS (20) WATCH_ROTATE_BYTES (20971520)
 #      TOKEN_BUDGET_DAILY (unset = no token alerts; also read from $AGENT_HOME/defaults/ching.env)
 set -euo pipefail
@@ -29,6 +36,12 @@ case "${TOKEN_BUDGET_DAILY:-}" in
   *) if [ "${#TOKEN_BUDGET_DAILY}" -le 9 ]; then TOKEN_BUDGET_DAILY=$((10#$TOKEN_BUDGET_DAILY)); else TOKEN_BUDGET_DAILY=""; fi
      [ "$TOKEN_BUDGET_DAILY" != 0 ] || TOKEN_BUDGET_DAILY="" ;;
 esac
+num_or() { # value default -> value as a decimal number when it is 1 to 9 digits, else default (never fails)
+  case "$1" in
+    ''|*[!0-9]*) printf '%s' "$2" ;;
+    *) if [ "${#1}" -le 9 ]; then printf '%s' $((10#$1)); else printf '%s' "$2"; fi ;;
+  esac
+}
 DAY=$(date -u -r "$NOW" +%Y-%m-%d)
 mkdir -p "$AGENT_HOME/tokens"
 
@@ -111,6 +124,143 @@ for m in "$AGENT_HOME"/sessions/*/meta; do
     [ "$lvl" != handoff ] || wnotify handoff "Context ${pct}% full: run /handoff and continue in a fresh session."
   fi
 done
+
+# A knob that is not plain digits (a typo in launchd's environment, "1.5") falls back to its default: the
+# nudge pass must never end the tick early, because the token budget and the log rotation come after it.
+SPEAK_AFTER_SECS=$(( $(num_or "${WATCH_SPEAK_AFTER_MINS:-}" 5) * 60 ))
+PRESENT_SECS=$(( $(num_or "${WATCH_PRESENT_MINS:-}" 10) * 60 ))
+SPEAK_GAP_SECS=$(( $(num_or "${WATCH_SPEAK_GAP_MINS:-}" 10) * 60 ))
+QUIET_END=$(num_or "${NOTIFY_QUIET_END:-}" 9)
+QUIET_START=$(num_or "${NOTIFY_QUIET_START:-}" 21)
+# VoiceMode's own window for an active call (VOICEMODE_CONCH_LOCK_EXPIRY, default 300 s; 0 = never stale there)
+CONCH_ACTIVE_SECS=$(num_or "$(printf '%s' "${VOICEMODE_CONCH_LOCK_EXPIRY:-}" | sed 's/\..*//')" 300)
+[ "$CONCH_ACTIVE_SECS" -gt 0 ] || CONCH_ACTIVE_SECS=300
+CONCH_FILE=${VOICEMODE_CONCH:-$HOME/.voicemode/conch}
+LAST_SPOKEN="$AGENT_HOME/notify/last-spoken"
+
+hour_ok() { # inside the same window as budgeted banners
+  local h; h=$(date -r "$NOW" +%H); h=${h#0}
+  [ "$h" -ge "$QUIET_END" ] && [ "$h" -lt "$QUIET_START" ]
+}
+user_present() { # keyboard or mouse used within PRESENT_SECS; unreadable counts as absent
+  local idle
+  if [ -n "${HID_IDLE_CMD:-}" ]; then
+    idle=$(bash -c "$HID_IDLE_CMD" 2>/dev/null || true)
+  else
+    # absolute path: ioreg is in /usr/sbin, which is not on the PATH of the launchd job
+    idle=$("${IOREG_CMD:-/usr/sbin/ioreg}" -c IOHIDSystem 2>/dev/null | awk '/"HIDIdleTime"/ { print int($NF / 1000000000); exit }' || true)
+  fi
+  case "$idle" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$idle" -lt "$PRESENT_SECS" ]
+}
+conch_secs() { # ISO local time as VoiceMode writes it -> epoch, or nothing when it does not parse
+  local secs; secs=$(date -j -f '%Y-%m-%dT%H:%M:%S' "${1%%.*}" +%s 2>/dev/null || true)
+  case "$secs" in ''|*[!0-9]*) ;; *) printf '%s' "$secs" ;; esac
+}
+voice_free() { # false while VoiceMode is in use: a live process with an active call or an unexpired hold
+  # VoiceMode writes ~/.voicemode/conch for the whole call (held:false, acquired = call start) and between
+  # turns as a short hold (held:true, absolute expires). Anything else is free: no file, not a JSON object,
+  # no live pid, an expired hold, a call older than VoiceMode's own stale window, a timestamp that does not parse.
+  local out pid held exp acq secs
+  [ -f "$CONCH_FILE" ] || return 0
+  out=$(jq -r 'if type == "object" then
+      [(.pid | if type == "number" and . == floor and . >= 1 then tostring else "" end),
+       (.held == true | tostring),
+       (.expires | if type == "string" then . else "" end),
+       (.acquired | if type == "string" then . else "" end)] | join("|") else empty end' "$CONCH_FILE" 2>/dev/null || true)
+  [ -n "$out" ] || return 0
+  IFS='|' read -r pid held exp acq <<<"$out" || true
+  case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+  [ "${#pid}" -le 7 ] || return 0
+  if ! kill -0 "$pid" 2>/dev/null; then return 0; fi
+  if [ "$held" = true ]; then
+    secs=$(conch_secs "$exp"); [ -n "$secs" ] || return 0
+    [ "$secs" -le "$NOW" ]                        # a hold is over once its expires has passed
+  else
+    secs=$(conch_secs "$acq"); [ -n "$secs" ] || return 0
+    [ $((NOW - secs)) -gt "$CONCH_ACTIVE_SECS" ]  # a call is over once it is older than the stale window
+  fi
+}
+gap_ok() { # nothing was spoken in the last SPEAK_GAP_SECS
+  local last; last=$(cat "$LAST_SPOKEN" 2>/dev/null || echo 0)
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  [ $((NOW - last)) -ge "$SPEAK_GAP_SECS" ]
+}
+
+# 3b. check-in nudges. A session is waiting when its last Stop left it `input`, `blocked`, or `done` with
+# something open (a checkpoint blocker or next_action other than "none", or a non-empty NEXT.md), at least
+# WATCH_WAIT_GRACE_MINS ago. A spell is identified by the session's `updated` time, so a new Stop or prompt
+# starts a new one. input and blocked already got their banner at Stop; `done` only lands in the inbox, so
+# the watcher sends it a `waiting` banner, once per spell and only when notify.sh really delivered it.
+# A session quiet for more than WATCH_NUDGE_MAX_HOURS is stale, not waiting: no banner and no spoken note.
+NOTIFY_LOG_FILE=${NOTIFY_LOG:-$AGENT_HOME/notify.log}
+GRACE_SECS=$(( $(num_or "${WATCH_WAIT_GRACE_MINS:-}" 2) * 60 ))
+MAX_AGE_SECS=$(( $(num_or "${WATCH_NUDGE_MAX_HOURS:-}" 12) * 3600 )) # older than this is stale, not waiting; 0 = nudging off
+# A meta file is rewritten at every update, so its mtime is never older than `updated`: a meta untouched for
+# longer than the cap cannot be a live spell. Skipped on the mtime alone with the builtin -nt (no fork per file),
+# the way the 48 h pass above does it. The age check below stays: a fresh meta can carry an old `updated`.
+NREF="$TMP/nref"
+nref_epoch=$((NOW - MAX_AGE_SECS)); [ "$nref_epoch" -gt 86400 ] || nref_epoch=86400
+touch -t "$(date -r "$nref_epoch" +%Y%m%d%H%M.%S)" "$NREF"
+SPEAK_FAILED=0 # one failed speak per tick is enough: a hung Kokoro must not cost 30 s per waiting session
+
+log_lines() { # number of lines in notify.log; 0 when it is missing or unreadable
+  local n; n=$({ wc -l <"$NOTIFY_LOG_FILE"; } 2>/dev/null | tr -d ' ') || n=""
+  case "$n" in ''|*[!0-9]*) n=0 ;; esac
+  printf '%s' "$n"
+}
+open_value() { # text -> text, or nothing when it is blank or a "nothing here" sentinel (same list as dash.sh is_none)
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in ''|none|'(none)'|none.) ;; *) printf '%s' "$1" ;; esac
+}
+
+for m in "$AGENT_HOME"/sessions/*/meta; do
+  [ "$MAX_AGE_SECS" -gt 0 ] || break
+  [ -f "$m" ] || continue
+  [ "$m" -nt "$NREF" ] || continue
+  SESS_DIR=$(dirname "$m"); SID=$(basename "$SESS_DIR")
+  state=$(meta_get "$m" state)
+  case "$state" in input|blocked|done) ;; *) continue ;; esac
+  upd=$(meta_get "$m" updated)
+  case "$upd" in ''|*[!0-9]*) continue ;; esac
+  age=$((NOW - upd))
+  [ "$age" -ge "$GRACE_SECS" ] || continue
+  [ "$age" -le "$MAX_AGE_SECS" ] || continue
+  CWD=$(meta_get "$m" cwd); NAME=$(meta_get "$m" name); ROOT=$(meta_get "$m" root)
+  resolve_state
+  nxt=$(open_value "$(checkpoint_get "$STATE_DIR/STATE.md" next_action)")
+  blk=$(open_value "$(checkpoint_get "$STATE_DIR/STATE.md" blocker)")
+  if [ "$state" = "done" ] && [ -z "$nxt" ] && [ -z "$blk" ]; then
+    { [ -f "$STATE_DIR/NEXT.md" ] && grep -q '[^[:space:]]' "$STATE_DIR/NEXT.md"; } || continue
+  fi
+  if [ "$state" = "done" ] && [ "$(meta_get "$m" nudged_for)" != "$upd" ]; then
+    before=$(log_lines)
+    wnotify waiting "${nxt:-$blk}"
+    method=$(tail -1 "$NOTIFY_LOG_FILE" 2>/dev/null | cut -f2 || true)
+    case "$method" in
+      suppressed:*) ;;
+      *) if [ "$(log_lines)" -gt "$before" ]; then
+           meta_set nudged_for "$upd"
+           ev waiting "$(jq -nc --argjson m $((age / 60)) --arg s "$state" '{mins:$m,state:$s}')"
+         fi ;;
+    esac
+  fi
+  # spoken note: once per spell, only when it can be heard and will not talk over anyone
+  [ "$age" -ge "$SPEAK_AFTER_SECS" ] || continue
+  [ "$(meta_get "$m" spoken_for)" != "$upd" ] || continue
+  [ "$SPEAK_FAILED" = 0 ] || continue
+  hour_ok && user_present && voice_free && gap_ok || continue
+  dflt="it needs your input"; [ "$state" != blocked ] || dflt="it is blocked"
+  mins=$((age / 60))
+  say=$(printf '%s has been waiting %s minutes: %s.' "$NAME" "$mins" "${nxt:-${blk:-$dflt}}" | tr '\n\r' '  ' | cut -c1-300)
+  mkdir -p "$AGENT_HOME/notify"
+  if "${SPEAK_CMD:-$SELF_DIR/speak.sh}" "$say" >/dev/null 2>&1; then
+    meta_set spoken_for "$upd"
+    printf '%s\n' "$NOW" >"$LAST_SPOKEN"
+    ev nudge_spoken "$(jq -nc --argjson m "$mins" '{mins:$m}')"
+  else
+    SPEAK_FAILED=1 # nothing is stamped: the spell and the speech gap stay open for the next tick
+  fi
+done # end of nudge pass
 
 # 4. daily token budget (machine-wide), one alert per mark per day
 if [ -n "${TOKEN_BUDGET_DAILY:-}" ] && [ -f "$AGENT_HOME/tokens/$DAY" ]; then

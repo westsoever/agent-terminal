@@ -2,6 +2,18 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D19 (2026-10-05): Check-in nudges for waiting sessions
+
+**Decision (user):** Ching reminds the user when a session is waiting on them: a banner first, then one spoken note after about 5 minutes. The notch widget that opens on hover is deferred. It is built by extending the existing one-shot watcher, `ching-watch.sh`, and stays within D17 (no daemon, no AI calls).
+
+**Why:** The stall watcher watches sessions, not the user. Nothing noticed a finished session sitting in front of a user who had looked away.
+
+**How to apply:**
+- Waiting means `input`, `blocked`, or `done` with open work (a checkpoint blocker or next action that is not a "none" value, or a non-empty `NEXT.md`). A working session never nudges.
+- Keyboard and mouse idle time only gates the voice, never the banner.
+- The banner uses the shared alert budget (quiet hours, 4 a day, 45-minute cooldown). The spoken note is outside that budget. It is bounded by once per waiting spell, a 10-minute gap between notes, quiet hours, and the user being at the Mac, and it stays silent while VoiceMode is in use.
+- Spec and plan: `docs/superpowers/specs/2026-10-05-ching-nudge-design.md`, `docs/superpowers/plans/2026-10-05-ching-nudge.md`.
+
 ## D14-D18 (2026-10-05): Hermes harvest (Phase 1.5)
 
 **Decisions (user, in the brainstorming session that evaluated four Hermes Agent repos):**

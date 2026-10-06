@@ -242,6 +242,16 @@ Built per D10: the shared contracts land first, then parallel implementers on di
 
 **Checkpoint 1.5:** test output, the `settings.json` and launchd diff, and the lens findings. You approve before `install.sh` re-runs on your real settings. Report: CHECKPOINT-1.5.md.
 
+### Phase 1.6: Check-in nudges (spec and plan in `docs/superpowers/`; D19)
+
+- [x] **1.6.1** `speak.sh`: say a sentence through the local Kokoro service.
+- [x] **1.6.2** `notify.sh`: the budgeted `waiting` kind.
+- [x] **1.6.3** `ching-watch.sh`: detect waiting sessions and send the banner for finished sessions with open work.
+- [x] **1.6.4** `ching-watch.sh`: one spoken note per waiting spell (presence, voice lock, quiet hours, speech gap).
+- [ ] **1.6.5** Live smoke section, docs, and the real-machine check from launchd. (real-machine check from launchd pending)
+
+**Checkpoint 1.6:** test output, the `ching-watch.sh` diff and the real-machine check. You approve before `nudge` merges into `main`.
+
 ### Phase 2: Pilot on a couple of real sessions across different folders (2-3 days of real use)
 
 - [x] **2.1** Run `install.sh` on your real `~/.claude/settings.json` (machine-wide from this point; no per-repo setup is needed for hooks, state, notifications, `dash.sh` or the guardrails). *Done 2026-10-06 10:01 after the user chose "install as designed" (rule 10 denies Telegram/Discord/Gmail/Slack reply and send tools for sessions). Backup `~/.claude/settings.json.bak.ching.20261006-100147`; launchd job `org.ching.watch` loaded; a second run changed nothing; the watcher logged `context` events.*
