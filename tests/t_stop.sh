@@ -224,6 +224,31 @@ pg_pid=$(cat "$PGF" 2>/dev/null || echo 0)
 if [ "$pg_pid" -gt 0 ] && gone "$pg_pid"; then pass "process group: the forked sleeper is gone"; else fail "process group: the forked sleeper is gone" "  pid $pg_pid still alive"; fi
 [ "$pg_pid" -gt 0 ] && kill -9 "$pg_pid" 2>/dev/null
 
+# F3: one deadline for the whole hook (STOP_CHECK_DEADLINE, default 780 s, under the 900 s hook timeout).
+# A check that outlives it is killed at the deadline, and the stop blocks with "out of time" plus an event.
+write_goal "$R" "sleep 30"
+s=$(date +%s)
+out=$(STOP_CHECK_DEADLINE=2 stop "$R" sess-DEADLINE)
+e=$(date +%s)
+assert_eq "deadline: the hook ends near its deadline, not after the 30 s check" "1" "$([ $((e - s)) -le 6 ] && echo 1 || echo 0)"
+assert_eq "deadline: still a block (a check with no result is not a pass)" "block" "$(printf '%s' "$out" | jq -r .decision)"
+assert_contains "deadline: the reason says the hook ran out of time" "$(printf '%s' "$out" | jq -r .reason)" "out of time"
+assert_eq "deadline: a stop_deadline event is logged" "2" "$(jq -r 'select(.kind=="stop_deadline" and .sid=="sess-DEADLINE") | .data.budget' "$AGENT_HOME/events.jsonl")"
+out=$(STOP_CHECK_DEADLINE=abc STOP_CHECK_TIMEOUT=1 stop "$R" sess-DEADLINE-BAD)
+assert_contains "deadline: a non-number falls back to the default (the 1 s timeout applies)" "$(printf '%s' "$out" | jq -r .reason)" "timed out after 1s"
+# the ladder only starts a model call when the budget leaves room for it and for the re-check after it
+cat >"$WORK/fake-claude-count" <<'EOS'
+#!/usr/bin/env bash
+echo call >>"$COUNT_CALLS"
+EOS
+chmod +x "$WORK/fake-claude-count"
+export COUNT_CALLS="$WORK/count-calls"; : >"$COUNT_CALLS"
+write_goal "$R" "false"
+out=$(STOP_CHECK_DEADLINE=20 CHING_TEST_LADDER_DAILY=100 CHING_CLAUDE_BIN="$WORK/fake-claude-count" CHING_TEST_MODELS="cheap strong" stop "$R" sess-DLLADDER)
+assert_eq "deadline: too little budget left, no model call" "0" "$(wc -l <"$COUNT_CALLS" | tr -d ' ')"
+assert_eq "deadline: the failing check still blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
+assert_contains "deadline: the ladder skip is in the escalation log" "$(cat "$AGENT_HOME/test-escalation.log")" "reason=deadline"
+
 # ---------- events (Phase 1.5) ----------
 EVF="$AGENT_HOME/events.jsonl"
 assert_eq "events: three test blocks and one cap for sess-A" "4" "$(jq -r 'select(.sid=="sess-A" and .kind=="stop_blocked") | .kind' "$EVF" | wc -l | tr -d ' ')"

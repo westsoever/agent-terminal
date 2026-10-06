@@ -8,8 +8,14 @@
 # block = {"decision":"block","reason":"..."} on stdout, exit 0. Claude Code's own cap is 8, ours is 3;
 # the per-session counter (not stop_hook_active) enforces it.
 # The check goes through test-escalate.sh (no model unless it fails; Haiku, then Sonnet).
-# Env: STOP_CHECK_MAX_RETRIES (3) STOP_CHECK_TIMEOUT (900 s) CHING_TEST_MODELS (see test-escalate.sh)
+# One deadline covers the whole hook (check runs and model calls): install.sh gives the hook 900 s, and a hook
+# that Claude Code kills allows the stop and orphans its children. Each step gets what is left; a check cut
+# at the deadline blocks with "out of time" (a stop_deadline event), and that block counts as a retry.
+# Env: STOP_CHECK_MAX_RETRIES (3) STOP_CHECK_TIMEOUT (one check run, 900 s)
+#      STOP_CHECK_DEADLINE (the whole hook, 780 s: 2 minutes of margin under the 900 s hook timeout)
+#      CHING_TEST_MODELS CHING_TEST_CALL_TIMEOUT CHING_TEST_MAX_TURNS (see test-escalate.sh)
 set -euo pipefail
+START=$(date +%s)
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
@@ -29,6 +35,11 @@ case "$MAX" in ''|*[!0-9]*) MAX=3 ;; esac
 TIMEOUT=${STOP_CHECK_TIMEOUT:-900}
 case "$TIMEOUT" in ''|*[!0-9]*) TIMEOUT=900 ;; esac
 [ "$TIMEOUT" -ge 1 ] || TIMEOUT=1
+BUDGET=${STOP_CHECK_DEADLINE:-780}
+case "$BUDGET" in ''|*[!0-9]*) BUDGET=780 ;; esac
+[ "${#BUDGET}" -le 6 ] || BUDGET=780
+BUDGET=$((10#$BUDGET)); [ "$BUDGET" -ge 1 ] || BUDGET=1
+DEADLINE=$((START + BUDGET))
 
 hook_init
 resolve_state
@@ -121,8 +132,9 @@ rc=0
 # CHING_ESCALATING: test-escalate.sh would switch the model ladder off for this run too.
 export CHING_STOP_CHECK_RUNNING=1
 if [ "$n" -ge "$MAX" ]; then export CHING_TEST_MODELS=""; fi
-# --timeout kills the whole process group of a run that takes too long (exit 142), not only its top bash.
-CHING_TEST_NOTIFY=0 "$SELF_DIR/test-escalate.sh" -C "$WORK_DIR" --timeout "$TIMEOUT" -- \
+# --timeout kills the whole process group of a run that takes too long (exit 142), not only its top bash;
+# --deadline makes every run and model call fit in what is left of the hook's budget.
+CHING_TEST_NOTIFY=0 "$SELF_DIR/test-escalate.sh" -C "$WORK_DIR" --timeout "$TIMEOUT" --deadline "$DEADLINE" -- \
   bash -c "$TEST_CMD" >"$OUT" 2>&1 </dev/null || rc=$?
 
 if [ "$rc" -eq 0 ]; then
@@ -151,7 +163,11 @@ n=$((n + 1))
 printf '%s\n' "$n" >"$COUNTER"
 ev stop_blocked "$(jq -nc --argjson n "$n" '{retry:$n,reason:"tests"}')"
 TAIL=$(tail -n 40 "$OUT" | cut -c1-400 | head -c 3500)
-if [ "$rc" -eq 142 ]; then WHY="timed out after ${TIMEOUT}s"; else WHY="exit code $rc"; fi
+if [ "$rc" -eq 142 ] && [ "$(date +%s)" -ge "$DEADLINE" ]; then
+  WHY="out of time: the hook's ${BUDGET}s budget (STOP_CHECK_DEADLINE) ran out before the check finished"
+  ev stop_deadline "$(jq -nc --argjson b "$BUDGET" --argjson e "$(($(date +%s) - START))" '{budget:$b,elapsed:$e}')"
+elif [ "$rc" -eq 142 ]; then WHY="timed out after ${TIMEOUT}s"
+else WHY="exit code $rc"; fi
 REASON="Do not stop yet: the done-check in $GOAL_FILE failed ($WHY, attempt $n of $MAX). Command: $TEST_CMD"$'\n\n'"Last output:"$'\n'"$TAIL"$'\n\n'"Fix the failure and finish. Do not ask questions; log assumptions in STATE.md."
 jq -n --arg r "$REASON" '{decision:"block", reason:$r}'
 exit 0
