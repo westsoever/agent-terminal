@@ -136,4 +136,17 @@ out=$(inst --yes); assert_eq "no settings.json yet: created" "0" "$?"
 assert_eq "created file is valid and has the hooks" "7" "$(jq '[.hooks | to_entries[] | .key] | length' "$SETTINGS_FILE")"
 # the real settings file is never the target in tests
 assert_not_contains "tests never reference the real settings path" "$(cat "$D/settings.json")" "/Users/clyde/.claude"
+
+# plist values are XML-escaped: paths with & < > still give a valid plist that carries the real paths
+XD="$WORK/x&y<z>"; XA="$WORK/a&b<c>"; XLA="$WORK/la-escape"; mkdir -p "$XD"; printf '{}\n' >"$XD/settings.json"
+xinst() { env SETTINGS_FILE="$XD/settings.json" CLAUDE_DIR="$XD" AGENT_HOME="$XA" AGENT_REPOS_FILE="$WORK/escape-repos" LAUNCH_AGENTS_DIR="$XLA" "$KIT/install.sh" "$@" </dev/null 2>&1; }
+out=$(xinst --yes); assert_eq "special characters in paths: install exits 0" "0" "$?"
+XP="$XLA/org.ching.watch.plist"
+assert_ok "special characters: the plist is valid" plutil -lint "$XP"
+assert_eq "special characters: AGENT_HOME survives the round trip" "$XA" "$(plutil -extract EnvironmentVariables.AGENT_HOME raw -o - "$XP")"
+assert_eq "special characters: the script path survives the round trip" "$XD/ching/bin/ching-watch.sh" "$(plutil -extract ProgramArguments.1 raw -o - "$XP")"
+assert_eq "special characters: the log path survives the round trip" "$XA/watch.log" "$(plutil -extract StandardOutPath raw -o - "$XP")"
+assert_contains "special characters: the file holds the escaped form" "$(cat "$XP")" "a&amp;b&lt;c&gt;/watch.log"
+assert_not_contains "special characters: no raw ampersand-path in the file" "$(cat "$XP")" "a&b"
+out=$(xinst --yes); assert_contains "special characters: a second run is a no-op" "$out" "nothing to do"
 exit 0

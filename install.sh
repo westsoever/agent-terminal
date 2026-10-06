@@ -147,21 +147,24 @@ LAUNCH_AGENTS_DIR=${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}
 LAUNCHCTL=${LAUNCHCTL:-launchctl}
 PLIST="$LAUNCH_AGENTS_DIR/org.ching.watch.plist"
 AH=${AGENT_HOME:-$HOME/.agent}
+# values go into XML text: & < > in a path would otherwise break the plist (launchd then refuses to load it)
+xml_esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+X_LINK=$(xml_esc "$LINK"); X_AH=$(xml_esc "$AH")
 PLIST_BODY=$(cat <<EOP
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key><string>org.ching.watch</string>
-  <key>ProgramArguments</key><array><string>/bin/bash</string><string>$LINK/bin/ching-watch.sh</string></array>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>$X_LINK/bin/ching-watch.sh</string></array>
   <key>StartInterval</key><integer>300</integer>
   <key>RunAtLoad</key><true/>
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-    <key>AGENT_HOME</key><string>$AH</string>
+    <key>AGENT_HOME</key><string>$X_AH</string>
   </dict>
-  <key>StandardOutPath</key><string>$AH/watch.log</string>
-  <key>StandardErrorPath</key><string>$AH/watch.log</string>
+  <key>StandardOutPath</key><string>$X_AH/watch.log</string>
+  <key>StandardErrorPath</key><string>$X_AH/watch.log</string>
 </dict>
 </plist>
 EOP
