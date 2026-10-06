@@ -5,7 +5,8 @@
 # (dash.sh --inbox) and is not pushed (NOTIFY_PUSH_DONE=1 restores the push). Every other kind is
 # budgeted: delivered only between NOTIFY_QUIET_END (9) and NOTIFY_QUIET_START (21) local time, at most
 # NOTIFY_BUDGET (4) a day, NOTIFY_COOLDOWN_MINS (45) apart per session; otherwise logged as suppressed.
-# handoff keeps the quiet hours but is not counted against the daily budget or the cooldown.
+# handoff keeps the quiet hours but is not counted against the daily budget or the cooldown; it has its own
+# per-session cooldown instead, NOTIFY_HANDOFF_COOLDOWN_MINS (120).
 # Hook usage reads hook JSON on stdin (cwd, session_id); works in any folder, repo or not. The folder /
 # repo name is always in the title. Delivery: terminal-notifier (click activates the Claude app), else
 # osascript. Env: NOTIFY_CWD NOTIFY_SESSION NOTIFY_ACTIVATE NOTIFY_DRY_RUN NOTIFY_LOG NOTIFY_NOW (epoch)
@@ -81,6 +82,10 @@ case "$KIND" in
   *) CLASS=budgeted ;;
 esac
 
+HANDOFF_COOLDOWN_MINS=${NOTIFY_HANDOFF_COOLDOWN_MINS:-120}
+case "$HANDOFF_COOLDOWN_MINS" in ''|*[!0-9]*) HANDOFF_COOLDOWN_MINS=120 ;; esac
+[ "${#HANDOFF_COOLDOWN_MINS}" -le 6 ] || HANDOFF_COOLDOWN_MINS=120
+HANDOFF_COOLDOWN_MINS=$((10#$HANDOFF_COOLDOWN_MINS))
 WHY=""
 budget_ok() { # 0 when a budgeted alert may go out now (and books it); else sets WHY
   local hour used last file
@@ -88,7 +93,15 @@ budget_ok() { # 0 when a budgeted alert may go out now (and books it); else sets
   # no readable hour (a date without BSD -r on PATH): the quiet-hours check cannot run, so do not send
   case "$hour" in ''|*[!0-9]*) WHY=no-clock; return 1 ;; esac
   if [ "$hour" -lt "${NOTIFY_QUIET_END:-9}" ] || [ "$hour" -ge "${NOTIFY_QUIET_START:-21}" ]; then WHY=quiet-hours; return 1; fi
-  [ "$KIND" != handoff ] || return 0 # rare (once per crossing of 80%) and actionable: no daily count, no cooldown
+  # handoff is rare (once per crossing of 80%) and actionable: no daily count and not the shared cooldown,
+  # only its own per-session one, so a context level that wobbles around 80% cannot push again and again
+  if [ "$KIND" = handoff ]; then
+    file="$AGENT_HOME/notify/$SESSION.handoff"
+    last=$(cat "$file" 2>/dev/null || echo 0); case "$last" in ''|*[!0-9]*) last=0 ;; esac
+    if [ $((NOW - last)) -lt $((HANDOFF_COOLDOWN_MINS * 60)) ]; then WHY=handoff-cooldown; return 1; fi
+    printf '%s\n' "$NOW" >"$file"
+    return 0
+  fi
   file="$AGENT_HOME/notify/budget-$(date -r "$NOW" +%Y-%m-%d)"
   used=$(cat "$file" 2>/dev/null || echo 0); case "$used" in ''|*[!0-9]*) used=0 ;; esac
   if [ "$used" -ge "${NOTIFY_BUDGET:-4}" ]; then WHY=daily-budget; return 1; fi

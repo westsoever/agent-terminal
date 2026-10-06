@@ -103,9 +103,25 @@ rm -rf "$AGENT_HOME/notify"
 nt h6 handoff
 nt h6 stall $((NOON + 60))
 assert_contains "handoff does not start the cooldown for the next alert" "$(tail -1 "$LOG")" $'\tdry-run\t'
-nt h6 handoff $((NOON + 120))
+nt h6b stall; nt h6b handoff $((NOON + 120))
 assert_contains "handoff ignores the cooldown a stall just started" "$(tail -1 "$LOG")" $'\tdry-run\t'
-assert_eq "only the stall used the budget" "1" "$(cat "$AGENT_HOME/notify/budget-2026-10-05")"
+assert_eq "only the stalls used the budget" "2" "$(cat "$AGENT_HOME/notify/budget-2026-10-05")"
+# but handoff has its own per-session cooldown (NOTIFY_HANDOFF_COOLDOWN_MINS, default 120): a context level
+# that wobbles around 80% must not push a notice every time it crosses again
+rm -rf "$AGENT_HOME/notify"
+nt h8 handoff
+nt h8 handoff $((NOON + 60))
+assert_contains "a second handoff for the session within 2 h is suppressed" "$(tail -1 "$LOG")" "suppressed:handoff-cooldown"
+nt h9 handoff $((NOON + 60))
+assert_contains "the handoff cooldown is per session" "$(tail -1 "$LOG")" $'\tdry-run\t'
+nt h8 handoff $((NOON + 2 * 3600 + 60))
+assert_contains "after 2 h the handoff is delivered again" "$(tail -1 "$LOG")" $'\tdry-run\t'
+printf '%s' "$(hook_json Notification "$R" h10)" | NOTIFY_NOW=$NOON NOTIFY_HANDOFF_COOLDOWN_MINS=1 "$BIN/notify.sh" handoff m
+printf '%s' "$(hook_json Notification "$R" h10)" | NOTIFY_NOW=$((NOON + 61)) NOTIFY_HANDOFF_COOLDOWN_MINS=1 "$BIN/notify.sh" handoff m
+assert_contains "NOTIFY_HANDOFF_COOLDOWN_MINS sets the handoff cooldown" "$(tail -1 "$LOG")" $'\tdry-run\t'
+nt h11 handoff $((NOON - 3 * 3600 - 60))
+nt h11 handoff $((NOON - 3 * 3600))
+assert_contains "a handoff held back by quiet hours does not start the cooldown" "$(tail -1 "$LOG")" $'\tdry-run\t'
 nt h7 handoff $((NOON + 10 * 3600))
 assert_contains "handoff at 22:00 waits for the morning" "$(tail -1 "$LOG")" "suppressed:quiet-hours"
 nt h7 handoff $((NOON - 3 * 3600 - 60))
