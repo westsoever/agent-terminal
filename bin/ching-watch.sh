@@ -7,7 +7,8 @@
 # Meta keys written: tok_offset tok_last_mid ctx_level ctx_pct stalled_at
 # Check-in nudges (3b): sessions waiting on the user get a `waiting` banner (finished sessions with open
 # work) and, after a delay, one spoken note. Meta keys: nudged_for spoken_for. Env: WATCH_WAIT_GRACE_MINS (2)
-# WATCH_SPEAK_AFTER_MINS (5) WATCH_PRESENT_MINS (10) WATCH_SPEAK_GAP_MINS (10) SPEAK_CMD HID_IDLE_CMD VOICEMODE_CONCH
+# WATCH_NUDGE_MAX_HOURS (12) WATCH_SPEAK_AFTER_MINS (5) WATCH_PRESENT_MINS (10) WATCH_SPEAK_GAP_MINS (10)
+# SPEAK_CMD HID_IDLE_CMD VOICEMODE_CONCH
 # Env: AGENT_HOME WATCH_NOW (epoch, tests) WATCH_STALL_MINS (20) WATCH_ROTATE_BYTES (20971520)
 #      TOKEN_BUDGET_DAILY (unset = no token alerts; also read from $AGENT_HOME/defaults/ching.env)
 set -euo pipefail
@@ -155,8 +156,10 @@ gap_ok() { # nothing was spoken in the last SPEAK_GAP_SECS
 # WATCH_WAIT_GRACE_MINS ago. A spell is identified by the session's `updated` time, so a new Stop or prompt
 # starts a new one. input and blocked already got their banner at Stop; `done` only lands in the inbox, so
 # the watcher sends it a `waiting` banner, once per spell and only when notify.sh really delivered it.
+# A session quiet for more than WATCH_NUDGE_MAX_HOURS is stale, not waiting: no banner and no spoken note.
 NOTIFY_LOG_FILE=${NOTIFY_LOG:-$AGENT_HOME/notify.log}
 GRACE_SECS=$(( ${WATCH_WAIT_GRACE_MINS:-2} * 60 ))
+MAX_AGE_SECS=$(( ${WATCH_NUDGE_MAX_HOURS:-12} * 3600 )) # older than this is stale, not waiting
 
 log_lines() { if [ -f "$NOTIFY_LOG_FILE" ]; then wc -l <"$NOTIFY_LOG_FILE" | tr -d ' '; else echo 0; fi; }
 open_value() { # text -> text, or nothing when it is blank or "none"
@@ -172,6 +175,7 @@ for m in "$AGENT_HOME"/sessions/*/meta; do
   case "$upd" in ''|*[!0-9]*) continue ;; esac
   age=$((NOW - upd))
   [ "$age" -ge "$GRACE_SECS" ] || continue
+  [ "$age" -le "$MAX_AGE_SECS" ] || continue
   CWD=$(meta_get "$m" cwd); NAME=$(meta_get "$m" name); ROOT=$(meta_get "$m" root)
   resolve_state
   nxt=$(open_value "$(checkpoint_get "$STATE_DIR/STATE.md" next_action)")

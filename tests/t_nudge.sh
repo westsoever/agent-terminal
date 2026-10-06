@@ -184,4 +184,21 @@ assert_eq "voice back: spoken on the next tick" "1" "$(spoken)"
 reset; reg i1 input 400; checkpoint i1 'do "this" now; it'"'"'s a \ test' none; run
 assert_eq "quotes and a backslash in the next action: spoken once" "1" "$(spoken)"
 assert_contains "and spoken as written" "$(cat "$SPOKEN")" 'do "this" now; it'"'"'s a \ test'
+
+# Review Focus 6: a spell older than the cap is not a check-in (no banner, no speech); inside it still is
+reset; reg d1 done 90000; checkpoint d1 "ship the migration" none; run
+assert_eq "done for 25 h with open work: no banner" "0" "$(banners)"
+assert_eq "done for 25 h: not spoken" "0" "$(spoken)"
+reset; reg i1 input 90000; run
+assert_eq "input for 25 h: not spoken" "0" "$(spoken)"
+assert_eq "input for 25 h: spoken_for stays unset" "" "$(mget i1 spoken_for)"
+reset; reg i1 input 43200; run
+assert_eq "exactly 12 h: still nudged" "1" "$(spoken)"
+reset; reg i1 input 43201; run
+assert_eq "12 h and 1 s: not nudged" "0" "$(spoken)"
+reset; reg d1 done 43200; checkpoint d1 "go" none; run
+assert_eq "done for exactly 12 h: still bannered" "1" "$(banners)"
+reset; reg i1 input 90000
+WATCH_NUDGE_MAX_HOURS=48 run
+assert_eq "the cap is configurable" "1" "$(spoken)"
 exit 0
