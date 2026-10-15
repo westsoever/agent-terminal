@@ -287,4 +287,65 @@ assert_contains "help: the whole header is printed (ends with the Env line)" "$h
 assert_not_contains "help: does not print code" "$help" "set -euo pipefail"
 assert_contains "dispatcher doc: --inbox marks FINISHED as seen" "$(cat "$KIT/dispatcher/AGENTS.md")" "marks FINISHED as seen"
 assert_contains "ching-functions.md: reading the inbox marks finished work as seen" "$(cat "$KIT/ching-functions.md")" "marks it as seen"
+
+# ---------- git sync: a SYNC lane in --inbox and one line in the default view ----------
+# The snapshot is bin/sync-check.sh's sync-check.md. Written by hand here so these checks do not depend on it;
+# one check at the end runs the real script.
+SYA="$WORK/sy-ah"; SYC="$WORK/sy-claude"; mkdir -p "$SYA/sessions/sy1" "$SYC"
+SYF="$WORK/syfolder"; mkdir -p "$SYF"
+printf 'cwd=%s\nroot=\nbranch=main\nstate=working\nupdated=%s\n' "$SYF" "$NOW" >"$SYA/sessions/sy1/meta"
+sydash() { AGENT_HOME="$SYA" CLAUDE_DIR="$SYC" AGENT_REPOS_FILE="$WORK/none" DASH_NOW="$NOW" "$BIN/dash.sh" "$@"; }
+isoz() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
+snap() { # seconds_ago [clean] : write the snapshot; two repos need attention (alpha 3 d, beta 5 h) unless "clean"
+  { printf 'generated: %s\nGit sync check: test snapshot.\n\n' "$(isoz $((NOW - $1)))"
+    if [ "${2:-}" != clean ]; then
+      printf '## alpha -- oldest 3d\npath: /x/alpha\nneeds: 2 unpushed commits, 1 dirty worktree\nage_h: 72\n- unpushed: main +2 (3d)\n\n'
+      printf '## beta -- oldest 5h\npath: /x/beta\nneeds: 1 stash\nage_h: 5\n- stash: 1 entry (5h)\n\n'
+      printf 'clean: gamma, delta\n'
+    else printf 'clean: gamma, delta\n'; fi
+  } >"$SYA/sync-check.md"
+}
+rm -f "$SYA/sync-check.md"
+base=$(sydash)
+assert_not_contains "sync: no snapshot, the default view says nothing about it" "$base" "sync"
+assert_contains "sync: no snapshot, the table still ends with its summary line" "$(printf '%s\n' "$base" | tail -1)" "-- 1 session(s), 1 active"
+assert_contains "sync: no snapshot: --inbox says never run" "$(sydash --inbox | sed -n '/^SYNC/,$p')" "never run"
+snap 3600
+out=$(sydash)
+assert_eq "sync: a fresh snapshot adds exactly one line, at the end" "$base"$'\n'"sync: 2 repos need attention (oldest 3d) - bin/dash.sh --inbox" "$out"
+snap 3600; printf '## solo -- oldest 2h\npath: /x/solo\nneeds: 1 dirty worktree\nage_h: 2\n' >"$WORK/solo.txt"
+{ sed -n '1,3p' "$SYA/sync-check.md"; cat "$WORK/solo.txt"; } >"$SYA/sync-check.md.new"; mv "$SYA/sync-check.md.new" "$SYA/sync-check.md"
+assert_contains "sync: one repo is singular" "$(sydash | tail -1)" "sync: 1 repo needs attention (oldest 2h) - bin/dash.sh --inbox"
+snap 3600
+ib=$(sydash --inbox)
+sy=$(printf '%s\n' "$ib" | sed -n '/^SYNC/,$p')
+assert_eq "sync: the SYNC lane comes after FINISHED" "yes" "$([ "$(printf '%s\n' "$ib" | grep -n '^FINISHED' | cut -d: -f1)" -lt "$(printf '%s\n' "$ib" | grep -n '^SYNC' | cut -d: -f1)" ] && echo yes || echo no)"
+assert_eq "sync: lane heading says the order and the snapshot age" "SYNC (oldest first; snapshot 1h old)" "$(printf '%s\n' "$sy" | head -1)"
+assert_eq "sync: one line per repo, oldest first" "  alpha: 2 unpushed commits, 1 dirty worktree (oldest 3d)"$'\n'"  beta: 1 stash (oldest 5h)" "$(printf '%s\n' "$sy" | sed -n '2,$p')"
+snap 3600 clean
+assert_eq "sync: a clean snapshot prints nothing in the default view" "$base" "$(sydash)"
+assert_eq "sync: a clean snapshot: the lane says (nothing)" "(nothing)" "$(sydash --inbox | sed -n '/^SYNC/,$p' | sed -n 2p | sed 's/^ *//')"
+snap $((23 * 3600))
+assert_not_contains "sync: 23 h old is not stale" "$(sydash --inbox | sed -n '/^SYNC/,$p')" "stale"
+snap $((30 * 3600))
+out=$(sydash)
+assert_contains "sync: a snapshot older than 24 h is shown as stale in the default view" "$(printf '%s\n' "$out" | tail -1)" "sync: stale snapshot (30h old): 2 repos need attention (oldest 3d) - bin/dash.sh --inbox"
+assert_eq "sync: ... and the lane heading says stale snapshot" "SYNC (oldest first; stale snapshot, 30h old: run bin/sync-check.sh)" "$(sydash --inbox | sed -n '/^SYNC/p')"
+snap $((30 * 3600)) clean
+assert_contains "sync: a stale clean snapshot is still worth a line" "$(sydash | tail -1)" "sync: stale snapshot (30h old): clean when last run - bin/dash.sh --inbox"
+assert_not_contains "sync: --speak never mentions it" "$(sydash --speak)" "sync"
+assert_not_contains "sync: --next never mentions it" "$(sydash --next)" "sync"
+printf 'not a snapshot\n' >"$SYA/sync-check.md"
+rc=0; out=$(sydash --inbox 2>&1) || rc=$?
+assert_eq "sync: an unreadable snapshot does not break --inbox" "0" "$rc"
+rc=0; out=$(sydash 2>&1) || rc=$?
+assert_eq "sync: ... nor the default view" "0" "$rc"
+rm -f "$SYA/sync-check.md"
+assert_eq "sync: removing the snapshot brings the old output back, byte for byte" "$base" "$(sydash)"
+# the real script and the real dash together
+SYR=$(cd "$(mk_repo syrepo)" && pwd -P); printf 'u\n' >"$SYR/untracked.txt"
+printf '%s\n' "$SYR" >"$WORK/sy-repos"
+CHING_INCLUDE_SANDBOX=1 SYNC_NO_FETCH=1 AGENT_HOME="$SYA" AGENT_REPOS_FILE="$WORK/sy-repos" "$BIN/sync-check.sh" --quiet
+assert_contains "sync: sync-check.sh then dash.sh: the count line" "$(sydash | tail -1)" "sync: 1 repo needs attention (oldest <1h) - bin/dash.sh --inbox"
+assert_contains "sync: ... and the lane" "$(sydash --inbox | sed -n '/^SYNC/,$p')" "  syrepo: 1 dirty worktree (oldest <1h)"
 exit 0
