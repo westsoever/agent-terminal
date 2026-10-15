@@ -327,6 +327,8 @@ assert_contains "events: a green stop logs stop_ok" "$(jq -r 'select(.kind=="sto
 
 # ---------- checkpoint rule (Phase 1.5) ----------
 CR=$(mk_repo cprepo); write_goal "$CR" "true"
+# a real checkpoint: all six keys filled (blocker: none and files_changed: 0 are real answers too)
+good_block() { printf '# State\nstatus: done\n<!-- ching:checkpoint -->\nresult: ok\nblocker: none\nnext_action: none\nfiles_changed: 1\nexamined: bin/x.sh\nnot_examined: nothing\n<!-- /ching:checkpoint -->\n' >"$1/.agent/STATE.md"; }
 touch_prompt() { printf '%s' "$(hook_json UserPromptSubmit "$1" "$2")" | "$BIN/session-start.sh" touch; }
 work() { echo "$2" >>"$1/work.txt"; }   # repo text : the turn changes the tree (the gate only asks after a change)
 touch_prompt "$CR" cp-1; work "$CR" cp-1
@@ -337,11 +339,13 @@ assert_contains "checkpoint reason: asks only for the checkpoint block" "$r" "Ed
 assert_contains "checkpoint reason: names the six keys" "$r" "result, blocker, next_action, files_changed, examined, not_examined"
 assert_not_contains "checkpoint reason: no /handoff (a full handoff is not needed)" "$r" "/handoff"
 out=$(stop "$CR" cp-1)
-assert_eq "checkpoint: asked only once per prompt" "" "$out"
-# the first cp-1 stop exited at the block, so the only stop_ok for cp-1 comes from this second stop reaching its normal end
-assert_eq "checkpoint: second stop ran to the end (one stop_ok, not a dead hook)" "cp-1" "$(jq -r 'select(.kind=="stop_ok" and .sid=="cp-1") | .sid' "$EVF")"
+assert_eq "checkpoint still missing: asked one more time" "block" "$(printf '%s' "$out" | jq -r .decision)"
+out=$(stop "$CR" cp-1)
+assert_eq "checkpoint: asked at most twice per prompt" "" "$out"
+# the first two cp-1 stops exited at a block, so the only stop_ok for cp-1 comes from the third reaching its normal end
+assert_eq "checkpoint: the capped stop ran to the end (one stop_ok, not a dead hook)" "cp-1" "$(jq -r 'select(.kind=="stop_ok" and .sid=="cp-1") | .sid' "$EVF")"
 touch_prompt "$CR" cp-2
-printf '# State\nstatus: done\n<!-- ching:checkpoint -->\nresult: ok\nblocker: none\nnext_action: none\n<!-- /ching:checkpoint -->\n' >"$CR/.agent/STATE.md"
+good_block "$CR"
 out=$(stop "$CR" cp-2)
 assert_eq "fresh checkpoint: no block" "" "$out"
 assert_contains "fresh checkpoint: checkpoint event" "$(jq -r 'select(.kind=="checkpoint") | .sid' "$AGENT_HOME/events.jsonl")" "cp-2"
@@ -363,7 +367,7 @@ touch_prompt "$CR" cp-5; work "$CR" cp-5
 out=$(stop "$CR" cp-5)
 assert_eq "block-then-comply: first stop blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
 assert_eq "block-then-comply: no checkpoint event yet" "" "$(jq -r 'select(.kind=="checkpoint" and .sid=="cp-5") | .sid' "$EVF")"
-printf '# State\nstatus: done\n<!-- ching:checkpoint -->\nresult: ok\nblocker: none\nnext_action: none\n<!-- /ching:checkpoint -->\n' >"$CR/.agent/STATE.md"
+good_block "$CR"; sed -i.bak 's/^result: ok/result: wrote the checkpoint for cp-5/' "$CR/.agent/STATE.md"; rm -f "$CR/.agent/STATE.md.bak"
 out=$(stop "$CR" cp-5)
 assert_eq "block-then-comply: second stop passes" "" "$out"
 assert_eq "block-then-comply: checkpoint event logged after the block" "cp-5" "$(jq -r 'select(.kind=="checkpoint" and .sid=="cp-5") | .sid' "$EVF")"
@@ -404,6 +408,135 @@ age_tree; touch -t 202001010000 "$CU/new.txt"; touch_prompt "$CU" cu-5
 out=$(stop "$CU" cu-5)
 assert_eq "a check that writes into the tree does not make the turn look changed" "" "$out"
 assert_file "the check did write into the tree" "$CU/gen-by-test.out"
+# ---------- the checkpoint has to be real (lens finding F7) ----------
+# A touch of STATE.md used to satisfy the gate (the template already holds the marker). The block must now be valid:
+# the six keys present, none empty, result/next_action/examined/not_examined not the template's "(none)". After a
+# block, the next stop passes only when the block changed since the block was asked for AND is valid; otherwise it is
+# asked once more, and the stop after that is allowed with a checkpoint_unmet event. Never more than two blocks.
+cp_blocks() { jq -r --arg s "$1" 'select(.kind=="stop_blocked" and .sid==$s and .data.reason=="checkpoint") | .data.retry' "$EVF" | tr '\n' ' '; }
+cp_unmet() { jq -r --arg s "$1" 'select(.kind=="checkpoint_unmet" and .sid==$s) | .data.reason' "$EVF" | tr '\n' ' '; }
+cp_ok() { jq -r --arg s "$1" 'select(.kind=="checkpoint" and .sid==$s) | .sid' "$EVF" | head -1; }
+cp_decision() { if [ -z "$1" ]; then echo allow; else printf '%s' "$1" | jq -r '.decision // "allow"' 2>/dev/null || echo garbage; fi; }
+use_template() { cp "$KIT/templates/STATE.md" "$1/.agent/STATE.md"; }
+CF=$(mk_repo cpfill); write_goal "$CF" "true"
+# placeholders only: the template touched (fresh mtime, marker present) is not a checkpoint
+touch_prompt "$CF" f7-a; work "$CF" f7-a; use_template "$CF"
+out=$(stop "$CF" f7-a)
+assert_eq "placeholder-only block, first stop: blocks" "block" "$(cp_decision "$out")"
+assert_contains "placeholder-only block: the reason names the unfilled keys" "$(printf '%s' "$out" | jq -r .reason)" "result"
+out=$(stop "$CF" f7-a)
+assert_eq "placeholder-only block, second stop: asked once more" "block" "$(cp_decision "$out")"
+assert_contains "second ask says it is the last" "$(printf '%s' "$out" | jq -r .reason)" "last time"
+out=$(stop "$CF" f7-a)
+assert_eq "placeholder-only block, third stop: allowed (the cap)" "" "$out"
+assert_eq "placeholder-only: exactly two checkpoint blocks, never a loop" "1 2 " "$(cp_blocks f7-a)"
+assert_eq "placeholder-only: checkpoint_unmet logged with the reason" "invalid " "$(cp_unmet f7-a)"
+assert_eq "placeholder-only: no checkpoint event" "" "$(cp_ok f7-a)"
+assert_eq "placeholder-only: the capped stop ran to its end (stop_ok)" "f7-a" "$(jq -r 'select(.kind=="stop_ok" and .sid=="f7-a") | .sid' "$EVF")"
+out=$(stop "$CF" f7-a)
+assert_eq "after the cap, later stops of the same prompt stay allowed" "" "$out"
+assert_eq "after the cap: still two blocks in all" "1 2 " "$(cp_blocks f7-a)"
+# an unchanged block after the block is not enough, a touch of the file or an edit outside the block neither
+touch_prompt "$CF" f7-b; work "$CF" f7-b; good_block "$CF"; touch -t 202001010000 "$CF/.agent/STATE.md"
+out=$(stop "$CF" f7-b)
+assert_eq "valid block older than the prompt: blocks" "block" "$(cp_decision "$out")"
+touch "$CF/.agent/STATE.md"
+out=$(stop "$CF" f7-b)
+assert_eq "same block, file only touched: asked once more" "block" "$(cp_decision "$out")"
+assert_contains "unchanged block: the reason says so" "$(printf '%s' "$out" | jq -r .reason)" "unchanged"
+printf '\n## Done\n- worked\n' >>"$CF/.agent/STATE.md"
+out=$(stop "$CF" f7-b)
+assert_eq "same block, an edit outside the block: allowed (the cap)" "" "$out"
+assert_eq "unchanged: checkpoint_unmet logged with the reason" "unchanged " "$(cp_unmet f7-b)"
+assert_eq "unchanged: two blocks, no checkpoint event" "1 2 :" "$(cp_blocks f7-b):$(cp_ok f7-b)"
+# a real block after the first block passes at once, and the checkpoint event carries its values
+touch_prompt "$CF" f7-c; work "$CF" f7-c; use_template "$CF"
+out=$(stop "$CF" f7-c)
+assert_eq "template, then a real block: first stop blocks" "block" "$(cp_decision "$out")"
+good_block "$CF"
+out=$(stop "$CF" f7-c)
+assert_eq "template, then a real block: the next stop passes" "" "$out"
+assert_eq "template, then a real block: one block only" "1 " "$(cp_blocks f7-c)"
+assert_eq "template, then a real block: checkpoint event logged" "f7-c" "$(cp_ok f7-c)"
+assert_eq "template, then a real block: no checkpoint_unmet" "" "$(cp_unmet f7-c)"
+assert_eq "the checkpoint event carries the block's values" "none|none" "$(jq -r 'select(.kind=="checkpoint" and .sid=="f7-c") | "\(.data.blocker)|\(.data.next_action)"' "$EVF")"
+# a real block written before any block is not asked for again
+touch_prompt "$CF" f7-d; work "$CF" f7-d; good_block "$CF"
+out=$(stop "$CF" f7-d)
+assert_eq "real block written unprompted: no block" "" "$out"
+assert_eq "real block written unprompted: no block event, a checkpoint event" ":f7-d" "$(cp_blocks f7-d):$(cp_ok f7-d)"
+# blocker: none and files_changed: 0 are real answers; the placeholder is (none) in the other four
+touch_prompt "$CF" f7-e; work "$CF" f7-e
+printf '# State\n<!-- ching:checkpoint -->\nresult: fixed the parser\nblocker: none\nnext_action: review the PR\nfiles_changed: 0\nexamined: the failing test\nnot_examined: the live site\n<!-- /ching:checkpoint -->\n' >"$CF/.agent/STATE.md"
+out=$(stop "$CF" f7-e)
+assert_eq "blocker none and files_changed 0 are accepted" "" "$out"
+# each way to be invalid: a missing key, an empty value, a value that is still (none)
+break_block() { # key how: spoil that key of the good block
+  case "$2" in
+    missing) sed -i.bak "/^$1:/d" "$CF/.agent/STATE.md" ;;
+    empty) sed -i.bak "s/^$1:.*/$1:   /" "$CF/.agent/STATE.md" ;;
+    none) sed -i.bak "s/^$1:.*/$1: (none)/" "$CF/.agent/STATE.md" ;;
+    None) sed -i.bak "s/^$1:.*/$1: (None)/" "$CF/.agent/STATE.md" ;;
+  esac
+  rm -f "$CF/.agent/STATE.md.bak"
+}
+for spec in files_changed:missing blocker:missing examined:empty result:empty result:none next_action:None examined:none not_examined:none; do
+  key=${spec%%:*}; how=${spec#*:}
+  touch_prompt "$CF" "f7-$key-$how"; work "$CF" "f7-$key-$how"; good_block "$CF"; break_block "$key" "$how"
+  out=$(stop "$CF" "f7-$key-$how")
+  assert_eq "invalid block ($key $how): blocks" "block" "$(cp_decision "$out")"
+  assert_contains "invalid block ($key $how): the reason names the key" "$(printf '%s' "$out" | jq -r .reason)" "$key"
+  good_block "$CF"
+  out=$(stop "$CF" "f7-$key-$how")
+  assert_eq "invalid block ($key $how), then filled in: passes" "" "$out"
+done
+touch_prompt "$CF" f7-old; work "$CF" f7-old
+printf '# State\n<!-- ching:checkpoint -->\nresult: ok\nblocker: none\nnext_action: none\n<!-- /ching:checkpoint -->\n' >"$CF/.agent/STATE.md"
+out=$(stop "$CF" f7-old)
+assert_eq "the old three-key block is not a checkpoint any more" "block" "$(cp_decision "$out")"
+assert_contains "three-key block: the reason names the missing keys" "$(printf '%s' "$out" | jq -r .reason)" "files_changed"
+# invalid after the block, then fixed on the second ask: passes (the second ask is a real chance)
+touch_prompt "$CF" f7-f; work "$CF" f7-f; use_template "$CF"
+stop "$CF" f7-f >/dev/null
+printf '# State\n<!-- ching:checkpoint -->\nresult: half done\nblocker: none\n<!-- /ching:checkpoint -->\n' >"$CF/.agent/STATE.md"
+out=$(stop "$CF" f7-f)
+assert_eq "changed but invalid: asked once more" "block" "$(cp_decision "$out")"
+good_block "$CF"
+out=$(stop "$CF" f7-f)
+assert_eq "fixed on the second ask: passes" "" "$out"
+assert_eq "fixed on the second ask: two blocks, a checkpoint event, no unmet" "1 2 :f7-f:" "$(cp_blocks f7-f):$(cp_ok f7-f):$(cp_unmet f7-f)"
+# the hook JSON from a real session has stop_hook_active true on the stops after a block: same behaviour, same cap
+touch_prompt "$CF" f7-g; work "$CF" f7-g; use_template "$CF"
+stop_active() { run_hook stop-check.sh "$(hook_json Stop "$1" "$2" '{"stop_hook_active":true,"last_assistant_message":"x"}')"; }
+out1=$(stop_active "$CF" f7-g); out2=$(stop_active "$CF" f7-g); out3=$(stop_active "$CF" f7-g)
+assert_eq "stop_hook_active true: block, block, allow" "block block allow" "$(cp_decision "$out1") $(cp_decision "$out2") $(cp_decision "$out3")"
+# opt-outs: placeholders are fine for scripted runs, before and after a block
+touch_prompt "$CF" f7-h; work "$CF" f7-h; use_template "$CF"
+out=$(CHING_NO_CHECKPOINT=1 stop "$CF" f7-h)
+assert_eq "CHING_NO_CHECKPOINT=1 with a placeholder block: allowed" "" "$out"
+touch_prompt "$CF" f7-i; work "$CF" f7-i; use_template "$CF"
+out=$(CLAUDE_CODE_ENTRYPOINT=sdk-ts stop "$CF" f7-i)
+assert_eq "sdk entrypoint with a placeholder block: allowed" "" "$out"
+touch_prompt "$CF" f7-j; work "$CF" f7-j; use_template "$CF"
+stop "$CF" f7-j >/dev/null
+out=$(CHING_NO_CHECKPOINT=1 stop "$CF" f7-j)
+assert_eq "opt-out after the first block: allowed, no second block" "" "$out"
+assert_eq "opt-outs: no checkpoint_unmet, no extra blocks" ":1 " "$(cp_unmet f7-j):$(cp_blocks f7-j)"
+assert_eq "opt-outs: nothing blocked for h and i" "" "$(cp_blocks f7-h)$(cp_blocks f7-i)"
+# a turn that changed nothing is not asked, even with a placeholder block
+touch_prompt "$CF" f7-k; use_template "$CF"
+git -C "$CF" status --porcelain >/dev/null
+age_all() { touch -t 202001010000 "$CF/.git/logs/HEAD" "$CF/README.md" "$CF/work.txt" 2>/dev/null || true; }
+age_all; touch_prompt "$CF" f7-k; touch -t 202001010000 "$CF/.agent/STATE.md"
+out=$(stop "$CF" f7-k)
+assert_eq "nothing changed in the tree: no checkpoint ask" "" "$out"
+# a new prompt starts the count again
+sleep 1
+touch_prompt "$CF" f7-a; work "$CF" f7-a; use_template "$CF"
+out=$(stop "$CF" f7-a)
+assert_eq "a later prompt of the same session is asked again" "block" "$(cp_decision "$out")"
+assert_eq "a later prompt: the block count restarts at 1" "1 2 1 " "$(cp_blocks f7-a)"
+
 # ---------- no verdict (F5, F9) ----------
 # When the hook cannot do its own bookkeeping it has no verdict: it allows the stop, says why on stderr,
 # exits 3 (a non-blocking hook error, so Claude Code shows the message) and logs stop_no_verdict when it can.
