@@ -12,6 +12,11 @@
 # falls back to its default. For tests: SPEAK_CMD, HID_IDLE_CMD (a shell command that prints idle seconds),
 # IOREG_CMD (default /usr/sbin/ioreg: launchd's PATH has no /usr/sbin), VOICEMODE_CONCH (the conch file),
 # VOICEMODE_CONCH_LOCK_EXPIRY (VoiceMode's own active-call window, default 300 s).
+# Git sync check (4b): starts bin/sync-check.sh in the background, detached, with its own lock and a hard time
+# ceiling, at most every SYNC_CHECK_INTERVAL_H (6; 0 switches it off) hours. $AGENT_HOME/sync-check.stamp holds the time
+# of the last start; a snapshot younger than the interval (an on-demand run) counts as a run too. The tick never waits
+# for it; a failure of the check is a line in $AGENT_HOME/watch.log, never a non-zero exit. Env: SYNC_CHECK_MAX_SECS
+# (300) SYNC_CHECK_CMD (tests).
 # Env: AGENT_HOME WATCH_NOW (epoch, tests) WATCH_STALL_MINS (20) WATCH_ROTATE_BYTES (20971520)
 #      TOKEN_BUDGET_DAILY (unset = no token alerts; also read from $AGENT_HOME/defaults/ching.env)
 set -euo pipefail
@@ -277,6 +282,62 @@ if [ -n "${TOKEN_BUDGET_DAILY:-}" ] && [ -f "$AGENT_HOME/tokens/$DAY" ]; then
       wnotify tokens "Token use today is at ${mark}% of the budget ($total of $TOKEN_BUDGET_DAILY)."
     fi
   done
+fi
+
+# 4b. git sync check. Started in the background, never waited for: a small perl supervisor forks, setsid()s into a
+# session of its own (launchd ends the job's own process group when the tick exits; this one is not in it), runs
+# sync-check.sh with stdout and stderr appended to watch.log, and stops it (TERM, then KILL) at SYNC_CHECK_MAX_SECS.
+# The start is stamped before it is attempted, so a check that keeps failing is retried at the next interval, not
+# every 5 minutes. Any trouble becomes a line in watch.log; nothing here can fail the tick.
+SYNC_INTERVAL_SECS=$(( $(num_or "${SYNC_CHECK_INTERVAL_H-}" 6) * 3600 )) # 0 = off
+SYNC_STAMP="$AGENT_HOME/sync-check.stamp"
+sync_due() { # not started for SYNC_INTERVAL_SECS, and no snapshot younger than that either
+  local st mt
+  st=$(cat "$SYNC_STAMP" 2>/dev/null || echo 0); case "$st" in ''|*[!0-9]*) st=0 ;; esac
+  [ "$st" -le $((NOW + 60)) ] || st=0 # a stamp from the future (clock set back) must not block the check for good
+  [ $((NOW - st)) -ge "$SYNC_INTERVAL_SECS" ] || return 1
+  mt=$(file_mtime "$AGENT_HOME/sync-check.md")
+  [ "$mt" -le $((NOW + 60)) ] || mt=0
+  [ $((NOW - mt)) -ge "$SYNC_INTERVAL_SECS" ]
+}
+sync_launch() { # MAX_SECS LOG CMD ARGS... : returns at once; the check runs on in its own session
+  perl -e '
+    use POSIX ();
+    my ($max, $log, @cmd) = @ARGV;
+    my $note = sub {
+      open(my $fh, ">>", $log) or return;
+      my @t = gmtime;
+      printf $fh "%04d-%02d-%02dT%02d:%02d:%02dZ ching-watch: %s\n", $t[5] + 1900, $t[4] + 1, @t[3, 2, 1, 0], $_[0];
+      close $fh;
+    };
+    my $p = fork;
+    defined $p or exit 1;
+    exit 0 if $p;
+    POSIX::setsid();
+    open(STDIN, "<", "/dev/null"); open(STDOUT, ">>", $log); open(STDERR, ">&STDOUT");
+    my $k = fork;
+    defined $k or do { $note->("sync-check: fork failed"); exit 1 };
+    if (!$k) { exec { $cmd[0] } @cmd; $note->("sync-check: cannot start $cmd[0]: $!"); POSIX::_exit(127) }
+    $SIG{ALRM} = sub {
+      $SIG{TERM} = "IGNORE";
+      $note->("sync-check: stopped after ${max}s (time ceiling)");
+      kill "TERM", -$$; select undef, undef, undef, 2; kill "KILL", -$$; exit 142;
+    };
+    alarm $max;
+    waitpid($k, 0);
+    my $s = $?;
+    alarm 0;
+    if ($s & 127) { $note->(sprintf("sync-check: killed by signal %d", $s & 127)) }
+    elsif (($s >> 8) != 0 && ($s >> 8) != 127) { $note->(sprintf("sync-check: exited with status %d", $s >> 8)) }
+    exit 0;
+  ' "$@"
+}
+if [ "$SYNC_INTERVAL_SECS" -gt 0 ] && sync_due; then
+  { printf '%s\n' "$NOW" >"$SYNC_STAMP.tmp" && mv -f "$SYNC_STAMP.tmp" "$SYNC_STAMP"; } 2>/dev/null || true
+  SYNC_MAX=$(num_or "${SYNC_CHECK_MAX_SECS-}" 300); [ "$SYNC_MAX" -gt 0 ] || SYNC_MAX=300
+  if ! sync_launch "$SYNC_MAX" "$AGENT_HOME/watch.log" "${SYNC_CHECK_CMD:-$SELF_DIR/sync-check.sh}" --quiet </dev/null >/dev/null 2>&1; then
+    printf '%s ching-watch: sync-check could not be started\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$AGENT_HOME/watch.log" 2>/dev/null || true
+  fi
 fi
 
 # 5. rotation
