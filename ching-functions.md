@@ -62,3 +62,19 @@ Whenever Ching runs the tests, it first runs them with no AI at all. The AI is o
 - **Limits so it cannot flood you.** The banner uses the same alert budget as every other alert. The spoken sentence is outside that budget, so it has its own limits: once each time a helper starts waiting, at most one every 10 minutes, never in quiet hours, and only when you are at the Mac.
 
 Later: a small panel in the notch that you hover over to see the updates.
+
+## 6. A read-only check of what git could lose or forget
+
+**The problem:** Work piles up in places you do not look at: commits that were never pushed, a branch that fell behind, a folder full of changes nobody committed, a finished worktree left lying around, a stash from last week. Nothing tells you until it hurts.
+
+**What we add:**
+- **A check that only looks.** It never pushes, pulls, merges, deletes or changes a file in any repo. The one thing it does is `git fetch`, which only updates git's own copy of what the remote has.
+- **It covers every repo Ching knows:** the ones listed in `~/.agent-repos` and the ones a session has worked in. Test and scratch folders under `/tmp` are ignored.
+- **Per repo it lists:** commits not pushed, branches behind their remote, uncommitted changes, worktrees whose branch is already merged into main, and the stash count, each with how old it is.
+- **Where you see it:** the latest snapshot is `~/.agent/sync-check.md`; `bin/dash.sh --inbox` has a SYNC section, and the normal `bin/dash.sh` view ends with one line, such as `sync: 3 repos need attention (oldest 2d)`.
+- **When it runs:** about every 6 hours from the watcher, or any time with `bin/sync-check.sh`.
+- **One banner a day, at most,** and only when something that could be lost (an unpushed commit, uncommitted changes, a stash, a leftover worktree) is more than 24 hours old. A repo that is merely behind its remote never triggers it, because that is normal. It uses the same alert budget and quiet hours as every other alert and is never spoken.
+
+## 7. A scoreboard for the pilot
+
+`bin/metrics.sh` reads the event log (`~/.agent/events.jsonl`) and prints one row per day: how often a helper stopped to ask you something, how many alerts were delivered and how many were held back (and why), stalls, how often a helper's context ran near full, and release-gate results. Scratch and test sessions are left out and the footer says how many. Where the log cannot tell (whether a stall was real, how many blocking findings a passing review had), the report says so instead of guessing.
