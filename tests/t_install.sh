@@ -69,11 +69,19 @@ assert_eq "guard matcher covers Bash, Monitor, Read, Edit, Supabase and messagin
 assert_eq "Notification entry uses the idle_prompt matcher" "idle_prompt" "$(printf '%s' "$S" | jq -r '.hooks.Notification[] | select(.hooks[0].command | contains("notify.sh")) | .matcher')"
 assert_eq "vscode-session-manager entries untouched (5 of them)" "5" "$(printf '%s' "$S" | jq --arg v "$VS" '[.. | objects | select(.command? != null) | select(.command | startswith($v))] | length')"
 assert_eq "popup still present by default" "1" "$(printf '%s' "$S" | jq '[.. | objects | select(.command? != null) | select(.command | contains("Session finished"))] | length')"
-assert_eq "non-hook settings untouched" "$(printf '%s' "$(cat "$D/settings.json.bak.ching."*)" | jq -S -c 'del(.hooks)')" "$(printf '%s' "$S" | jq -S -c 'del(.hooks)')"
+assert_eq "non-hook, non-allowlist settings untouched" "$(printf '%s' "$(cat "$D/settings.json.bak.ching."*)" | jq -S -c 'del(.hooks, .permissions.allow)')" "$(printf '%s' "$S" | jq -S -c 'del(.hooks, .permissions.allow)')"
+
+# ---------- voice permissions (Phase 3.1): converse is allowed, nothing else is added ----------
+CONV1=mcp__voicemode__converse; CONV2=mcp__plugin_voicemode_voicemode__converse
+assert_eq "allowlist: the existing entry stays first, both converse names follow" "mcp__pencil $CONV1 $CONV2" "$(printf '%s' "$S" | jq -r '.permissions.allow | join(" ")')"
+assert_eq "allowlist: defaultMode untouched" "bypassPermissions" "$(printf '%s' "$S" | jq -r '.permissions.defaultMode')"
+assert_eq "allowlist: no deny list appears" "null" "$(printf '%s' "$S" | jq -c '.permissions.deny')"
+assert_contains "apply output: the diff names the allowlist addition" "$out" "+      \"$CONV1\""
 assert_eq "exactly one backup" "1" "$(ls "$D"/settings.json.bak.ching.* | wc -l | tr -d ' ')"
 assert_eq "ching symlink points at the kit" "$KIT" "$(readlink "$D/ching")"
 assert_eq "handoff command linked" "$KIT/commands/handoff.md" "$(readlink "$D/commands/handoff.md")"
 assert_eq "next command linked" "$KIT/commands/next.md" "$(readlink "$D/commands/next.md")"
+assert_eq "dash command linked" "$KIT/commands/dash.md" "$(readlink "$D/commands/dash.md")"
 assert_file "optional ~/.agent-repos created" "$AGENT_REPOS_FILE"
 assert_not_contains "~/.agent-repos starts with no active repo" "$(grep -v '^#' "$AGENT_REPOS_FILE")" "/"
 
@@ -164,6 +172,8 @@ S=$(cat "$SETTINGS_FILE")
 assert_eq "uninstall: no ching entries left" "0" "$(printf '%s' "$S" | jq '[.. | objects | select(.command? != null) | select(.command | contains("/ching/bin/"))] | length')"
 assert_eq "uninstall: vscode entries kept" "5" "$(printf '%s' "$S" | jq --arg v "$VS" '[.. | objects | select(.command? != null) | select(.command | startswith($v))] | length')"
 assert_eq "uninstall: empty events removed" "false" "$(printf '%s' "$S" | jq 'has("hooks") and (.hooks | has("PreCompact"))')"
+assert_eq "uninstall: the converse allowlist entries are left in place" "mcp__pencil $CONV1 $CONV2" "$(printf '%s' "$S" | jq -r '.permissions.allow | join(" ")')"
+assert_contains "uninstall: says the allowlist entries stay" "$out" "permissions.allow"
 assert_no_file "uninstall removes the watcher plist" "$HOME/Library/LaunchAgents/org.ching.watch.plist"
 assert_contains "uninstall boots the watcher out (last launchctl call)" "$(tail -1 "$WORK/launchctl.log")" "bootout gui/"
 
@@ -199,6 +209,23 @@ out=$(inst --yes); assert_eq "no settings.json yet: created" "0" "$?"
 assert_eq "created file is valid and has the hooks" "7" "$(jq '[.hooks | to_entries[] | .key] | length' "$SETTINGS_FILE")"
 # the real settings file is never the target in tests
 assert_not_contains "tests never reference the real settings path" "$(cat "$D/settings.json")" "/Users/clyde/.claude"
+
+# the allowlist merge on other shapes of settings.json
+PD="$WORK/perm-claude"; mkdir -p "$PD"
+pinst() { env SETTINGS_FILE="$PD/settings.json" CLAUDE_DIR="$PD" AGENT_REPOS_FILE="$WORK/perm-repos" LAUNCH_AGENTS_DIR="$WORK/perm-la" "$KIT/install.sh" "$@" </dev/null 2>&1; }
+printf '{}\n' >"$PD/settings.json"; pinst --yes >/dev/null
+assert_eq "allowlist: settings without a permissions key get exactly the two converse names" "$CONV1 $CONV2" "$(jq -r '.permissions.allow | join(" ")' "$PD/settings.json")"
+assert_eq "allowlist: nothing else is created under permissions" '["allow"]' "$(jq -c '.permissions | keys' "$PD/settings.json")"
+psum() { shasum -a 256 "$PD/settings.json" | cut -d' ' -f1; }
+P1=$(psum); pinst --yes >/dev/null
+assert_eq "allowlist: a second run leaves the file byte-identical" "$P1" "$(psum)"
+printf '{"permissions":{"allow":["Bash(ls)","%s"],"deny":["Bash(rm:*)"]}}\n' "$CONV1" >"$PD/settings.json"; pinst --yes >/dev/null
+assert_eq "allowlist: an entry the user already had is not duplicated, the missing one is appended" "Bash(ls) $CONV1 $CONV2" "$(jq -r '.permissions.allow | join(" ")' "$PD/settings.json")"
+assert_eq "allowlist: an existing deny list is untouched" '["Bash(rm:*)"]' "$(jq -c '.permissions.deny' "$PD/settings.json")"
+printf '{"permissions":{"allow":"mcp__pencil"}}\n' >"$PD/settings.json"; pinst --yes >/dev/null
+assert_eq "allowlist: an allow that is not a list is left alone" '"mcp__pencil"' "$(jq -c '.permissions.allow' "$PD/settings.json")"
+printf '{"permissions":{"allow":["%s","%s"]}}\n' "$CONV2" "$CONV1" >"$PD/settings.json"; pinst --yes >/dev/null
+assert_eq "allowlist: both names already present in another order stay in that order" "$CONV2 $CONV1" "$(jq -r '.permissions.allow | join(" ")' "$PD/settings.json")"
 
 # plist values are XML-escaped: paths with & < > still give a valid plist that carries the real paths
 XD="$WORK/x&y<z>"; XA="$WORK/a&b<c>"; XLA="$WORK/la-escape"; mkdir -p "$XD"; printf '{}\n' >"$XD/settings.json"

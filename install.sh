@@ -7,8 +7,10 @@
 #
 # What it changes:
 #   $SETTINGS_FILE (default ~/.claude/settings.json): merges hook entries with jq (backup first, unified
-#       diff shown before applying; nothing is written when the result is identical).
-#   $CLAUDE_DIR/ching  -> symlink to this directory;  $CLAUDE_DIR/commands/{handoff,next}.md -> symlinks.
+#       diff shown before applying; nothing is written when the result is identical), and appends the two
+#       VoiceMode converse tool names to permissions.allow when they are missing (--uninstall leaves them).
+#   $CLAUDE_DIR/ching  -> symlink to this directory;  $CLAUDE_DIR/commands/<name>.md -> symlink for every
+#       file in commands/ (handoff, next, dash).
 #   ~/.agent-repos: created empty with a comment if absent (optional extra list for dash.sh).
 #   $LAUNCH_AGENTS_DIR/org.ching.watch.plist (default ~/Library/LaunchAgents): runs bin/ching-watch.sh every 300 s.
 # The preview shows the settings diff and the plist diff. Nothing is applied (settings, symlinks, plist,
@@ -38,7 +40,7 @@ while [ $# -gt 0 ]; do
     --replace-popup) POPUP=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --install-prepush) PREPUSH=${2:?--install-prepush needs a repo path}; shift 2 ;;
-    -h|--help) sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "install: unknown argument $1" >&2; exit 64 ;;
   esac
 done
@@ -73,6 +75,10 @@ fi
 if [ -f "$SETTINGS_FILE" ]; then CURRENT=$(cat "$SETTINGS_FILE"); else CURRENT='{}'; fi
 printf '%s' "$CURRENT" | jq -e . >/dev/null 2>&1 || { echo "install: $SETTINGS_FILE is not valid JSON" >&2; exit 1; }
 
+# Voice (Phase 3.1): the VoiceMode converse tool, under both names it can have (the plugin's MCP server
+# "voicemode" is mcp__plugin_voicemode_voicemode__converse, a hand-added server is mcp__voicemode__converse).
+# Appended to permissions.allow when missing. Nothing else under permissions is created or changed.
+VOICE_ALLOW='["mcp__voicemode__converse","mcp__plugin_voicemode_voicemode__converse"]'
 GUARD_MATCHER='Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit|Monitor|mcp__.*[Ss]upabase.*|mcp__.*([Gg]mail|[Ss]lack|[Dd]iscord|[Tt]elegram).*'
 
 # event, matcher, command, timeout (seconds); tab separated because matchers contain '|'
@@ -99,7 +105,7 @@ if [ "$UNINSTALL" -eq 1 ]; then
       | if (.hooks | length) == 0 then del(.hooks) else . end
     else . end')
 else
-  NEW=$(printf '%s' "$CURRENT" | jq --indent 2 --argjson add "$HOOKS_JSON" --argjson popup "$POPUP" '
+  NEW=$(printf '%s' "$CURRENT" | jq --indent 2 --argjson add "$HOOKS_JSON" --argjson popup "$POPUP" --argjson voice "$VOICE_ALLOW" '
     def has_cmd($g; $c): ([$g[]? | .hooks[]? | .command] | index($c)) != null;
     .hooks = (.hooks // {})
     | reduce $add[] as $h (.;
@@ -107,6 +113,9 @@ else
           | if has_cmd($g; $h.command)
             then $g | map(if ([.hooks[]?.command] | index($h.command)) != null then .matcher = $h.matcher else . end)
             else $g + [{matcher: $h.matcher, hooks: [{type: "command", command: $h.command, timeout: $h.timeout}]}] end))
+    | if ((.permissions // {}) | type) == "object" and ((.permissions.allow // []) | type) == "array" then
+        .permissions.allow = ((.permissions.allow // []) as $a | $a + ($voice - $a))
+      else . end
     | if $popup == 1 and .hooks.Stop then
         .hooks.Stop |= (map(.hooks |= map(select(((.command // "") | test("osascript.*Session finished")) | not)))
                         | map(select((.hooks | length) > 0)))
@@ -141,8 +150,10 @@ plan_link() { # target link
 }
 if [ "$UNINSTALL" -eq 0 ]; then
   plan_link "$CHING_ROOT" "$LINK"
-  plan_link "$CHING_ROOT/commands/handoff.md" "$CLAUDE_DIR/commands/handoff.md"
-  plan_link "$CHING_ROOT/commands/next.md" "$CLAUDE_DIR/commands/next.md"
+  for c in "$CHING_ROOT"/commands/*.md; do
+    [ -f "$c" ] || continue
+    plan_link "$c" "$CLAUDE_DIR/commands/$(basename "$c")"
+  done
 fi
 NEED_REPOS=0
 if [ "$UNINSTALL" -eq 0 ] && [ ! -e "$AGENT_REPOS_FILE" ]; then NEED_REPOS=1; fi
@@ -258,5 +269,5 @@ if [ "$NEED_PLIST" -eq 1 ]; then
     act "loaded $PLIST (ching-watch every 5 minutes)"
   fi
 fi
-if [ "$UNINSTALL" -eq 1 ]; then say "note: --uninstall removes hook entries and the watcher; symlinks and a removed popup are left as they are."; fi
+if [ "$UNINSTALL" -eq 1 ]; then say "note: --uninstall removes hook entries and the watcher; symlinks, a removed popup and the converse entries in permissions.allow (they may predate the install) are left as they are."; fi
 exit 0
