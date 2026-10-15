@@ -137,3 +137,21 @@ is_sandbox_path() {
   esac
   return 1
 }
+
+# config_get KEY [DEFAULT]: value of `KEY=value` in the machine-level config $AGENT_HOME/config (default
+# ~/.agent/config). One setting per line, `#` starts a comment, blanks around the key and the value are
+# ignored, the LAST assignment wins, one pair of quotes around the value is dropped. A missing or unreadable
+# file, or a missing key, gives DEFAULT (empty when none). Never fails and never prints errors.
+config_get() {
+  local v
+  v=$(sed -n 's/^[[:space:]]*'"$1"'[[:space:]]*=[[:space:]]*//p' "$AGENT_HOME/config" 2>/dev/null | tail -n 1 \
+      | sed -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\\(.*\\)'\$/\\1/") || v=""
+  if [ -n "$v" ]; then printf '%s' "$v"; else printf '%s' "${2:-}"; fi
+}
+
+# push_gate_on: true only when the machine config says `push_gate=on` (case-insensitive). The release gate on a
+# plain push or merge to main is OFF by default (decision D24: the owner wants automatic commits, pushes and
+# merges); every repo-level setting such as GOAL.md release_mode is ignored while it is off.
+push_gate_on() {
+  case "$(config_get push_gate off | tr '[:upper:]' '[:lower:]')" in on) return 0 ;; *) return 1 ;; esac
+}
