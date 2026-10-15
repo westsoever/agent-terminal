@@ -228,6 +228,8 @@ assert_contains "missing log: says no events" "$OUT" "no events"
 JSON=$(AGENT_HOME="$EMPTY" "$M" --json 2>&1); rc=$?
 assert_eq "missing log --json: exit 0" "0" "$rc"
 assert_eq "missing log --json: valid JSON, no days" "0" "$(printf '%s' "$JSON" | jq -r '.days | length')"
+assert_eq "missing log --json: the total is zeros, not null" "0" "$(printf '%s' "$JSON" | jq -r '.total.asked')"
+assert_eq "missing log: nothing but the one line" "1" "$(AGENT_HOME="$EMPTY" "$M" | wc -l | tr -d ' ')"
 : >"$EMPTY/events.jsonl"
 OUT=$(AGENT_HOME="$EMPTY" "$M" 2>&1); rc=$?
 assert_eq "empty log: exit 0" "0" "$rc"
@@ -314,6 +316,24 @@ assert_eq "sandbox-only log with CHING_INCLUDE_SANDBOX=1 shows it" "1" "$(tcell 
 assert_eq "metrics.sh does not define its own is_sandbox_path" "0" "$(grep -c '^is_sandbox_path()' "$M")"
 assert_contains "metrics.sh sources lib.sh" "$(cat "$M")" 'lib.sh'
 
+# a cwd with a quote, a tab and a newline (lib.sh ev keeps it as one valid line): counted under its own name,
+# and a sandbox one with the same shape is still excluded
+ODD="$WORK/ah odd"; mkdir -p "$ODD"
+printf '%s\n' '{"ts":"2026-10-14T10:00:00Z","sid":"o1","cwd":"/work/we\"ird\tfolder\nx","kind":"stop_ok","data":{"outcome":"input"}}' \
+  '{"ts":"2026-10-14T10:00:00Z","sid":"o2","cwd":"/tmp/we\"ird\nfolder","kind":"stop_ok","data":{"outcome":"input"}}' >"$ODD/events.jsonl"
+OUT=$(AGENT_HOME="$ODD" "$M" 2>&1); rc=$?
+assert_eq "odd cwd and a space in AGENT_HOME: exit 0" "0" "$rc"
+assert_eq "odd cwd: the real one is counted, the sandbox one is not" "1" "$(tcell TOTAL asked)"
+assert_contains "odd cwd: the sandbox one is reported as excluded" "$OUT" "excluded: 1 events"
+# an unreadable log is an error, not "no events"
+if [ "$(id -u)" != 0 ]; then
+  UR="$WORK/ah-unreadable"; mkdir -p "$UR"; : >"$UR/events.jsonl"; chmod 000 "$UR/events.jsonl"
+  OUT=$(AGENT_HOME="$UR" "$M" 2>&1); rc=$?
+  assert_eq "unreadable log: exit 1" "1" "$rc"
+  assert_contains "unreadable log: says so" "$OUT" "cannot read"
+  chmod 600 "$UR/events.jsonl"
+fi
+
 # ---------- local time vs UTC around midnight and across the DST change ----------
 TZD="$WORK/ah-tz"; mkdir -p "$TZD"
 {
@@ -351,10 +371,11 @@ OUT=$(AGENT_HOME="$RT" "$M" 2>&1)
 assert_eq "rotated: events from the live and the rotated file are both counted" "2" "$(tcell TOTAL asked)"
 assert_eq "rotated: the older day comes from the rotated file" "1" "$(tcell 2026-10-14 asked)"
 assert_contains "rotated: nothing malformed (old and unrelated files were not read)" "$OUT" "skipped: 0 malformed lines"
-assert_contains "rotated: the header names the extra file" "$OUT" "1 rotated"
+assert_contains "rotated: the header names the extra file" "$OUT" "events.jsonl + 1 rotated"
 rm -f "$RT/events.jsonl"
 OUT=$(AGENT_HOME="$RT" "$M" 2>&1)
 assert_eq "rotated: works with only a rotated file left" "1" "$(tcell TOTAL asked)"
+assert_contains "rotated: the header says the live log is missing" "$OUT" "events.jsonl (missing) + 1 rotated"
 OUT=$(AGENT_HOME="$RT" "$M" --days 400 2>&1)
 assert_contains "rotated: an old rotation is read once the window reaches it" "$OUT" "skipped: 1 malformed lines"
 
