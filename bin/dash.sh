@@ -12,6 +12,9 @@
 #              $AGENT_HOME/inbox.seen, so the next --inbox does not list those again. One entry per session.
 #   --next     top 5 by urgency x importance x recency (blocked and input sessions stay above working ones),
 #              each with its checkpoint next_action
+# Git sync (bin/sync-check.sh writes $AGENT_HOME/sync-check.md): the default view ends with one `sync:` line when the
+#   snapshot lists repos that need attention, or is older than 24 h; --inbox ends with a SYNC lane, oldest first, that
+#   shows the snapshot age ("stale snapshot" over 24 h, "never run" without one). No snapshot: the default view is unchanged.
 # Notes come from the STATE.md checkpoint `blocker:` (unless none), else the first "## Blocked" bullet.
 # Env: AGENT_HOME CLAUDE_DIR AGENT_REPOS_FILE DASH_NOW (epoch, tests) DASH_ACTIVE_MINS (30)
 set -euo pipefail
@@ -27,7 +30,7 @@ while [ $# -gt 0 ]; do
     --next) MODE=next; shift ;;
     --hours) HOURS=${2:?}; shift 2 ;;
     --all) HOURS=720; shift ;;
-    -h|--help) sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,/^# Env:/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "dash: unknown argument $1" >&2; exit 64 ;;
   esac
 done
@@ -233,9 +236,70 @@ ready_for_head() { # repo root -> 0 when .agent/release-ready names the repo's c
   [ "$got" = "$want" ]
 }
 
+# ---- git sync snapshot (bin/sync-check.sh): read in one awk pass, and only by the default view and --inbox ----
+SYNC_SNAP="$AGENT_HOME/sync-check.md"
+sync_age_fmt() { # hours -> <1h, 5h (up to 47 h), 3d
+  local h=$1
+  if [ "$h" -lt 1 ]; then echo "<1h"; elif [ "$h" -lt 48 ]; then echo "${h}h"; else echo "$((h / 24))d"; fi
+}
+# sync_load: SYNC_STATE (none | fresh | stale: older than 24 h), SYNC_AGE_H (snapshot age), SYNC_N (repos needing
+# attention), SYNC_OLD_H (their oldest finding when the snapshot was made); rows "name US needs US age_h" go to
+# $TMP/sync.rows in the snapshot's own order, which is oldest first.
+sync_load() {
+  local kind a b c gen="" gen_epoch age
+  SYNC_STATE=none; SYNC_N=0; SYNC_OLD_H=0; SYNC_AGE_H=0; : >"$TMP/sync.rows"
+  [ -f "$SYNC_SNAP" ] || return 0
+  awk '
+    /^generated:/ && !g { g = 1; v = $0; sub(/^generated:[ ]*/, "", v); print "G\037" v; next }
+    /^## / { name = $0; sub(/^## /, "", name); sub(/ -- oldest .*$/, "", name); needs = ""; next }
+    /^needs:/ && name != "" { needs = $0; sub(/^needs:[ ]*/, "", needs); next }
+    /^age_h:/ && name != "" { h = $0; sub(/^age_h:[ ]*/, "", h); print "R\037" name "\037" needs "\037" h; name = "" }
+  ' "$SYNC_SNAP" >"$TMP/sync.all" 2>/dev/null || true
+  while IFS=$'\037' read -r kind a b c; do
+    case "$kind" in
+      G) gen=$a ;;
+      R) case "$c" in ''|*[!0-9]*) c=0 ;; esac
+         SYNC_N=$((SYNC_N + 1)); [ "$c" -le "$SYNC_OLD_H" ] || SYNC_OLD_H=$c
+         printf '%s\037%s\037%s\n' "$a" "$b" "$c" >>"$TMP/sync.rows" ;;
+    esac
+  done <"$TMP/sync.all"
+  gen_epoch=""
+  if [ -n "$gen" ]; then gen_epoch=$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$gen" +%s 2>/dev/null || true); fi
+  case "$gen_epoch" in ''|*[!0-9]*) gen_epoch=$(file_mtime "$SYNC_SNAP") ;; esac
+  age=$((NOW - gen_epoch)); [ "$age" -ge 0 ] || age=0
+  SYNC_AGE_H=$((age / 3600))
+  if [ "$age" -gt 86400 ]; then SYNC_STATE=stale; else SYNC_STATE=fresh; fi
+}
+sync_what() { # the findings in a few words
+  if [ "$SYNC_N" -eq 0 ]; then printf 'clean when last run'
+  elif [ "$SYNC_N" -eq 1 ]; then printf '1 repo needs attention (oldest %s)' "$(sync_age_fmt "$SYNC_OLD_H")"
+  else printf '%s repos need attention (oldest %s)' "$SYNC_N" "$(sync_age_fmt "$SYNC_OLD_H")"; fi
+}
+sync_line() { # the default view's last line: nothing without a snapshot, and nothing for a fresh clean one
+  sync_load
+  case "$SYNC_STATE" in
+    none) return 0 ;;
+    stale) printf 'sync: stale snapshot (%s old): %s - bin/dash.sh --inbox\n' "$(sync_age_fmt "$SYNC_AGE_H")" "$(sync_what)" ;;
+    *) [ "$SYNC_N" -eq 0 ] || printf 'sync: %s - bin/dash.sh --inbox\n' "$(sync_what)" ;;
+  esac
+}
+sync_lane() { # --inbox's last lane
+  local name needs h
+  sync_load
+  case "$SYNC_STATE" in
+    none) echo "SYNC"; echo "  never run (bin/sync-check.sh)"; return 0 ;;
+    stale) echo "SYNC (oldest first; stale snapshot, $(sync_age_fmt "$SYNC_AGE_H") old: run bin/sync-check.sh)" ;;
+    *) echo "SYNC (oldest first; snapshot $(sync_age_fmt "$SYNC_AGE_H") old)" ;;
+  esac
+  if [ "$SYNC_N" -eq 0 ]; then echo "  (nothing)"; return 0; fi
+  while IFS=$'\037' read -r name needs h; do
+    printf '  %s: %s (oldest %s)\n' "$name" "$needs" "$(sync_age_fmt "$h")"
+  done <"$TMP/sync.rows"
+}
+
 case "$MODE" in
   table)
-    if [ "$total" -eq 0 ]; then echo "no Claude sessions seen in the last ${HOURS}h"; exit 0; fi
+    if [ "$total" -eq 0 ]; then echo "no Claude sessions seen in the last ${HOURS}h"; sync_line; exit 0; fi
     while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do
       label=$(label_of "$name" "$branch")
       [ "$src" = worktree ] || label="$label ${sid:0:7}"
@@ -244,6 +308,7 @@ case "$MODE" in
     done <"$TMP/sorted"
     echo "-- $total session(s), $active active"
     if [ "$active" -gt 5 ]; then echo "WARNING: $active active sessions; the plan caps this at about 5. Park some behind their STATE.md."; fi
+    sync_line
     exit 0 ;;
 
   inbox)
@@ -280,6 +345,7 @@ case "$MODE" in
     lane "NEEDS YOU" "$TMP/needs"
     lane "READY" "$TMP/ready"
     lane "FINISHED (since last look)" "$TMP/fin"
+    sync_lane
     mkdir -p "$AGENT_HOME"
     printf '%s\n' "$NOW" >"$SEEN_F"
     exit 0 ;;
