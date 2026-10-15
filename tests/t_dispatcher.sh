@@ -108,7 +108,6 @@ deny_b "an empty command" ''
 deny_t "Bash with no command key at all" Bash '{}'
 
 # relay-log.sh: a quoted text, nothing else
-RL_TXT="Relay: tell miso-app to run the tests again"
 allow_b "relay-log.sh with a single-quoted text" "~/.claude/ching/dispatcher/relay-log.sh $PROJ/.agent yes 'tell miso-app to run the tests again'"
 allow_b "relay-log.sh unconfirmed" "~/.claude/ching/dispatcher/relay-log.sh $AGENT_HOME/sessions/abc123 no 'push miso-workspace'"
 allow_b "relay-log.sh with an apostrophe written as '\\''" "~/.claude/ching/dispatcher/relay-log.sh $PROJ/.agent yes 'don'\\''t push'"
@@ -242,7 +241,7 @@ assert_eq "relay-log: ...the secret is untouched" "hmac-secret" "$(cat "$AGENT_H
 assert_fails "relay-log: no arguments is a usage error" "$RELAY"
 after=$(cd "$WORK" && find . -type f -newer "$WORK/outside.txt" | sort | tr '\n' ' ')
 assert_eq "relay-log: refused calls left no new file behind" "$before" "$after"
-assert_eq "relay-log: no temp file is left in the state dir" "0" "$(ls -a "$WORK/r1/.agent" | grep -c -e '\.tmp' -e 'STATE.md\.' || true)"
+assert_eq "relay-log: no temp file is left in the state dir" "STATE.md" "$(find "$WORK/r1/.agent" -type f -exec basename {} \; | tr '\n' ' ' | sed 's/ $//')"
 assert_contains "relay-log: each entry is an event too" "$(cat "$AGENT_HOME/events.jsonl")" '"kind":"relay"'
 
 # ---------------- settings template and the install path ----------------
