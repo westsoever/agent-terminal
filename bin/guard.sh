@@ -14,7 +14,8 @@
 # the pushed commit | 4 vercel deploy, gh workflow run | 5 reading .env*, printing secrets | 6 Supabase
 # apply_migration / non-read-only execute_sql / Management API / CLI db push | 7 editing a committed
 # migration, db-migrate --record-only, --apply without a migrate token | 8 publishing (npm/bun/pnpm/yarn
-# publish, gh release, gh repo delete/visibility/public, pushing a v* tag or all tags, tags/releases through
+# publish, also as pn, yarnpkg, corepack pnpm|yarn|npm, pnpm -r/m, npm's abbreviations, yarn tag, npm stage
+# approve; gh release, gh repo delete/visibility/public, pushing a v* tag or all tags, tags/releases through
 # gh api) | 9 closing PRs/issues | 10 sending email/chat
 # (drafts only) | 11 gate settings in GOAL.md (review, release_mode, test_command). Extras: --no-verify,
 # hook/settings/token tampering, gh pr merge, piping into a shell. A git alias does not get around any of them:
@@ -136,7 +137,7 @@ declare -a TOKS=()
 NT=0
 SIM_CWD=$CWD_PHYS
 SIM_UNKNOWN=0
-WRAPPERS=" sudo env command exec time nohup nice ionice xargs timeout watch caffeinate npx bunx bun pnpm yarn npm dlx x run exec bash sh zsh eval then do else if while until ! { parallel doppler dotenv direnv volta mise op "
+WRAPPERS=" sudo env command exec time nohup nice ionice xargs timeout watch caffeinate npx bunx bun pnpm pn pnpx pnx yarn yarnpkg corepack npm dlx x run exec bash sh zsh eval then do else if while until ! { parallel doppler dotenv direnv volta mise op "
 CP_LIMIT=0   # index of the command word of the current segment (see compute_cmd_limit)
 BASE=""
 
@@ -673,31 +674,54 @@ check_gh() { # $1 = index of gh
   esac
 }
 
-check_publish() { # $1 = index of npm/pnpm/bun/yarn
+check_publish() { # $1 = index of npm/pnpm/pn/bun/yarn/yarnpkg (also npm@11 and the like: npx npm@latest publish)
   # The word right after the package manager is the subcommand. A read-only or test subcommand there makes a
   # later `publish` an argument (bun test publish, npm view publish); a dry run publishes nothing. Anything else
   # (an option first, whose value could be taken for the subcommand: npm --prefix test publish) keeps the old
   # rule: any `publish` word in the command is denied.
-  local sub scr=""
-  sub=${TOKS[$(( $1 + 1 ))]:-}
+  local sub scr="" mgr si=$(( $1 + 1 ))
   base_of "${TOKS[$1]}"
-  if [ "$BASE" = npm ]; then
-    # npm runs any unique prefix of a command (npm 11: pu..publis is publish, unp.. unpublish, dep.. deprecate);
-    # no other npm command starts with pu, unp or dep. pnpm/yarn are not known to; bun runs a script named pub.
-    case "$sub" in
-      pu|pub|publ|publi|publis) sub=publish ;;
-      unp|unpu|unpub|unpubl|unpubli|unpublis|dep|depr|depre|deprec|depreca|deprecat|dist-tags) scr=$sub ;;
-    esac
+  mgr=${BASE%%@*}
+  case "$mgr" in pn) mgr=pnpm ;; yarnpkg) mgr=yarn ;; esac
+  if [ "$mgr" = pnpm ]; then   # pnpm -r / recursive / multi / m run the command after them in every project
+    while :; do
+      case "${TOKS[$si]:-}" in -r|--recursive|recursive|multi|m) si=$((si + 1)) ;; *) break ;; esac
+    done
   fi
+  sub=${TOKS[$si]:-}
+  case "$mgr" in
+    npm)
+      # npm runs any unique prefix of a command (npm 11: pu..publis is publish, unp.. unpublish, dep.. deprecate,
+      # stag is stage); no other npm command starts with pu, unp, dep or stag. bun runs a script named pub.
+      case "$sub" in
+        pu|pub|publ|publi|publis) sub=publish ;;
+        unp|unpu|unpub|unpubl|unpubli|unpublis|dep|depr|depre|deprec|depreca|deprecat|dist-tags) scr=$sub ;;
+        stag) sub=stage ;;
+      esac ;;
+    pnpm|yarn)
+      # Neither prefix-matches its commands (pnpm 10 and yarn 1 and 4 read: an unknown word is a script, so
+      # `pnpm pub` runs the script pub). Prefixes of publish are denied anyway: a miss is a publish, and a script
+      # named pu or pub is rare.
+      case "$sub" in
+        pu|pub|publ|publi|publis) sub=publish ;;
+        unp|unpu|unpub|unpubl|unpubli|unpublis) scr=$sub ;;
+      esac ;;
+  esac
   case "$sub" in
-    npm|pnpm|bun|yarn) return 0 ;;   # yarn npm ...: that word is in command position and is checked itself
+    npm|pnpm|pn|bun|yarn|yarnpkg) return 0 ;;   # yarn npm ...: that word is in command position and is checked itself
     test|t|tst|view|v|info|show|help|help-search|search|s|find|ls|list|outdated|why|explain|audit|pack) return 0 ;;
     publish)   # a dry run, unless anything could switch it back off (--dry-run false, --no-dry-run, =false)
       if seg_matches --dry-run && ! seg_matches '--dry-run=*' && ! seg_matches '--no-dry-run*' && ! seg_matches false && ! seg_matches 0; then return 0; fi
       scr=publish ;;
     run|run-script)   # the script name right after it decides: a script named like a publish is one
-      scr=${TOKS[$(( $1 + 2 ))]:-}
+      scr=${TOKS[$(( si + 1 ))]:-}
       case "$scr" in -*|'') scr="" ;; *publish*|*dist-tag*|*deprecate*) ;; *) return 0 ;; esac ;;
+    stage)   # npm stage approve publishes what npm stage publish staged (yarn 4: yarn npm stage approve)
+      if seg_matches approve; then scr=stage; fi ;;
+    tag)   # yarn 1: yarn tag add|remove, yarn 4: yarn npm tag add|remove: the dist-tags of a published package
+      if [ "$mgr" = yarn ] || [ "$mgr" = npm ]; then
+        if seg_matches add || seg_matches remove || seg_matches rm; then scr=tag; fi
+      fi ;;
   esac
   if seg_matches publish || seg_matches unpublish || seg_matches deprecate || seg_matches dist-tag || [ -n "$scr" ]; then
     emit_deny "rule 8: publishing a package is the user's call. Run '${TOKS[$1]##*/} pack' to check the tarball, then notify that it is ready."
@@ -790,7 +814,7 @@ check_misc() { # one segment, tokens in TOKS
         find) [ "$k" -ne 0 ] || check_find_delete ;;
         git) check_git "$k" ;;
         gh) check_gh "$k" ;;
-        npm|pnpm|bun|yarn) check_publish "$k" ;;
+        npm|pnpm|pn|bun|yarn|yarnpkg|npm@*|pnpm@*|pn@*|bun@*|yarn@*|yarnpkg@*) check_publish "$k" ;;
         vercel|vercel@*) check_vercel "$k" ;;
         supabase) check_supabase_cli "$k" ;;
         eval) case "$SEG_RAW" in *'$'*|*'`'*) emit_deny "eval with a variable or substitution hides what will run." ;; esac ;;
