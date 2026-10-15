@@ -7,8 +7,10 @@
 # cannot touch the real ~/.claude (hook symlink, settings), ~/.agent-repos, ~/Library/LaunchAgents or launchd.
 # The generated hooks run through $S/claude/ching -> this checkout, so the smoke test exercises this
 # checkout's hooks, not the installed ones. HOME is left alone on purpose: `claude -p` needs it for auth.
+# Section 4 speaks one sentence (day time only). Section 5 is silent: tests/live-watch.sh, read-only, on the real launchd job.
 set -euo pipefail
 KIT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+REAL_AGENT_HOME=${AGENT_HOME:-$HOME/.agent}   # section 5 looks at the real machine, read-only
 S=$(mktemp -d /tmp/ching-live.XXXXXX)
 export AGENT_HOME="$S/agent-home" NOTIFY_DRY_RUN=1 NOTIFY_LOG="$S/notify.log"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@e GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@e
@@ -43,4 +45,6 @@ if "$KIT/bin/speak.sh" "Ching check-in test."; then echo "speak.sh: ok"; else ec
 # with set -eo pipefail that must not end the script before the idle value and the sandbox line are printed.
 idle=$(/usr/sbin/ioreg -c IOHIDSystem | awk '/"HIDIdleTime"/ { print int($NF / 1000000000); exit }' || true)
 echo "keyboard/mouse idle seconds: ${idle:-UNREADABLE}"
+echo "== 5. launchd watcher on the real machine (silent, read-only; --kick would also start one extra run)"
+AGENT_HOME="$REAL_AGENT_HOME" "$KIT/tests/live-watch.sh" || echo "live-watch: problems above (this does not fail the smoke run)"
 echo "sandbox: $S"
