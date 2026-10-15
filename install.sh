@@ -4,6 +4,7 @@
 #   install.sh [--dry-run] [--yes] [--replace-popup]
 #   install.sh --uninstall [--dry-run] [--yes]
 #   install.sh --install-prepush <repo> [--dry-run]
+#   install.sh --install-dispatcher [--dry-run] [--yes]
 #
 # What it changes:
 #   $SETTINGS_FILE (default ~/.claude/settings.json): merges hook entries with jq (backup first, unified
@@ -13,6 +14,10 @@
 #       file in commands/ (handoff, next, dash).
 #   ~/.agent-repos: created empty with a comment if absent (optional extra list for dash.sh).
 #   $LAUNCH_AGENTS_DIR/org.ching.watch.plist (default ~/Library/LaunchAgents): runs bin/ching-watch.sh every 300 s.
+# --install-dispatcher only prepares the voice dispatcher's own folder, $AGENT_HOME/dispatcher (default ~/.agent/dispatcher):
+#   .claude/settings.json (its permissions and the tool-gate hook), mcp.json (VoiceMode, converse only) and AGENTS.md /
+#   CLAUDE.md links to dispatcher/AGENTS.md. It never touches the settings file above. Start it with
+#   $CLAUDE_DIR/ching/dispatcher/launch.sh. To remove it: rm -r the folder (it holds two generated files and two links).
 # The preview shows the settings diff and the plist diff. Nothing is applied (settings, symlinks, plist,
 # launchctl) without --yes or a "y" at a terminal; with no terminal and no --yes it prints what it would
 # change and exits 1. --dry-run prints the same preview and exits 0.
@@ -32,7 +37,7 @@ if [ -z "${AGENT_REPOS_FILE:-}" ]; then
 fi
 LINK="$CLAUDE_DIR/ching"
 
-DRY=0; YES=0; POPUP=0; UNINSTALL=0; PREPUSH=""
+DRY=0; YES=0; POPUP=0; UNINSTALL=0; PREPUSH=""; DISPATCHER=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1; shift ;;
@@ -40,6 +45,7 @@ while [ $# -gt 0 ]; do
     --replace-popup) POPUP=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --install-prepush) PREPUSH=${2:?--install-prepush needs a repo path}; shift 2 ;;
+    --install-dispatcher) DISPATCHER=1; shift ;;
     -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "install: unknown argument $1" >&2; exit 64 ;;
   esac
@@ -68,6 +74,75 @@ if [ -n "$PREPUSH" ]; then
   if [ -f "$target" ] && [ "$(cat "$target")" = "$rendered" ]; then say "pre-push hook already installed: $target"; exit 0; fi
   act "write $target"
   if [ "$DRY" -eq 0 ]; then mkdir -p "$hooks_dir"; printf '%s\n' "$rendered" >"$target"; chmod +x "$target"; fi
+  exit 0
+fi
+
+link_plan=""
+plan_link() { # target link
+  local target=$1 link=$2
+  if [ -L "$link" ] && [ "$(readlink "$link")" = "$target" ]; then return 0; fi
+  if [ -e "$link" ] || [ -L "$link" ]; then
+    say "warning: $link exists and is not our symlink; leaving it alone"; return 0
+  fi
+  link_plan="$link_plan$target|$link"$'\n'
+}
+
+# ---------------- the voice dispatcher's own folder ----------------
+if [ "$DISPATCHER" -eq 1 ]; then
+  AH=${AGENT_HOME:-$HOME/.agent}
+  DDIR=${DISPATCHER_DIR:-$AH/dispatcher}
+  VM=$(command -v voicemode 2>/dev/null || echo voicemode)
+  render() { # template -> the template with its @placeholders@ filled in (jq: any character in a path is safe)
+    jq --indent 2 --arg link "$LINK" --arg vm "$VM" \
+      'walk(if type == "string" then gsub("@CHING@"; $link) | gsub("@VOICEMODE@"; $vm) else . end)' "$1"
+  }
+  tmpd
+  gen_files="$DDIR/.claude/settings.json|$CHING_ROOT/dispatcher/settings.json
+$DDIR/mcp.json|$CHING_ROOT/dispatcher/mcp.json"
+  write_plan=""
+  while IFS='|' read -r dest tmpl; do
+    [ -n "$dest" ] || continue
+    render "$tmpl" >"$TMPD/render.new"
+    if [ -f "$dest" ] && [ "$(cat "$dest")" = "$(cat "$TMPD/render.new")" ]; then continue; fi
+    say "== dispatcher: $dest"
+    if [ -f "$dest" ]; then
+      diff -u --label "$dest (current)" --label "$dest (after install)" "$dest" "$TMPD/render.new" || true
+    else
+      diff -u --label "$dest (absent)" --label "$dest (after install)" /dev/null "$TMPD/render.new" || true
+    fi
+    cp "$TMPD/render.new" "$TMPD/w.$(printf '%s' "$dest" | shasum | cut -c1-12)"
+    write_plan="$write_plan$dest|$TMPD/w.$(printf '%s' "$dest" | shasum | cut -c1-12)"$'\n'
+  done <<<"$gen_files"
+  if [ "$(readlink "$LINK" 2>/dev/null)" != "$CHING_ROOT" ]; then
+    say "warning: $LINK is not the kit's symlink yet. The dispatcher's paths go through it: run install.sh first."
+  fi
+  plan_link "$LINK/dispatcher/AGENTS.md" "$DDIR/AGENTS.md"
+  plan_link "AGENTS.md" "$DDIR/CLAUDE.md"
+  if [ -z "$write_plan" ] && [ -z "$link_plan" ]; then say "nothing to do"; exit 0; fi
+  d_plan() {
+    while IFS='|' read -r dest _; do [ -z "$dest" ] || would "write $dest"; done <<<"$write_plan"
+    while IFS='|' read -r t l; do [ -z "$l" ] || would "symlink $l -> $t"; done <<<"$link_plan"
+  }
+  if [ "$DRY" -eq 1 ]; then d_plan; exit 0; fi
+  if [ "$YES" -eq 0 ]; then
+    d_plan
+    if [ -t 0 ]; then
+      printf 'Apply these changes? [y/N] '; read -r ans
+      case "$ans" in y|Y|yes) ;; *) say "aborted"; exit 1 ;; esac
+    else
+      echo "install: not a terminal; re-run with --yes to apply the changes shown above" >&2; exit 1
+    fi
+  fi
+  while IFS='|' read -r dest src; do
+    [ -n "$dest" ] || continue
+    mkdir -p "$(dirname "$dest")"
+    cp "$src" "$dest.tmp" && mv "$dest.tmp" "$dest"; act "wrote $dest"
+  done <<<"$write_plan"
+  while IFS='|' read -r t l; do
+    [ -n "$l" ] || continue
+    mkdir -p "$(dirname "$l")"; ln -s "$t" "$l"; act "symlink $l -> $t"
+  done <<<"$link_plan"
+  say "dispatcher ready. Start it with: $LINK/dispatcher/launch.sh"
   exit 0
 fi
 
@@ -139,15 +214,6 @@ else
 fi
 
 # ---------------- symlinks and files ----------------
-link_plan=""
-plan_link() { # target link
-  local target=$1 link=$2
-  if [ -L "$link" ] && [ "$(readlink "$link")" = "$target" ]; then return 0; fi
-  if [ -e "$link" ] || [ -L "$link" ]; then
-    say "warning: $link exists and is not our symlink; leaving it alone"; return 0
-  fi
-  link_plan="$link_plan$target|$link"$'\n'
-}
 if [ "$UNINSTALL" -eq 0 ]; then
   plan_link "$CHING_ROOT" "$LINK"
   for c in "$CHING_ROOT"/commands/*.md; do

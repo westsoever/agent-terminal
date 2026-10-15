@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "voicemode": {
+      "type": "stdio",
+      "command": "@VOICEMODE@",
+      "args": ["--tools-enabled", "converse"]
+    }
+  }
+}
