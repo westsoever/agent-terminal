@@ -163,6 +163,47 @@ assert_contains "stash: counted" "$(sec stash1 | grep 'stash:')" "1 entry"
 assert_eq "stash: event counts it" "1" "$(evq stash1 '.data.stashes')"
 assert_eq "stash: age is the date of the oldest entry (216 h)" "216" "$(evq stash1 '.data.oldest_age_h')"
 
+# ---------- more shapes: behind in a linked worktree and via the origin twin, merged on the remote only ----------
+R=$(mk behwt); new_ah behwt; repos "$R"
+git -C "$R" worktree add -q -b wtup "$WORK/behwt-wt"; commit_file "$WORK/behwt-wt" w.txt w "wt work"; git -C "$WORK/behwt-wt" push -q -u origin wtup
+git clone -q "$WORK/behwt.git" "$WORK/behwt-other"; git -C "$WORK/behwt-other" checkout -q wtup
+GIT_COMMITTER_DATE=$(ago 2) commit_file "$WORK/behwt-other" w2.txt w2 "more on wtup"; git -C "$WORK/behwt-other" push -q origin wtup
+commit_file "$WORK/behwt-other" b.txt b "remote main work"; git -C "$WORK/behwt-other" checkout -q main
+commit_file "$WORK/behwt-other" m.txt m "remote main"; git -C "$WORK/behwt-other" push -q origin main
+git -C "$R" branch -q --unset-upstream main                  # the base has no configured upstream: origin/main is its twin
+scf --quiet
+line=$(sec behwt | grep 'behind origin:')
+assert_contains "behind: the branch checked out in a linked worktree counts" "$line" "wtup -1"
+assert_contains "behind: a base branch without a configured upstream is compared with origin/<base>" "$line" "main -1"
+R=$(mk mrgrem); new_ah mrgrem; repos "$R"
+git -C "$R" worktree add -q -b remote-merged "$WORK/mrgrem-wt"
+GIT_COMMITTER_DATE=$(ago 4) commit_file "$WORK/mrgrem-wt" m.txt m "work"; git -C "$WORK/mrgrem-wt" push -q origin remote-merged
+git clone -q "$WORK/mrgrem.git" "$WORK/mrgrem-other"
+git -C "$WORK/mrgrem-other" merge -q --no-ff origin/remote-merged -m "merge on the remote"; git -C "$WORK/mrgrem-other" push -q origin main
+sc --quiet
+assert_not_contains "merged on the remote only: unknown until the fetch" "$(sec mrgrem)" "merged worktrees"
+scf --quiet
+assert_contains "merged on the remote only: after the fetch it is merged into origin/main" "$(sec mrgrem | grep 'merged worktrees:')" "remote-merged, merged into origin/main"
+assert_eq "merged on the remote only: aged by its tip (96 h)" "96" "$(evq mrgrem '.data.oldest_age_h')"
+# odd shapes must not break the run
+R=$(mk 'sp ace'); echo u >"$R/new file.txt"; new_ah space; repos "$R"
+sc --quiet
+assert_eq "spaces: a repo path with a space is one section" "1" "$(grep -c '^## sp ace -- oldest' "$SNAP")"
+assert_contains "spaces: ... its path is whole" "$(grep '^path:' "$SNAP")" "sp ace"
+assert_contains "spaces: ... and the untracked file is counted" "$(grep 'uncommitted:' "$SNAP")" "1 untracked"
+R="$WORK/unborn"; git init -q -b main "$R"; echo u >"$R/f"; R=$(phys "$R"); new_ah unborn; repos "$R"
+rc=0; sc --quiet 2>"$WORK/unborn.err" || rc=$?
+assert_eq "no commits yet: exit 0, quiet" "0:" "$rc:$(cat "$WORK/unborn.err")"
+assert_contains "no commits yet: the untracked file is still reported" "$(sec unborn)" "1 untracked"
+R=$(mk detach1); new_ah detach; repos "$R"
+git -C "$R" worktree add -q --detach "$WORK/detach1-wt"; echo u >"$WORK/detach1-wt/x.txt"
+rc=0; sc --quiet 2>"$WORK/detach.err" || rc=$?
+assert_eq "detached worktree: exit 0, quiet" "0:" "$rc:$(cat "$WORK/detach.err")"
+assert_contains "detached worktree: its changes are reported" "$(sec detach1 | grep 'uncommitted:')" "detach1-wt"
+assert_not_contains "detached worktree: it is not 'merged'" "$(sec detach1)" "merged worktrees"
+assert_contains "--help prints the header" "$(sc --help)" "READ-ONLY"
+assert_not_contains "--help does not print code" "$(sc --help)" "set -euo pipefail"
+
 # ---------- discovery ----------
 # every discovery fixture carries an untracked file so that it shows up as a section
 R=$(mk disc-ev); dirty "$R"; new_ah disc_ev; put_event "$R"

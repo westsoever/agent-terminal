@@ -19,7 +19,8 @@
 # Ages (the "oldest" in every line; <1h under an hour, then hours up to 47, then days):
 #   unpushed = committer date of the oldest commit not on the upstream (no upstream: not on any remote branch);
 #   behind = committer date of the oldest commit you are missing; uncommitted = oldest mtime among the changed
-#   files; merged worktree = committer date of the branch tip; stash = committer date of the oldest entry.
+#   files (a deleted file has none); merged worktree = committer date of the branch tip; stash = committer date
+#   of the oldest entry.
 # Output: $AGENT_HOME/sync-check.md (latest snapshot, replaced atomically, starts with `generated: <UTC ISO>`);
 #   one `sync` event per repo with findings in $AGENT_HOME/events.jsonl (counts and oldest_age_h only); and at
 #   most one budgeted banner per local day (notify.sh kind sync, stamp $AGENT_HOME/sync-banner.day, never spoken)
@@ -187,7 +188,7 @@ fetch_repo() {
   if [ "$left" -le 0 ]; then FETCH=skipped; return 0; fi
   t=$FETCH_TIMEOUT; [ "$t" -le "$left" ] || t=$left
   # --no-prune and fetch.prune=false: a global fetch.prune=true must not delete remote-tracking refs. No tags.
-  if run_limited "$t" env GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never \
+  if run_limited "$t" env GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never SSH_ASKPASS_REQUIRE=never \
        git -c gc.auto=0 -c maintenance.auto=false -c fetch.prune=false -c fetch.pruneTags=false -c fetch.writeCommitGraph=false \
        -C "$R" fetch --all --no-tags --no-prune --no-recurse-submodules --quiet </dev/null >/dev/null 2>&1; then FETCH=ok; else FETCH=failed; fi
 }
@@ -231,20 +232,20 @@ check_repo() {
       case "$trk" in *behind\ *) behind=${trk#*behind }; behind=$(num "${behind%%[!0-9]*}") ;; esac
       [ "$br" != "$BASE" ] || base_up=$upref
       if [ "$ahead" -gt 0 ]; then
-        age=$(age_of "$(ct_min_of log --format=%ct "$upref..$ref")")
+        age=$(age_of "$(ct_min_of log --format=%ct "$upref..$ref" --)")
         U_BR=$((U_BR + 1)); U_N=$((U_N + ahead)); U_AGE=$(maxi "$age" "$U_AGE")
         printf '%s +%s (%s)\n' "$br" "$ahead" "$(age_fmt "$age")" >>"$TMP/unp.items"
       fi
       if [ "$behind" -gt 0 ] && { [ "$br" = "$BASE" ] || grep -qxF -- "$br" "$TMP/wtbr"; }; then
-        age=$(age_of "$(ct_min_of log --format=%ct "$ref..$upref")")
+        age=$(age_of "$(ct_min_of log --format=%ct "$ref..$upref" --)")
         B_BR=$((B_BR + 1)); B_N=$((B_N + behind)); B_AGE=$(maxi "$age" "$B_AGE")
         printf '%s -%s (%s)\n' "$br" "$behind" "$(age_fmt "$age")" >>"$TMP/beh.items"
       fi
     elif [ "$HAS_REMOTE" = 1 ]; then
       # no (remote) upstream, or the upstream is gone: commits that are on no remote branch at all
-      n=$(num "$(g -C "$R" rev-list --count "$ref" --not --remotes 2>/dev/null || true)")
+      n=$(num "$(g -C "$R" rev-list --count "$ref" --not --remotes -- 2>/dev/null || true)")
       if [ "$n" -gt 0 ]; then
-        age=$(age_of "$(ct_min_of log --format=%ct "$ref" --not --remotes)")
+        age=$(age_of "$(ct_min_of log --format=%ct "$ref" --not --remotes --)")
         N_BR=$((N_BR + 1)); N_N=$((N_N + n)); N_AGE=$(maxi "$age" "$N_AGE")
         printf '%s: %s on no remote branch (%s)\n' "$br" "$(cnt "$n" commit)" "$(age_fmt "$age")" >>"$TMP/nup.items"
       fi
@@ -256,9 +257,9 @@ check_repo() {
     if [ -n "$base_up" ]; then twin=$base_up
     elif g -C "$R" show-ref --verify --quiet "refs/remotes/origin/$BASE"; then twin="refs/remotes/origin/$BASE"; fi
     if [ -n "$twin" ] && [ -z "$base_up" ]; then
-      behind=$(num "$(g -C "$R" rev-list --count "refs/heads/$BASE..$twin" 2>/dev/null || true)")
+      behind=$(num "$(g -C "$R" rev-list --count "refs/heads/$BASE..$twin" -- 2>/dev/null || true)")
       if [ "$behind" -gt 0 ]; then
-        age=$(age_of "$(ct_min_of log --format=%ct "refs/heads/$BASE..$twin")")
+        age=$(age_of "$(ct_min_of log --format=%ct "refs/heads/$BASE..$twin" --)")
         B_BR=$((B_BR + 1)); B_N=$((B_N + behind)); B_AGE=$(maxi "$age" "$B_AGE")
         printf '%s -%s (%s)\n' "$BASE" "$behind" "$(age_fmt "$age")" >>"$TMP/beh.items"
       fi
@@ -293,7 +294,7 @@ check_repo() {
         into=${twin#refs/remotes/}
       else into=""; fi
       if [ -n "$into" ]; then
-        age=$(age_of "$(g -C "$R" log -1 --format=%ct "$tip" 2>/dev/null || true)")
+        age=$(age_of "$(g -C "$R" log -1 --format=%ct "$tip" -- 2>/dev/null || true)")
         M_N=$((M_N + 1)); M_AGE=$(maxi "$age" "$M_AGE")
         printf '%s (branch %s, merged into %s, tip %s old)\n' "$(short_path "$wt")" "$wbr" "$into" "$(age_fmt "$age")" >>"$TMP/mrg.items"
       fi
