@@ -314,6 +314,7 @@ sync_launch() { # MAX_SECS LOG CMD ARGS... : returns at once; the check runs on 
     defined $p or exit 1;
     exit 0 if $p;
     POSIX::setsid();
+    POSIX::nice(10);                       # a background chore: git status over every repo must not compete with the user
     open(STDIN, "<", "/dev/null"); open(STDOUT, ">>", $log); open(STDERR, ">&STDOUT");
     my $k = fork;
     defined $k or do { $note->("sync-check: fork failed"); exit 1 };

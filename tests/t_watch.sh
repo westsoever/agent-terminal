@@ -287,6 +287,19 @@ assert_eq "sync: a hanging check: the watcher exits 0" "0" "$rc"
 assert_eq "sync: ... it is stopped at the time ceiling and watch.log says so" "1" "$(wlog_has 'stopped after 1s')"
 sleep 1
 assert_eq "sync: ... and nothing of it is left running" "0" "$(pgrep -f 'sleep 25' | wc -l | tr -d ' ')"
+# the real check under the ceiling: a fetch that hangs inside it goes down with it (its own session included)
+mkdir -p "$WORK/shim"
+cat >"$WORK/shim/git" <<'EOF'
+#!/bin/bash
+for a in "$@"; do if [ "$a" = fetch ]; then sleep "${SHIM_SLEEP:-3}"; break; fi; done
+exec /usr/bin/git "$@"
+EOF
+chmod +x "$WORK/shim/git"
+sreset; HR=$(mk_repo hangrepo); printf '%s\n' "$HR" >"$SAH/repos"
+CHING_INCLUDE_SANDBOX=1 AGENT_REPOS_FILE="$SAH/repos" PATH="$WORK/shim:$PATH" SHIM_SLEEP=23 SYNC_CHECK_CMD="$BIN/sync-check.sh" SYNC_CHECK_MAX_SECS=2 srun
+assert_eq "sync: the real check is stopped at the ceiling while it fetches" "1" "$(wlog_has 'stopped after 2s')"
+sleep 2
+assert_eq "sync: ... and the hung fetch is not left behind" "0" "$(pgrep -f 'sleep 23' | wc -l | tr -d ' ')"
 # the rest of the tick is unaffected: a tick that launches the check still reads transcripts
 sreset
 T9="$WORK/t9.jsonl"; amsg k1 0 1000 0 33 >"$T9"
