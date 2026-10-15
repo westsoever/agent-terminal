@@ -414,12 +414,28 @@ assert_no_file "banner: a suppressed banner does not use up the day" "$AH/sync-b
 SYNC_NOW=$NOON sc --quiet
 assert_eq "banner: at noon it is delivered" "1" "$(nlog)"
 assert_file "banner: and the day is stamped" "$AH/sync-banner.day"
-# a behind-origin or stash finding older than 24 h counts too (any of the five)
+# an old stash counts (any finding but behind-origin does)
 R=$(mk ban3); new_ah ban3; repos "$R"
 echo c >>"$R/README.md"; GIT_COMMITTER_DATE=$(ago 4) git -C "$R" stash push -q
 SYNC_NOW=$NOON sc --quiet
 assert_eq "banner: an old stash is enough" "1" "$(nlog)"
 assert_eq "banner: nothing was ever spoken" "0" "$(wc -l <"$SPOKEN" | tr -d ' ')"
+# behind-origin alone (main is a day behind in any repo with active collaborators) is in the snapshot but is no reason to banner
+R=$(mk ban4); new_ah ban4; repos "$R"
+git clone -q "$WORK/ban4.git" "$WORK/ban4-other"
+GIT_COMMITTER_DATE=$(ago 3) commit_file "$WORK/ban4-other" r.txt remote "remote work"; git -C "$WORK/ban4-other" push -q origin main
+SYNC_NOW=$NOON scf --quiet
+assert_contains "banner: behind-only: the snapshot still lists it" "$(cat "$AH/sync-check.md")" "behind origin:"
+assert_eq "banner: behind-only (3 days) gives no banner" "0" "$(nlog)"
+assert_no_file "banner: behind-only leaves no day stamp" "$AH/sync-banner.day"
+SYNC_BANNER_INCLUDE_BEHIND=1 SYNC_NOW=$NOON scf --quiet
+assert_eq "banner: SYNC_BANNER_INCLUDE_BEHIND=1 brings it back" "1" "$(nlog)"
+# behind plus an old unpushed commit: banner, and it counts the repo
+R=$(mk ban5); new_ah ban5; repos "$R"
+git clone -q "$WORK/ban5.git" "$WORK/ban5-other"; commit_file "$WORK/ban5-other" r.txt remote "remote work"; git -C "$WORK/ban5-other" push -q origin main
+GIT_COMMITTER_DATE=$(ago 2) commit_file "$R" f.txt f "two days old"
+SYNC_NOW=$NOON scf --quiet
+assert_eq "banner: behind plus an old unpushed commit does banner" "1" "$(nlog)"
 
 # ---------- lock ----------
 R=$(mk lk1); dirty "$R"; new_ah lk; repos "$R"

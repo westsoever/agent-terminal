@@ -24,10 +24,11 @@
 # Output: $AGENT_HOME/sync-check.md (latest snapshot, replaced atomically, starts with `generated: <UTC ISO>`);
 #   one `sync` event per repo with findings in $AGENT_HOME/events.jsonl (counts and oldest_age_h only); and at
 #   most one budgeted banner per local day (notify.sh kind sync, stamp $AGENT_HOME/sync-banner.day, never spoken)
-#   when some finding is older than SYNC_BANNER_AGE_H (24) hours. On demand it prints a one-line summary and the
+#   when some finding other than behind-origin is older than SYNC_BANNER_AGE_H (24) hours (behind-origin only with
+#   SYNC_BANNER_INCLUDE_BEHIND=1: an active repo is behind most days and nothing is lost by it). On demand it prints a one-line summary and the
 #   snapshot path (--quiet: nothing). ching-watch.sh starts it in the background every SYNC_CHECK_INTERVAL_H (6) hours.
 # Env: AGENT_HOME AGENT_REPOS_FILE SYNC_NO_FETCH (non-empty = no fetch, like --no-fetch) SYNC_FETCH_TIMEOUT (45 s per
-#   repo) SYNC_FETCH_BUDGET (150 s for all fetches together; later repos are not fetched) SYNC_BANNER_AGE_H
+#   repo) SYNC_FETCH_BUDGET (150 s for all fetches together; later repos are not fetched) SYNC_BANNER_AGE_H SYNC_BANNER_INCLUDE_BEHIND
 #   SYNC_NOW (epoch, tests) CHING_INCLUDE_SANDBOX NOTIFY_* (the banner)
 set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -196,7 +197,7 @@ fetch_repo() {
 check_repo() {
   local ref upref trk br ahead behind has_up age n wt wbr flags tip basetip twin out mod stg unt old parts into is_main
   U_BR=0; U_N=0; U_AGE=0; N_BR=0; N_N=0; N_AGE=0; B_BR=0; B_N=0; B_AGE=0
-  D_WT=0; D_MOD=0; D_STG=0; D_UNT=0; D_AGE=0; M_N=0; M_AGE=0; S_N=0; S_AGE=0; OLDEST=0
+  D_WT=0; D_MOD=0; D_STG=0; D_UNT=0; D_AGE=0; M_N=0; M_AGE=0; S_N=0; S_AGE=0; OLDEST=0; BAN_AGE=0
   : >"$TMP/unp.items"; : >"$TMP/nup.items"; : >"$TMP/beh.items"; : >"$TMP/dirty.items"; : >"$TMP/mrg.items"
   fetch_repo
   HAS_REMOTE=0; [ "$FETCH" = none ] || HAS_REMOTE=1
@@ -307,12 +308,16 @@ check_repo() {
   if [ "$S_N" -gt 0 ]; then S_AGE=$(age_of "$(min_ct <"$TMP/stash")"); fi
 
   for age in "$U_AGE" "$N_AGE" "$B_AGE" "$D_AGE" "$M_AGE" "$S_AGE"; do OLDEST=$(maxi "$age" "$OLDEST"); done
+  # The banner ignores behind-origin (the main branch of a repo with collaborators is a day behind most days and
+  # nothing is lost by it); it stays in the snapshot, the events and dash. SYNC_BANNER_INCLUDE_BEHIND=1 counts it.
+  for age in "$U_AGE" "$N_AGE" "$D_AGE" "$M_AGE" "$S_AGE"; do BAN_AGE=$(maxi "$age" "$BAN_AGE"); done
+  if [ -n "${SYNC_BANNER_INCLUDE_BEHIND:-}" ]; then BAN_AGE=$(maxi "$B_AGE" "$BAN_AGE"); fi
   FINDINGS=$((U_BR + N_BR + B_BR + D_WT + M_N + S_N))
 }
 
 addneed() { needs="$needs${needs:+, }$1"; }
 T0=$SECONDS
-REPO_N=0; FIND_N=0; MAX_OLD=0; F_OK=0; F_FAIL=0; F_SKIP=0
+REPO_N=0; FIND_N=0; MAX_OLD=0; MAX_BAN=0; F_OK=0; F_FAIL=0; F_SKIP=0
 : >"$TMP/order"; : >"$TMP/clean"
 while IFS= read -r R; do
   [ -n "$R" ] || continue
@@ -325,7 +330,7 @@ while IFS= read -r R; do
     printf '%s%s\n' "$name" "$note" >>"$TMP/clean"
     continue
   fi
-  FIND_N=$((FIND_N + 1)); MAX_OLD=$(maxi "$OLDEST" "$MAX_OLD")
+  FIND_N=$((FIND_N + 1)); MAX_OLD=$(maxi "$OLDEST" "$MAX_OLD"); MAX_BAN=$(maxi "$BAN_AGE" "$MAX_BAN")
   needs=""
   [ "$U_N" -eq 0 ] || addneed "$(cnt "$U_N" "unpushed commit")"
   [ "$N_BR" -eq 0 ] || addneed "$(cnt "$N_BR" branch branches) with no upstream ($(cnt "$N_N" commit))"
@@ -388,7 +393,7 @@ done
 # day, so a later run (daytime) can still deliver it. The stamp is ours: wiping notify's budget files changes nothing.
 banner() {
   local day stamp before after method msg
-  [ "$FIND_N" -gt 0 ] && [ "$MAX_OLD" -ge "$BANNER_SECS" ] || return 0
+  [ "$FIND_N" -gt 0 ] && [ "$MAX_BAN" -ge "$BANNER_SECS" ] || return 0
   day=$(date -r "$NOW" +%Y-%m-%d)
   stamp="$AGENT_HOME/sync-banner.day"
   [ "$(cat "$stamp" 2>/dev/null || true)" != "$day" ] || return 0
