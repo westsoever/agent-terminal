@@ -317,8 +317,8 @@ Four parallel agents, then an independent review of the merged result. Details a
     - A redirect writes only its own target, so `dash.sh 2>&1` is not a tamper deny, while `>& settings.json` now is.
   - Still open:
     - When `quote-data.pl` cannot read a command safely (heredoc, backtick, `case`, unterminated quote), the old splitting applies, including the quoted-value hole.
-    - pnpm and yarn abbreviations are unchecked (not installed).
-    - Git aliases still bypass the push rules.
+    - pnpm and yarn abbreviations are unchecked (not installed). **FIXED 2026-10-16 (track A, 320cc77), see "Track A fixes".**
+    - Git aliases still bypass the push rules. **FIXED 2026-10-16 (track A, 15c6445), see "Track A fixes".**
 
 ### Fixed in the fix wave (listed as gaps before)
 
@@ -361,7 +361,7 @@ I re-read `bin/stop-check.sh`, `bin/test-escalate.sh` and `bin/lib.sh` on `main`
 | F4 timed-out `test_command` leaves its children | FIXED | ee760d3 (process-group kill); 499a25a (a TERM/INT/HUP to the hook kills the whole check, ends as no verdict) |
 | F5 bookkeeping failures fail open or false-block | FIXED | 7af13fe (exit 3 "no verdict", `stop_no_verdict` event) |
 | F6 non-numeric or zero caps | FIXED | ce5ae94 (82f6994 for the green-run epoch) |
-| F7 any write to `STATE.md` satisfies the checkpoint | see "Track A fixes" at the end of this section | |
+| F7 any write to `STATE.md` satisfies the checkpoint | FIXED 2026-10-16 (track A) | a260da2, see "Track A fixes" |
 | F8 green-run fingerprint is stale-prone | PARTLY | 5df71da (fingerprint taken before the run, TTL, `check_skipped` event); gitignored/external inputs are still not part of it |
 | F9 missing `jq` fails open silently | FIXED | 7af13fe (checked first, loud no verdict) |
 | F10 first `test_command:` line wins; `stop_ok` does not say no check ran | OPEN | |
@@ -477,6 +477,13 @@ parse error is not identified.
 
 - `rm -rf /Users/clyde/bbq/ching/vendor-eval` (R6, Task 12 step 7): four evaluation clones outside the worktree; the lens files that were the reason to keep them are committed. Your call.
 - Merge of `phase-1.5-harvest` into `main` (R12, plan Task 12 step 8).
+
+### Track A fixes (2026-10-16, branch `ching-a`; the details are in the commit messages)
+
+- **Git aliases (15c6445).** A git word that is not a built-in is resolved with `git config --get alias.<word>` in the command's directory (`-C` and `cd` honoured, up to 6 aliases deep) and the rules run on the expansion; `!` aliases are scanned as shell commands. `-c alias.x=...`, `GIT_CONFIG_KEY_n`/`GIT_CONFIG_PARAMETERS` on the same line are checked as if used, `--config-env=alias.*` is denied (its value cannot be read). Defining an alias (`git config alias.x ...`) is denied when the body would push to main, force push, push a tag, publish or run a denied `!` command, and the definition is remembered within one command line. Residuals: an alias written straight into a config file with an editor, `sed` or `echo`; a variable as the subcommand (`git $x`); unreadable config or a missing directory is allowed as before.
+- **pnpm and yarn (320cc77).** pnpm and yarn have no `publish` abbreviations (read statically from pnpm 10.34.7, yarn 1.22.22 and 4.18.1; pnpm 12's native binary was not read). What is checked now: `pn`, `yarnpkg`, `pnpx`/`pnx`, `corepack pnpm|yarn|npm`, `yarn tag add|remove`, `npm stage approve`; prefixes `pu` to `publis` are denied for pnpm and yarn anyway; `pnpm -r publish --dry-run` is allowed; `pnpx vercel deploy` is now denied under rule 4.
+- **F7 (a260da2).** After a checkpoint block, the hash of the six-line block is stored (`ckpt_hash_at_block`); the next stop passes only when the block changed and is valid (six keys present, none empty, `(none)` not accepted for result, next_action, examined, not_examined). Otherwise it is asked one more time, then the stop is allowed with a `checkpoint_unmet` event: never more than two blocks per prompt. Opt-outs unchanged. Residual: a valid block left from an earlier turn plus any touch of `STATE.md` passes the first stop.
+- **Guard on, push rule off (9ff2868, owner decision, recorded as D24 by the coordinator).** `push_gate=on|off` in `~/.agent/config` (`$AGENT_HOME/config`), read through `lib.sh` `push_gate_on`; **off by default**; only exactly `push_gate=on` (case-insensitive) turns it on; garbage or an unreadable file means off; no `GOAL.md` `release_mode` matters. Off means no release-token requirement for a plain push to main/default (`check_refspec`, the bare-push path, `--all`), for `gh pr merge` (token and pin), for the `gh api` merge endpoints and for GraphQL merge mutations. Unchanged with the switch off and on: force push, `--force-with-lease`, `+refs`, `--mirror`, deleting a protected branch, `v*` tag pushes, `--no-verify`, `rm -rf`, `vercel`/`gh workflow run`, `.env` reads, Supabase writes, publishing, closing others' items, outbound send tools, GOAL.md gate settings, and edits to hooks, settings, tokens and now the config file itself. History rewrites (`reset`, `rebase`, `commit --amend`) are not covered by any guard rule and were not before; only force pushes are stopped. `templates/pre-push` reads the same switch (installed copies are stale until `install.sh --install-prepush <repo>` is re-run). `release-gate.sh`, `post-release.sh` and `migrate-gate.sh` are untouched and still usable by hand.
 
 ## 7. What you do next
 
