@@ -34,9 +34,10 @@ assert_fails "3.2: dash.sh itself rejects --text, so the command must map it" "$
 # the installer links every file in commands/, so a new command needs no installer edit
 D="$WORK/voice-claude"; mkdir -p "$D"; printf '{}\n' >"$D/settings.json"
 out=$(env SETTINGS_FILE="$D/settings.json" CLAUDE_DIR="$D" AGENT_REPOS_FILE="$WORK/voice-repos" LAUNCH_AGENTS_DIR="$WORK/voice-la" "$KIT/install.sh" --yes </dev/null 2>&1)
-assert_eq "3.2: install links the dash command" "$KIT/commands/dash.md" "$(readlink "$D/commands/dash.md")"
+KITP=$(cd "$KIT" && pwd -P)   # install.sh links the physical path
+assert_eq "3.2: install links the dash command" "$KITP/commands/dash.md" "$(readlink "$D/commands/dash.md")"
 for c in "$KIT"/commands/*.md; do
-  assert_eq "install links $(basename "$c")" "$c" "$(readlink "$D/commands/$(basename "$c")")"
+  assert_eq "install links $(basename "$c")" "$KITP/commands/$(basename "$c")" "$(readlink "$D/commands/$(basename "$c")")"
 done
 
 # docs/voice.md (3.3)

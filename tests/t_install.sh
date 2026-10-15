@@ -78,10 +78,11 @@ assert_eq "allowlist: defaultMode untouched" "bypassPermissions" "$(printf '%s' 
 assert_eq "allowlist: no deny list appears" "null" "$(printf '%s' "$S" | jq -c '.permissions.deny')"
 assert_contains "apply output: the diff names the allowlist addition" "$out" "+      \"$CONV1\""
 assert_eq "exactly one backup" "1" "$(ls "$D"/settings.json.bak.ching.* | wc -l | tr -d ' ')"
-assert_eq "ching symlink points at the kit" "$KIT" "$(readlink "$D/ching")"
-assert_eq "handoff command linked" "$KIT/commands/handoff.md" "$(readlink "$D/commands/handoff.md")"
-assert_eq "next command linked" "$KIT/commands/next.md" "$(readlink "$D/commands/next.md")"
-assert_eq "dash command linked" "$KIT/commands/dash.md" "$(readlink "$D/commands/dash.md")"
+KITP=$(cd "$KIT" && pwd -P)   # install.sh links the physical path; a kit under a symlinked folder (/tmp) must not fail
+assert_eq "ching symlink points at the kit" "$KITP" "$(readlink "$D/ching")"
+assert_eq "handoff command linked" "$KITP/commands/handoff.md" "$(readlink "$D/commands/handoff.md")"
+assert_eq "next command linked" "$KITP/commands/next.md" "$(readlink "$D/commands/next.md")"
+assert_eq "dash command linked" "$KITP/commands/dash.md" "$(readlink "$D/commands/dash.md")"
 assert_file "optional ~/.agent-repos created" "$AGENT_REPOS_FILE"
 assert_not_contains "~/.agent-repos starts with no active repo" "$(grep -v '^#' "$AGENT_REPOS_FILE")" "/"
 
