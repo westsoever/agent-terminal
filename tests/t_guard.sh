@@ -2,6 +2,9 @@
 # guard.sh: every guardrail in PLAN 5.1 denies, ordinary commands pass, works in any folder.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# Rule 3 (a release token for a push or merge to main) applies only while the push gate is on, and it is off by
+# default: these tests prove the rule, so they run with push_gate=on (t_pushgate.sh covers the switch itself).
+printf 'push_gate=on\n' >"$AGENT_HOME/config"
 
 R=$(mk_repo grepo)
 RP=$(cd "$R" && pwd -P)
@@ -949,6 +952,158 @@ npm deprecate x "old"
 gh release create v1.0.0
 GH_REPO=o/r gh release create v1.0.0
 EOF
+
+# ---------- rule 8: pnpm and yarn (CHECKPOINT-1.5 section 6; read from pnpm 10.34.7, yarn 1.22.22 and yarn 4.18.1) ----------
+# Neither tool prefix-matches its commands (npm does): pnpm has `publish` only, plus the recursive prefixes recursive,
+# multi and m (and -r), and its binaries pn, pnpx, pnx; an unknown word is a script. Yarn has `publish` (classic),
+# `npm publish` (berry), `tag` (classic) and `npm tag add|remove` (berry), the binary yarnpkg; an unknown word is a
+# script. corepack runs any of them. Prefixes of publish are denied anyway (a miss is a publish, a script called
+# `pub` is rare). A script NAMED like a publish is denied for every manager, as it is for npm (npm run publish).
+while IFS= read -r c; do
+  [ -n "$c" ] && gallow "rule 8 pnpm/yarn subcommand: $c" "$QD" "$c"
+done <<'EOF'
+pnpm publish --dry-run
+pnpm -r publish --dry-run
+pnpm --recursive publish --dry-run --no-git-checks
+pnpm m publish --dry-run
+pn publish --dry-run
+yarn npm publish --dry-run
+yarnpkg npm publish --dry-run
+corepack pnpm publish --dry-run
+corepack yarn npm publish --dry-run
+corepack npm publish --dry-run
+pnpm test publish
+pnpm t publish
+pnpm tst publish
+pnpm -r test publish
+pnpm m test publish
+yarn test publish
+yarn info publish
+yarn npm info publish
+pnpm view x publish
+pnpm v x publish
+pnpm info publish versions
+pnpm show publish
+pnpm search publish
+pnpm why publish
+pnpm ls publish
+pnpm pack
+yarn pack
+pnpm run test -- publish
+pnpm run build
+pnpm -r run build
+pnpm --filter web test
+pnpm install
+pnpm i
+pnpm add -D typescript
+pnpm update
+yarn
+yarn install
+yarn add left-pad
+yarn build
+yarn run build
+yarn workspace web test
+yarn npm tag list
+yarn tag ls
+yarn npm whoami
+yarn npm login
+npm stage list
+npm stage view abc
+npm stage reject abc
+corepack enable
+corepack prepare pnpm@latest --activate
+corepack use pnpm@9
+pnpm exec tsc --noEmit
+pnpx cowsay hi
+pnx cowsay hi
+bunx cowsay hi
+npx npm@latest view publish
+EOF
+while IFS= read -r c; do
+  [ -n "$c" ] && gdeny_why "publish: $c" "$QD" "$c" "rule 8"
+done <<'EOF'
+pnpm publish --access public
+pnpm -r publish
+pnpm --recursive publish
+pnpm recursive publish
+pnpm multi publish
+pnpm m publish
+pnpm --filter web publish
+pnpm publish --dry-run false
+pnpm publish --no-dry-run
+pn publish
+pn -r publish
+yarn publish
+yarn npm publish
+yarn npm publish --tag next
+yarn npm publish --dry-run --no-dry-run
+yarn workspace web npm publish
+yarn workspaces foreach -A npm publish
+yarnpkg publish
+yarnpkg npm publish
+corepack pnpm publish
+corepack yarn publish
+corepack yarn npm publish
+corepack npm publish
+corepack pnpm -r publish
+corepack yarnpkg npm publish
+pnpm pu
+pnpm pub
+pnpm publ
+pnpm publi
+pnpm publis --tag next
+pnpm -r pub
+pn pub
+yarn pu
+yarn pub
+yarn publis
+yarnpkg pub
+pnpm run publish-docs
+pnpm run publish
+pnpm run release:publish
+yarn run publish
+yarn run publish:npm
+pn run publish
+pnpm unpublish x@1
+pnpm unp x@1
+pnpm unpub x@1
+pnpm deprecate x "old"
+pnpm dist-tag add x@1 latest
+yarn unpublish x@1
+yarn tag add x@1 latest
+yarn tag remove x latest
+yarn tag rm x latest
+yarn npm tag add x@1 latest
+yarn npm tag remove x latest
+yarnpkg tag add x@1 latest
+npm stage approve abc
+npm stag approve abc
+yarn npm stage approve abc
+corepack yarn npm stage approve abc
+npm stage publish
+npm stage publish --dry-run false
+pnpx npm publish
+pnx npm publish
+pnpx pnpm publish
+pnpx yarn npm publish
+npx npm@latest publish
+npx npm@11 pub
+npx pnpm@9 publish
+npx yarn@1 publish
+bunx npm@latest publish
+bunx pnpm@latest publish
+corepack pnpm@9.1.0 publish
+sudo corepack pnpm publish
+env NODE_ENV=production pn publish
+cd packages/x && pnpm publish
+bash -c "pnpm publish"
+pnpm test && pnpm publish
+EOF
+gdeny_why "pnpx runs vercel: rule 4" "$QD" 'pnpx vercel deploy' "the vercel CLI"
+gdeny_why "pnx runs vercel: rule 4" "$QD" 'pnx vercel --prod' "the vercel CLI"
+gdeny_why "pn dlx vercel: rule 4" "$QD" 'pn dlx vercel deploy' "the vercel CLI"
+gdeny_why "corepack pnpm dlx vercel: rule 4" "$QD" 'corepack pnpm dlx vercel deploy' "the vercel CLI"
+gallow "pnpx vercel whoami" "$QD" 'pnpx vercel whoami'
 
 # ---------- rule 5: a grep/rg pattern names no file (2026-10-06: grep -n "ching.env" bin/*.sh was denied) ----------
 while IFS= read -r c; do

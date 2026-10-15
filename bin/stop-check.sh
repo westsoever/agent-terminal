@@ -19,6 +19,15 @@
 #      STOP_CHECK_DEADLINE (the whole hook, 780 s: 2 minutes of margin under the 900 s hook timeout)
 #      STOP_CHECK_SKIP_TTL (1800 s: how long an unchanged tree's green run is trusted; 0 = always run)
 #      CHING_NO_CHECKPOINT=1 (scripted runs: never ask for the checkpoint; see checkpoint_gate)
+# Checkpoint rule (repo mode, once a prompt is recorded, only when the turn changed the tree): STATE.md must hold
+# a valid <!-- ching:checkpoint --> block, written after the prompt: the six keys, none empty, and none of result,
+# next_action, examined, not_examined still the template's "(none)". A touch of STATE.md is not enough (F7). When it
+# is missing or invalid the stop is blocked once and the block's hash is kept in the session meta
+# (ckpt_hash_at_block); the next stop of the same prompt passes only if the block CHANGED since then and is valid,
+# else it is blocked one more time, and the stop after that is allowed with a checkpoint_unmet event. At most two
+# blocks per prompt, whatever stop_hook_active says, so it can never loop. Opt-outs: CHING_NO_CHECKPOINT=1,
+# CLAUDE_CODE_ENTRYPOINT=sdk-*. Residual: a valid block left over from an earlier turn, with STATE.md touched this
+# turn, passes on the first stop (nothing says the block was not rewritten).
 #      CHING_TEST_MODELS CHING_TEST_CALL_TIMEOUT CHING_TEST_MAX_TURNS (see test-escalate.sh)
 set -euo pipefail
 START=$(date +%s)
@@ -110,13 +119,13 @@ tree_changed_since() {
   ' "$1")
 }
 
-# Repo mode only, and only once a prompt was recorded: block ONCE per prompt when STATE.md has no
-# checkpoint block or it was not updated since that prompt. The meta key makes the next Stop pass.
-# A fresh checkpoint is checked first so the checkpoint event is logged whether the model wrote it
-# unprompted or after the one block. Not asked: when the turn changed nothing in the tree (a question
-# answered), and in scripted runs, where the block would replace the run's answer: CHING_NO_CHECKPOINT=1, or
-# CLAUDE_CODE_ENTRYPOINT=sdk-* (Claude Code sets sdk-cli for claude -p, sdk-ts/sdk-py for the Agent SDK,
-# cli for an interactive session; seen in the 2.1 binary, not documented, hence the explicit switch too).
+# Repo mode only, and only once a prompt was recorded: block when STATE.md has no valid checkpoint block or it was
+# not updated since that prompt (see the header for the full rule: at most two blocks per prompt). A fresh, valid
+# checkpoint is checked first so the checkpoint event is logged whether the model wrote it unprompted or after a
+# block. Not asked: when the turn changed nothing in the tree (a question answered), and in scripted runs, where the
+# block would replace the run's answer: CHING_NO_CHECKPOINT=1, or CLAUDE_CODE_ENTRYPOINT=sdk-* (Claude Code sets
+# sdk-cli for claude -p, sdk-ts/sdk-py for the Agent SDK, cli for an interactive session; seen in the 2.1 binary, not
+# documented, hence the explicit switch too).
 # prompt_state: set PROMPTED (epoch of the last prompt, '' when none or not in repo mode) and TREE_CHANGED
 # (1/0) once. Called before the test run, so files the check itself writes do not count as the turn's work.
 PROMPTED=""; TREE_CHANGED=""
@@ -130,14 +139,52 @@ prompt_state() {
   if tree_changed_since "$PROMPTED"; then TREE_CHANGED=1; fi
 }
 
+# ckpt_hash FILE: sha256 of the checkpoint block (the lines between the markers, trailing blanks and blank lines
+# dropped), so a touch of the file or an edit outside the block does not change it. Needs the file to exist.
+ckpt_hash() {
+  awk '
+    index($0, "<!-- ching:checkpoint -->") == 1 { c = 1; next }
+    index($0, "<!-- /ching:checkpoint -->") == 1 { exit }
+    c { sub(/[[:space:]]+$/, ""); if ($0 != "") print }
+  ' "$1" | shasum -a 256 | cut -d' ' -f1
+}
+# ckpt_bad_keys FILE: the keys of the six that are missing, empty, or still the template's placeholder "(none)"
+# (result, next_action, examined, not_examined; `none` and `0` are real answers for blocker and files_changed).
+ckpt_bad_keys() {
+  local k v bad=""
+  for k in result blocker next_action files_changed examined not_examined; do
+    v=$(checkpoint_get "$1" "$k")
+    case "$k:$v" in
+      *:) bad="$bad $k" ;;
+      result:*|next_action:*|examined:*|not_examined:*) case "$v" in '('[Nn][Oo][Nn][Ee]')') bad="$bad $k" ;; esac ;;
+    esac
+  done
+  printf '%s' "${bad# }"
+}
+
 checkpoint_gate() {
   [ "$REPO_MODE" -eq 1 ] || return 0
-  local prompted st status
+  local prompted st status nblocks=0 at_block cur=missing bad="" why="" reason
   prompt_state
   prompted=$PROMPTED
   [ -n "$prompted" ] || return 0
   st="$STATE_DIR/STATE.md"
-  if [ -f "$st" ] && grep -qF '<!-- ching:checkpoint -->' "$st" && [ "$(file_mtime "$st")" -ge "$prompted" ]; then
+  # blocks given for THIS prompt so far (a record from an older version has only checkpoint_blocked_for: one)
+  if [ "$(meta_get "$SESS_DIR/meta" checkpoint_blocked_for)" = "$prompted" ]; then
+    nblocks=$(meta_get "$SESS_DIR/meta" ckpt_blocks)
+    case "$nblocks" in ''|*[!0-9]*) nblocks=1 ;; esac
+  fi
+  at_block=$(meta_get "$SESS_DIR/meta" ckpt_hash_at_block)
+  if [ ! -f "$st" ] || ! grep -qF '<!-- ching:checkpoint -->' "$st"; then why=missing
+  elif [ "$(file_mtime "$st")" -lt "$prompted" ]; then why=stale; cur=$(ckpt_hash "$st")
+  else
+    cur=$(ckpt_hash "$st")
+    bad=$(ckpt_bad_keys "$st")
+    if [ -n "$bad" ]; then why=invalid
+    elif [ "$nblocks" -ge 1 ] && [ "$cur" = "$at_block" ]; then why=unchanged   # nothing was written since the block
+    fi
+  fi
+  if [ -z "$why" ]; then
     status=$(sed -n 's/^status:[[:space:]]*//p' "$st" | head -1)
     ev checkpoint "$(jq -nc --arg s "$status" --arg b "$(checkpoint_get "$st" blocker)" --arg n "$(checkpoint_get "$st" next_action)" \
       '{status:$s,blocker:$b,next_action:$n}')"
@@ -145,12 +192,25 @@ checkpoint_gate() {
   fi
   [ "${CHING_NO_CHECKPOINT:-}" != 1 ] || return 0
   case "${CLAUDE_CODE_ENTRYPOINT:-}" in sdk-*) return 0 ;; esac
-  [ "$(meta_get "$SESS_DIR/meta" checkpoint_blocked_for)" != "$prompted" ] || return 0   # already asked once for this prompt
   [ "$TREE_CHANGED" -eq 1 ] || return 0
+  if [ "$nblocks" -ge 2 ]; then   # asked twice for this prompt: allow, say so, never loop
+    ev checkpoint_unmet "$(jq -nc --arg w "$why" --arg k "$bad" --argjson n "$nblocks" '{reason:$w,keys:$k,blocks:$n}')"
+    return 0
+  fi
+  nblocks=$((nblocks + 1))
   meta_set checkpoint_blocked_for "$prompted"
-  ev stop_blocked '{"retry":1,"reason":"checkpoint"}'
-  jq -n --arg r "Do not stop yet: update the checkpoint block in $st for this turn. Edit only the six lines between <!-- ching:checkpoint --> and <!-- /ching:checkpoint --> (add the block if it is missing): result, blocker, next_action, files_changed, examined, not_examined. Nothing else is needed. This is asked once per prompt." \
-    '{decision:"block", reason:$r}'
+  meta_set ckpt_blocks "$nblocks"
+  meta_set ckpt_hash_at_block "$cur"
+  ev stop_blocked "$(jq -nc --argjson n "$nblocks" --arg w "$why" '{retry:$n,reason:"checkpoint",why:$w}')"
+  if [ "$nblocks" -eq 1 ]; then
+    reason="Do not stop yet: update the checkpoint block in $st for this turn. Edit only the six lines between <!-- ching:checkpoint --> and <!-- /ching:checkpoint --> (add the block if it is missing): result, blocker, next_action, files_changed, examined, not_examined. Nothing else is needed. Fill in real values: the template's (none) does not count for result, next_action, examined and not_examined (write none or nothing when that is the true answer). If the block is still empty or unchanged you are asked one more time, then the stop is allowed."
+  else
+    case "$why" in
+      unchanged) reason="Do not stop yet: the checkpoint block in $st is unchanged since the first request. Rewrite its six lines (result, blocker, next_action, files_changed, examined, not_examined) for this turn. This is the last time it is asked for this prompt." ;;
+      *) reason="Do not stop yet: the checkpoint block in $st is still ${why}${bad:+ ($bad missing, empty or still (none))}. Fill in the six lines between <!-- ching:checkpoint --> and <!-- /ching:checkpoint --> for this turn: result, blocker, next_action, files_changed, examined, not_examined; write none or nothing where that is the true answer. This is the last time it is asked for this prompt." ;;
+    esac
+  fi
+  jq -n --arg r "$reason" '{decision:"block", reason:$r}'
   exit 0
 }
 
