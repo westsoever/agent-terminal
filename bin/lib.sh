@@ -125,3 +125,15 @@ checkpoint_get() { # file key -> value of the first `key:` line inside the ching
     c && index($0, k ":") == 1 { v = substr($0, length(k) + 2); sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); print v; exit }
   ' "$1"
 }
+
+# is_sandbox_path PATH: true for throwaway locations (test and probe sandboxes) that reports must not count:
+# /tmp, /private/tmp, macOS per-user temp (/var/folders, /private/var/folders) and any task*-repo folder.
+# CHING_INCLUDE_SANDBOX=1 turns the exclusion off (tests whose fixtures live under /tmp, "--all" flags).
+is_sandbox_path() {
+  [ -z "${CHING_INCLUDE_SANDBOX:-}" ] || return 1
+  case "$1" in
+    /tmp|/tmp/*|/private/tmp|/private/tmp/*|/var/folders/*|/private/var/folders/*) return 0 ;;
+    */task*-repo|*/task*-repo/*) return 0 ;;
+  esac
+  return 1
+}
