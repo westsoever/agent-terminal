@@ -6,6 +6,9 @@
 # The aliases live in the sandbox repos' local config (GIT_CONFIG_GLOBAL is /dev/null in tests).
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# Rule 3 (a release token for a push or merge to main) applies only while the push gate is on, and it is off by
+# default: these tests prove the rule, so they run with push_gate=on (t_pushgate.sh covers the switch itself).
+printf 'push_gate=on\n' >"$AGENT_HOME/config"
 
 AR=$(mk_repo aliasrepo); ARP=$(cd "$AR" && pwd -P)
 git -C "$AR" tag v1.2.3

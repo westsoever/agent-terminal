@@ -11,7 +11,8 @@
 # anything whose push target it cannot resolve literally.
 #
 # Rules: 1 rm -rf outside the repo//tmp | 2 force push | 3 push to main/default without release token for
-# the pushed commit | 4 vercel deploy, gh workflow run | 5 reading .env*, printing secrets | 6 Supabase
+# the pushed commit (also gh pr merge and the gh api / GraphQL merge forms; ONLY while push_gate=on in
+# $AGENT_HOME/config, see "The push gate switch" below; off by default) | 4 vercel deploy, gh workflow run | 5 reading .env*, printing secrets | 6 Supabase
 # apply_migration / non-read-only execute_sql / Management API / CLI db push | 7 editing a committed
 # migration, db-migrate --record-only, --apply without a migrate token | 8 publishing (npm/bun/pnpm/yarn
 # publish, also as pn, yarnpkg, corepack pnpm|yarn|npm, pnpm -r/m, npm's abbreviations, yarn tag, npm stage
@@ -25,6 +26,8 @@
 # Every deny is also logged as a `deny` event, after the decision has been printed.
 # Env: GUARD_PROTECTED_BRANCHES (default "main master" plus the remote default branch);
 #      GUARD_TIME_LIMIT (seconds; can only lower the 8 s ceiling, for the tests)
+# Config: push_gate=on|off in $AGENT_HOME/config (default ~/.agent/config), read through lib.sh push_gate_on. The file
+#      is a tamper path: a session may read it and may not write it.
 set -euo pipefail
 
 # The time ceiling counts from here. An inherited SECONDS (the hook environment) would otherwise start the clock
@@ -303,10 +306,26 @@ check_find_delete() { # find ... -delete / -exec rm
 }
 
 # ---------- rules 2, 3: git ----------
+# The push gate switch: rule 3 (a token for a plain, non-force push or merge to main/default: git push, gh pr merge,
+# the gh api and GraphQL merge forms) applies only when the machine config $AGENT_HOME/config (default
+# ~/.agent/config) says push_gate=on. It is OFF by default (owner decision: automatic commits, pushes and merges),
+# and then no GOAL.md release_mode matters. Read through lib.sh push_gate_on, once per run and only when a rule is
+# about to ask for a token; a lib.sh or a config that cannot be read means off. Force pushes (rule 2), deleting a
+# protected branch, tag pushes (rule 8), --no-verify and every other rule do not look at the switch.
+PUSH_GATE=""   # '' = not read yet, 1 = on, 0 = off
+push_gate() {
+  if [ -z "$PUSH_GATE" ]; then
+    # shellcheck source=lib.sh
+    if ( . "$SELF_DIR/lib.sh" && push_gate_on ) >/dev/null 2>&1; then PUSH_GATE=1; else PUSH_GATE=0; fi
+  fi
+  [ "$PUSH_GATE" -eq 1 ]
+}
+gate_hint() { printf '(The push gate is on: push_gate=on in %s/config. Only the user switches it off, by editing that file.)' "${AGENT_HOME:-$HOME/.agent}"; }
+
 require_token() { # sha dir dst
   local out rc=0
   out=$(cd "$2" && "$SELF_DIR/release-gate.sh" --verify "$1" 2>&1) || rc=$?
-  [ "$rc" -eq 0 ] || emit_deny "push to $3 denied: $out. Run release-gate.sh (tests, evidence) first; in confirm mode the user must approve."
+  [ "$rc" -eq 0 ] || emit_deny "push to $3 denied: $out. Run release-gate.sh (tests, evidence) first; in confirm mode the user must approve. $(gate_hint)"
 }
 
 check_refspec() { # refspec gdir delete
@@ -329,6 +348,7 @@ check_refspec() { # refspec gdir delete
   is_protected "$dst" || return 0
   [ -n "$src" ] || emit_deny "deleting the protected branch $dst is not allowed."
   [ "$del" -eq 0 ] || emit_deny "deleting the protected branch $dst is not allowed."
+  push_gate || return 0   # rule 3 only: a plain push to a protected branch needs a token while the gate is on
   sha=$(git -C "$gdir" rev-parse --verify -q "${src}^{commit}" 2>/dev/null || true)
   [ -n "$sha" ] || emit_deny "cannot resolve '$src' to a commit for the push to $dst."
   require_token "$sha" "$gdir" "$dst"
@@ -405,7 +425,7 @@ check_push() { # $1 = index of 'push' token, $2 = git dir
   done
   [ "$force" -eq 0 ] || emit_deny "force push is never allowed (--force, --force-with-lease, +refspec, --mirror). Push a new commit; to undo a release push a revert commit through the gate."
   DEFB=$(git -C "$gdir" symbolic-ref --short -q refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)
-  [ "$all" -eq 0 ] || emit_deny "git push --all would push the protected branch without a release token. Push named branches."
+  if [ "$all" -eq 1 ] && push_gate; then emit_deny "git push --all would push the protected branch without a release token. Push named branches. $(gate_hint)"; fi
   if [ -n "$refs" ]; then check_push_tags "$gdir" 1; else check_push_tags "$gdir" 0; fi
   while IFS= read -r r; do   # `tag <name>` is refs/tags/<name>
     [ -n "$r" ] || continue
@@ -419,6 +439,7 @@ check_push() { # $1 = index of 'push' token, $2 = git dir
     cur=$(git -C "$gdir" symbolic-ref --short -q HEAD 2>/dev/null || true)
     up=$(git -C "$gdir" rev-parse --abbrev-ref '@{u}' 2>/dev/null || true)
     if is_protected "$cur" || is_protected "${up#*/}"; then
+      push_gate || return 0
       sha=$(git -C "$gdir" rev-parse HEAD 2>/dev/null || true)
       [ -n "$sha" ] || emit_deny "cannot resolve HEAD for the push."
       require_token "$sha" "$gdir" "${cur:-the default branch}"
@@ -612,13 +633,15 @@ graphql_mutation() { # `gh api graphql` whose query text (anywhere in the comman
   case "$CMD_ALL" in *[[:space:]]graphql*) ;; *) return 1 ;; esac
   case "$CMD_ALL" in *[Mm][Uu][Tt][Aa][Tt][Ii][Oo][Nn]*) ;; *) return 1 ;; esac
   case "$CMD_ALL" in
-    *[Cc][Ll][Oo][Ss][Ee]*|*[Mm][Ee][Rr][Gg][Ee]*|*[Dd][Ee][Ll][Ee][Tt][Ee]*|*[Pp][Uu][Bb][Ll][Ii][Ss][Hh]*|*[Uu][Pp][Dd][Aa][Tt][Ee][Rr][Ee][Ff]*|*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Ff]*|*[Cc][Rr][Ee][Aa][Tt][Ee][Cc][Oo][Mm][Mm][Ii][Tt]*) return 0 ;;
+    *[Cc][Ll][Oo][Ss][Ee]*|*[Dd][Ee][Ll][Ee][Tt][Ee]*|*[Pp][Uu][Bb][Ll][Ii][Ss][Hh]*|*[Uu][Pp][Dd][Aa][Tt][Ee][Rr][Ee][Ff]*|*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Ff]*|*[Cc][Rr][Ee][Aa][Tt][Ee][Cc][Oo][Mm][Mm][Ii][Tt]*) return 0 ;;
   esac
+  # a merge is rule 3: it needs a token only while the push gate is on
+  case "$CMD_ALL" in *[Mm][Ee][Rr][Gg][Ee]*) if push_gate; then return 0; fi ;; esac
   return 1
 }
 
 check_gh() { # $1 = index of gh
-  local k subs="" n=0 a mut=0 hit=0 method="" inp=0
+  local k subs="" n=0 a mut=0 hit=0 mrg=0 method="" inp=0
   k=$(( $1 + 1 ))
   while [ "$k" -lt "$NT" ]; do
     a=${TOKS[$k]}
@@ -631,27 +654,33 @@ check_gh() { # $1 = index of gh
       -f|-F|--field|--raw-field) mut=1 ;;
       -*) ;;
       *) if [ "$n" -lt 2 ]; then subs="$subs $a"; n=$((n + 1)); fi
-         case "$a" in *git/refs*|*/merge|*/merges|*dispatches*|*/contents/*) hit=1 ;; esac ;;
+         case "$a" in
+           *git/refs*|*dispatches*|*/contents/*) hit=1 ;;   # ref and file writes, workflow dispatches: never allowed
+           */merge|*/merges) mrg=1 ;;                         # a merge: rule 3, only while the push gate is on
+         esac ;;
     esac
     k=$((k + 1))
   done
   case "$subs" in
     " pr merge"*)
-      # Allowed only through the gate: valid token for the local HEAD, and the merge pinned to that exact
-      # commit with --match-head-commit so GitHub refuses it if the PR head is anything else.
-      local msha pin="" kk
-      msha=$(git -C "$SIM_CWD" rev-parse HEAD 2>/dev/null || true)
-      [ -n "$msha" ] || emit_deny "gh pr merge: cannot resolve HEAD here. Run it from inside the repo whose release token you minted."
-      kk=$(( $1 + 1 ))
-      while [ "$kk" -lt "$NT" ]; do
-        case "${TOKS[$kk]}" in
-          --match-head-commit) pin=${TOKS[$((kk + 1))]:-} ;;
-          --match-head-commit=*) pin=${TOKS[$kk]#--match-head-commit=} ;;
-        esac
-        kk=$((kk + 1))
-      done
-      require_token "$msha" "$SIM_CWD" "gh pr merge"
-      [ "$pin" = "$msha" ] || emit_deny "gh pr merge must be pinned to the released commit: add --match-head-commit $msha." ;;
+      # While the push gate is on, allowed only through the gate: valid token for the local HEAD, and the merge
+      # pinned to that exact commit with --match-head-commit so GitHub refuses it if the PR head is anything else.
+      # With the gate off a merge needs neither (see push_gate).
+      if push_gate; then
+        local msha pin="" kk
+        msha=$(git -C "$SIM_CWD" rev-parse HEAD 2>/dev/null || true)
+        [ -n "$msha" ] || emit_deny "gh pr merge: cannot resolve HEAD here. Run it from inside the repo whose release token you minted."
+        kk=$(( $1 + 1 ))
+        while [ "$kk" -lt "$NT" ]; do
+          case "${TOKS[$kk]}" in
+            --match-head-commit) pin=${TOKS[$((kk + 1))]:-} ;;
+            --match-head-commit=*) pin=${TOKS[$kk]#--match-head-commit=} ;;
+          esac
+          kk=$((kk + 1))
+        done
+        require_token "$msha" "$SIM_CWD" "gh pr merge"
+        [ "$pin" = "$msha" ] || emit_deny "gh pr merge must be pinned to the released commit: add --match-head-commit $msha."
+      fi ;;
     " pr close"*|" issue close"*|" issue delete"*)
       emit_deny "rule 9: closing or deleting PRs and issues is the user's call. Comment with your reasoning (gh pr comment / gh issue comment) and notify instead." ;;
     " release create"*|" release delete"*|" release edit"*|" release upload"*)
@@ -667,7 +696,7 @@ check_gh() { # $1 = index of gh
       if [ "$mut" -eq 1 ] && { seg_matches '*refs/tags*' || seg_matches '*/releases' || seg_matches '*/releases/*'; }; then
         emit_deny "rule 8: creating a tag or a release through the API publishes a release. Create the tag locally, then notify the user that it is ready."
       fi
-      if [ "$mut" -eq 1 ] && [ "$hit" -eq 1 ]; then emit_deny "gh api call that merges, dispatches workflows, or writes refs/contents bypasses the release gate."; fi
+      if [ "$mut" -eq 1 ] && { [ "$hit" -eq 1 ] || { [ "$mrg" -eq 1 ] && push_gate; }; }; then emit_deny "gh api call that merges, dispatches workflows, or writes refs/contents bypasses the release gate."; fi
       if [ "$mm" -eq 1 ] && [ "$inp" -eq 1 ]; then emit_deny "gh api with a mutating method and --input sends a body the guard cannot read. Use the dedicated gh subcommand, or ask the user."; fi
       if [ "$inp" -eq 1 ] && seg_matches graphql; then emit_deny "gh api graphql --input sends a query the guard cannot read. Pass the query with -f query=... so it can be checked."; fi
       if graphql_mutation; then emit_deny "rule 3/9: a GraphQL mutation that closes, merges, deletes, publishes or writes refs is the user's call (it bypasses the release gate)."; fi ;;
@@ -871,8 +900,34 @@ committed_migration() { # absolute physical path -> 0 if it exists in HEAD of it
   git -C "$top" cat-file -e "HEAD:$rel" 2>/dev/null
 }
 
+CFG_L=""   # the lower-cased physical paths of the machine config ($AGENT_HOME/config, ~/.agent/config), one per line
+is_config_path() { # absolute path -> 0 when it is the machine config that holds the push_gate switch
+  local l p
+  if [ -z "$CFG_L" ]; then
+    CFG_L=$(printf '%s\n%s\n' "$(resolve_path "${AGENT_HOME:-$HOME/.agent}/config" "$CWD_PHYS")" "$(resolve_path "$HOME/.agent/config" "$CWD_PHYS")" | LC_ALL=C tr 'A-Z' 'a-z')
+  fi
+  l=$(printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z')
+  while IFS= read -r p; do
+    if [ "$l" = "$p" ]; then return 0; fi
+  done <<<"$CFG_L"
+  return 1
+}
+config_token_hit() { # token -> 0 when it, or what follows a redirect operator or a name=, names the machine config
+  local t=$1 c cand
+  [ "${#t}" -le 4096 ] || return 1
+  t=${t//\$\{AGENT_HOME\}/${AGENT_HOME:-$HOME/.agent}}; t=${t//\$AGENT_HOME/${AGENT_HOME:-$HOME/.agent}}
+  t=${t//\$\{HOME\}/$HOME}; t=${t//\$HOME/$HOME}
+  for cand in "$t" "${t#"${t%%[!0-9<>&|]*}"}" "${t#*=}"; do
+    [ -n "$cand" ] || continue
+    c=$(resolve_path "$cand" "$SIM_CWD")
+    if is_config_path "$c"; then return 0; fi
+  done
+  return 1
+}
+
 is_tamper_path() { # macOS volumes are case-insensitive: match on the lower-cased path (like is_goal_path)
   local l s
+  if is_config_path "$1"; then return 0; fi
   l=$(printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z')
   s=$(printf '%s' "$SELF_DIR" | LC_ALL=C tr 'A-Z' 'a-z')
   case "$l" in "$s"|"$s"/*) return 0 ;; esac
@@ -988,6 +1043,11 @@ tamper_bash() {
     if [ -n "$abs" ] && is_tamper_path "$abs" && tok_written "$k"; then
       emit_deny "editing hooks, settings or the guard itself ($t) would disable the guardrails. Ask the user."
     fi
+    case "$t" in *[Cc][Oo][Nn][Ff][Ii][Gg])   # the machine config holds the push_gate switch: a session may read it, not write it
+      if config_token_hit "$t" && tok_written "$k"; then
+        emit_deny "editing hooks, settings or the guard itself (the machine config $t holds the push_gate switch, which only the user sets). Ask the user."
+      fi ;;
+    esac
     gabs=""
     case "$t" in
       *[Gg][Oo][Aa][Ll].[Mm][Dd]*) goal_token_path "$t"; gabs=$GABS ;;

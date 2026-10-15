@@ -2,6 +2,9 @@
 # guard.sh: every guardrail in PLAN 5.1 denies, ordinary commands pass, works in any folder.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# Rule 3 (a release token for a push or merge to main) applies only while the push gate is on, and it is off by
+# default: these tests prove the rule, so they run with push_gate=on (t_pushgate.sh covers the switch itself).
+printf 'push_gate=on\n' >"$AGENT_HOME/config"
 
 R=$(mk_repo grepo)
 RP=$(cd "$R" && pwd -P)
