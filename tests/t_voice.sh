@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Phase 3 (voice level A): the /dash slash command and docs/voice.md. No test calls a voice tool or plays audio.
+# The literal ~ in quotes is the point: these are command strings a model types, not paths for this shell.
+# shellcheck disable=SC2088
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 

@@ -27,7 +27,7 @@ Your tools are limited, and a gate (`tool-gate.sh`) enforces it on every call. A
 2. Safe instructions (run the tests again, summarize, continue) are relayed immediately with `SendMessage`, logged with `relay-log.sh ... no '<text>'`, then confirmed aloud in one line.
 3. Risky instructions are READ BACK and need a spoken "yes" first: anything destructive (delete, drop, reset, force), anything that deploys or pushes, merges, migrates a database, spends money, or touches credentials. Read it back verbatim: "I will tell miso-app: push to main. Confirm?" Speech-to-text mishears, so do not skip this. After a "yes", relay it and log it with `relay-log.sh ... yes '<text>'`. After anything else, do not relay it.
 4. Refuse to relay anything the guardrails would deny, and say what the worker can do instead:
-   - a force push, or a push to main without the release gate (it can run the gate or open a PR);
+   - a force push, and a push to main that the worker's guard would deny (the denial says so: the worker then runs the release gate or opens a PR). A push the guard allows is still READ BACK (step 3) and needs a spoken "yes";
    - a deploy by hand (`vercel`, `gh workflow run`);
    - reading or printing `.env` files or other credentials;
    - applying a migration outside the migration gate, editing a committed migration, or database changes through the Supabase tools;

@@ -2,6 +2,8 @@
 # Phase 4: the voice dispatcher. 4.1 the policy file, 4.2 the tool restriction (tool-gate.sh, settings, launcher,
 # install path) and relay-log.sh. Nothing here starts a real session, calls a model or plays audio: the gate is
 # driven with hook JSON, the launcher with a fake claude.
+# The literal ~ in quotes is the point: these are command strings a model types, not paths for this shell.
+# shellcheck disable=SC2088
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -402,4 +404,25 @@ assert_contains "4.1: the one write is relay-log.sh" "$pb" "relay-log.sh"
 assert_not_contains "4.1: no longer claims a file edit of its own" "$pb" "That file edit is the only write you do"
 assert_not_contains "4.1: no longer offers to write into NEXT.md (it cannot)" "$pb" "put the instruction in X's NEXT.md"
 assert_contains "4.1: a denial is reported, not worked around" "$pb" "do not try another way"
+# ---------------- 4.3: the spoken acceptance script, and the owner-only steps ----------------
+AC="$KIT/docs/dispatcher-acceptance.md"
+assert_file "4.3: docs/dispatcher-acceptance.md exists" "$AC"
+ab=$(cat "$AC" 2>/dev/null || true)
+for phrase in "What's blocked?" "What did miso finish?" "Tell miso to run the tests again" "push miso-workspace"; do
+  assert_contains "4.3: the script has the phrase: $phrase" "$ab" "\"$phrase\""
+done
+assert_eq "4.3: every phrase has a pass criterion" "ok" "$([ "$(grep -c '^\*\*Pass' "$AC")" -ge 4 ] && echo ok || echo "only $(grep -c '^\*\*Pass' "$AC")")"
+assert_eq "4.3: every phrase has a fail criterion" "ok" "$([ "$(grep -c '^\*\*Fail' "$AC")" -ge 4 ] && echo ok || echo "only $(grep -c '^\*\*Fail' "$AC")")"
+assert_contains "4.3: the risky phrase must not be relayed unconfirmed" "$ab" "never relayed"
+assert_contains "4.3: the speed pass line is the one chosen in MANUAL-STEPS 0.6" "$ab" "pass line"
+assert_contains "4.3: says the owner runs it" "$ab" "You run this"
+assert_contains "4.3: tells how to check a relay and a denial afterwards" "$ab" "events.jsonl"
+MS="$KIT/MANUAL-STEPS.md"; mb=$(cat "$MS")
+assert_contains "MANUAL-STEPS has a dated section for 2026-10-16" "$mb" "2026-10-16"
+for step in "0.6" "0.7" "4.3"; do
+  assert_contains "MANUAL-STEPS 2026-10-16 section has step $step" "$(printf '%s\n' "$mb" | sed -n '/^## 2026-10-16/,$p')" "$step"
+done
+assert_contains "MANUAL-STEPS: step V1 (hear /dash) exists, voice.md points at it" "$(printf '%s\n' "$mb" | sed -n '/^## 2026-10-16/,$p')" "V1"
+assert_contains "MANUAL-STEPS: the pass line is the owner's to pick" "$(printf '%s\n' "$mb" | sed -n '/^## 2026-10-16/,$p')" "pick"
+assert_contains "the earlier 0.4/0.5 sections are kept" "$mb" "## - [x] 0.4 SessionStart hook fires in Desktop and VS Code"
 exit 0
