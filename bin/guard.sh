@@ -17,7 +17,8 @@
 # publish, gh release, gh repo delete/visibility/public, pushing a v* tag or all tags, tags/releases through
 # gh api) | 9 closing PRs/issues | 10 sending email/chat
 # (drafts only) | 11 gate settings in GOAL.md (review, release_mode, test_command). Extras: --no-verify,
-# hook/settings/token tampering, gh pr merge, piping into a shell.
+# hook/settings/token tampering, gh pr merge, piping into a shell. A git alias does not get around any of them:
+# `git <word>` is resolved through the git config and the rules run on its expansion (see "git aliases" below).
 # The Monitor tool (it runs a shell command) goes through the Bash rules. A missing dependency, a failing
 # splitter, a deny that cannot be printed, or a command that takes more than 8 s to check all fail closed.
 # Every deny is also logged as a `deny` event, after the decision has been printed.
@@ -42,10 +43,14 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 INPUT=$(cat)
 DECIDED=0
 
+ALIAS_NOTE=""   # set while the rules run on what a git alias expands to: the deny then says which alias it came through
 emit_deny() {
   # The reason can carry attacker-shaped text (a 1 MB token makes jq fail with "Argument list too long"): cap it.
-  local reason=$1
-  if [ "${#reason}" -gt 500 ]; then reason="${reason:0:500}..."; fi
+  # The alias note goes after the cap, so the text of the rule that was hit always stays first.
+  local reason=$1 cap=500
+  if [ -n "$ALIAS_NOTE" ]; then cap=400; fi
+  if [ "${#reason}" -gt "$cap" ]; then reason="${reason:0:$cap}..."; fi
+  if [ -n "$ALIAS_NOTE" ]; then reason="$reason $ALIAS_NOTE"; fi
   # DECIDED only after the decision was printed; if it cannot be printed, exit 2 (a blocking error).
   if ! jq -n --arg r "GUARD: $reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'; then
     echo "GUARD: could not print the deny decision; failing closed" >&2
@@ -307,12 +312,19 @@ check_refspec() { # refspec gdir delete
   local r=$1 gdir=$2 del=$3 src dst cur sha
   src=${r%%:*}
   if [[ "$r" == *:* ]]; then dst=${r#*:}; else dst=$r; fi
+  if [ "$ALIAS_DEFINE" -eq 1 ]; then   # an alias being defined: a variable or substitution is filled in when it runs
+    case "$src$dst" in *'$'*|*'`'*) return 0 ;; esac
+  fi
   case "$src$dst" in
     *'$'*|*'*'*|*'?'*|*'['*|*'`'*|*'{'*|*'~'*)
       emit_deny "cannot determine the push target from '$r' (variable, glob or brace). Name the branch literally, e.g. git push origin HEAD:my-branch." ;;
   esac
   dst=${dst#refs/heads/}
-  if [ "$dst" = HEAD ]; then cur=$(git -C "$gdir" symbolic-ref --short -q HEAD 2>/dev/null || true); dst=$cur; fi
+  if [ "$dst" = HEAD ]; then
+    # an alias being defined: HEAD is whatever is checked out when it runs, and it is checked again then
+    [ "$ALIAS_DEFINE" -eq 0 ] || return 0
+    cur=$(git -C "$gdir" symbolic-ref --short -q HEAD 2>/dev/null || true); dst=$cur
+  fi
   is_protected "$dst" || return 0
   [ -n "$src" ] || emit_deny "deleting the protected branch $dst is not allowed."
   [ "$del" -eq 0 ] || emit_deny "deleting the protected branch $dst is not allowed."
@@ -401,6 +413,8 @@ check_push() { # $1 = index of 'push' token, $2 = git dir
     prev=$r
   done <<<"$refs"
   if [ -z "$refs" ]; then
+    # an alias being defined: whether a bare push is allowed depends on the branch when it runs, not now
+    if [ "$ALIAS_DEFINE" -eq 1 ]; then return 0; fi
     cur=$(git -C "$gdir" symbolic-ref --short -q HEAD 2>/dev/null || true)
     up=$(git -C "$gdir" rev-parse --abbrev-ref '@{u}' 2>/dev/null || true)
     if is_protected "$cur" || is_protected "${up#*/}"; then
@@ -416,15 +430,154 @@ check_push() { # $1 = index of 'push' token, $2 = git dir
   done <<<"$refs"
 }
 
+# ---------- git aliases ----------
+# `git <word>` runs alias.<word> from the git config when <word> is not a built-in command (an alias never hides a
+# built-in). So an alias is a way to reach `git push origin HEAD:main`, a force push, a tag push or a `!`-shell
+# command without the words ever appearing in the command. The guard therefore:
+#  - resolves a word that is not a built-in with `git config --get alias.<word>` in the command's directory (the
+#    guard sees system, global and repo config; `-C`/cd are honoured) and runs the same rules on the expansion
+#    (a `!` alias as a shell command, run from the top of the work tree), at most 6 aliases deep;
+#  - runs the rules on an alias set on the same command line (`-c alias.x=...`, GIT_CONFIG_KEY_n/VALUE_n,
+#    GIT_CONFIG_PARAMETERS) and on one set earlier in the same command (`git config alias.x ... && git x`);
+#  - checks what `git config alias.x VALUE` would define: an explicit push to a protected branch, a force push,
+#    a tag push, a publish, a `!` body that any rule denies. The branch is not looked at then (a bare `push` or
+#    `push origin HEAD` is allowed to be defined; it is checked again when the alias runs).
+# What is not resolved is allowed, as before: a config that cannot be read, a directory that is not there, a
+# word that is no alias. Residuals: an alias written into a config file with an editor, sed or echo; a variable
+# as the subcommand (git $x); an alias set through --config-env is denied because its value cannot be read.
+GIT_BUILTINS=" add am annotate apply archive backfill bisect blame branch bugreport bundle cat-file check-attr check-ignore check-mailmap check-ref-format checkout checkout--worker checkout-index cherry cherry-pick clean clone column commit commit-graph commit-tree config count-objects credential credential-cache credential-cache--daemon credential-store describe diagnose diff diff-files diff-index diff-pairs diff-tree difftool fast-export fast-import fetch fetch-pack fmt-merge-msg for-each-ref for-each-repo format-patch fsck fsck-objects fsmonitor--daemon gc get-tar-commit-id grep hash-object help hook index-pack init init-db interpret-trailers log ls-files ls-remote ls-tree mailinfo mailsplit maintenance merge merge-base merge-file merge-index merge-ours merge-recursive merge-recursive-ours merge-recursive-theirs merge-subtree merge-tree mktag mktree multi-pack-index mv name-rev notes pack-objects pack-redundant pack-refs patch-id pickaxe prune prune-packed pull push range-diff read-tree rebase receive-pack reflog refs remote remote-ext remote-fd repack replace replay rerere reset restore rev-list rev-parse revert rm send-pack shortlog show show-branch show-index show-ref sparse-checkout stage stash status stripspace submodule--helper switch symbolic-ref tag unpack-file unpack-objects update-index update-ref update-server-info upload-archive upload-archive--writer upload-pack var verify-commit verify-pack verify-tag version whatchanged worktree write-tree "
+ALIAS_DEPTH=0      # aliases being expanded (nested scans)
+ALIAS_CHAIN=""     # their names: an alias that calls itself is a loop, which git stops with an error of its own
+ALIAS_DEFINE=0     # 1 while checking what an alias definition would do (see above)
+ALIAS_DEFS=""      # aliases defined earlier in this command: "name<TAB>body" lines
+ALIAS_BODY=""      # alias_lookup's result
+
+unquote_text() { printf '%s' "$1" | tr -d "\"'\\\\"; }   # the same three deletions tokenize makes
+
+alias_lookup() { # name gdir -> ALIAS_BODY: defined earlier in this command, else from the git config ('' = no alias)
+  local name=$1 gdir=$2 n b
+  ALIAS_BODY=""
+  while IFS=$'\t' read -r n b; do
+    if [ -n "$n" ] && [ "$n" = "$name" ]; then ALIAS_BODY=$b; fi
+  done <<<"$ALIAS_DEFS"
+  [ -z "$ALIAS_BODY" ] || return 0
+  case "$name" in ""|-*|*[!A-Za-z0-9-]*) return 0 ;; esac   # not a key git can hold: no alias
+  ALIAS_BODY=$(git -C "$gdir" config --get "alias.$name" 2>/dev/null || true)
+}
+
+alias_subst() { # body mode args -> the body with $1..$9, $@ and $* replaced: use = the real arguments, define = a
+  # placeholder word (the arguments are not known yet)
+  local b=$1 mode=$2 i=1 v all=$3
+  local -a av=()
+  if [ "$mode" = use ]; then
+    set -f; read -r -a av <<<"$3" || true; set +f
+  else all=""; fi
+  while [ "$i" -le 9 ]; do
+    if [ "$mode" = use ]; then v=${av[$((i - 1))]:-}; else v=ARG; fi
+    b=${b//\$$i/$v}; b=${b//\$\{$i\}/$v}
+    i=$((i + 1))
+  done
+  b=${b//\$@/$all}; b=${b//\$\*/$all}
+  printf '%s' "$b"
+}
+
+alias_eval() { # mode(use|define) name body gdir [args] : run the rules on what the alias runs. A deny exits; a clean
+  # alias returns with every piece of scan state as it was.
+  local mode=$1 name=$2 body=$3 gdir=$4 args=${5:-} text base unk
+  local sv_raw=$SEG_RAW sv_ar=$SEG_AFTER_REDIR sv_nar=$NEXT_AFTER_REDIR sv_defb=$DEFB sv_all=$CMD_ALL sv_nt=$NT sv_cp=$CP_LIMIT
+  local sv_cwd=$SIM_CWD sv_unk=$SIM_UNKNOWN sv_note=$ALIAS_NOTE sv_def=$ALIAS_DEFINE sv_chain=$ALIAS_CHAIN
+  local -a sv_toks=("${TOKS[@]}")
+  case "$ALIAS_CHAIN" in *" $name "*) return 0 ;; esac   # a loop: git stops it itself
+  if [ "$ALIAS_DEPTH" -ge 6 ]; then emit_deny "a git alias chain more than 6 deep cannot be checked (alias '$name'). Call the command directly."; fi
+  body=${body#"${body%%[![:space:]]*}"}
+  [ -n "$body" ] || return 0
+  if [ -z "$ALIAS_NOTE" ]; then
+    if [ "$mode" = define ]; then ALIAS_NOTE="(defining git alias '$name' as '${body:0:60}')"; else ALIAS_NOTE="(through git alias '$name' = '${body:0:60}')"; fi
+  fi
+  ALIAS_DEPTH=$((ALIAS_DEPTH + 1)); ALIAS_CHAIN="$ALIAS_CHAIN $name "
+  if [ "$mode" = define ]; then ALIAS_DEFINE=1; fi
+  case "$body" in
+    '!'*)   # a shell alias: run from the top of the work tree, with the arguments appended ("$@")
+      text=$(alias_subst "${body#!}" "$mode" "$args")
+      if [ -n "$args" ] && [ "$mode" = use ]; then text="$text $args"; fi
+      base=$(git -C "$gdir" rev-parse --show-toplevel 2>/dev/null || true)
+      [ -n "$base" ] || base=$gdir ;;
+    *) text="git $body"; if [ -n "$args" ] && [ "$mode" = use ]; then text="$text $args"; fi; base=$gdir ;;
+  esac
+  unk=$SIM_UNKNOWN; if [ "$mode" = define ]; then unk=0; fi
+  scan_text "$text" "$base" "$unk"
+  ALIAS_DEPTH=$((ALIAS_DEPTH - 1))
+  SEG_RAW=$sv_raw; SEG_AFTER_REDIR=$sv_ar; NEXT_AFTER_REDIR=$sv_nar; DEFB=$sv_defb; CMD_ALL=$sv_all; NT=$sv_nt; CP_LIMIT=$sv_cp
+  SIM_CWD=$sv_cwd; SIM_UNKNOWN=$sv_unk; ALIAS_NOTE=$sv_note; ALIAS_DEFINE=$sv_def; ALIAS_CHAIN=$sv_chain
+  TOKS=("${sv_toks[@]}")
+}
+
+alias_pairs() { # raw-segment cfg -> lines "kind<TAB>name<TAB>rest": kind U = an alias set for this one command (-c
+  # alias.x=VALUE or GIT_CONFIG_PARAMETERS, GIT_CONFIG_KEY_n=alias.x with its GIT_CONFIG_VALUE_n), kind D (cfg = 1)
+  # = `alias.x VALUE`, the git config form. rest = the text after it to the end of the segment, quotes and all: the
+  # words of a quoted value cannot be told from the arguments that follow it, so all of it is checked.
+  perl -e '
+    my ($raw, $cfg) = @ARGV;
+    while ($raw =~ /alias\.([A-Za-z0-9][A-Za-z0-9-]*)=/gi) { print "U\t", lc($1), "\t", substr($raw, pos($raw)), "\n" }
+    my $r = $raw;
+    while ($r =~ /GIT_CONFIG_KEY_(\d+)=["\x27]?alias\.([A-Za-z0-9][A-Za-z0-9-]*)/gi) {
+      my ($n, $name) = ($1, lc $2);
+      my $v = $raw;
+      if ($v =~ /GIT_CONFIG_VALUE_$n=/g) { print "U\t$name\t", substr($v, pos($v)), "\n" }
+    }
+    if ($cfg) { while ($raw =~ /(?:^|[\s"\x27])alias\.([A-Za-z0-9][A-Za-z0-9-]*)\s+(?=\S)/gi) { print "D\t", lc($1), "\t", substr($raw, pos($raw)), "\n" } }
+  ' "$1" "$2"
+}
+
+check_git_alias() { # git-index sub-index git-dir has_c : see the notes above; TOKS is the segment
+  local gidx=$1 sidx=$2 gdir=$3 sub=${TOKS[$2]:-} k pairs kind name rest body args="" cfg=0 env=0
+  [ "$sub" != config ] || cfg=1
+  k=0; while [ "$k" -lt "$gidx" ]; do
+    case "${TOKS[$k]}" in GIT_CONFIG_PARAMETERS=*|GIT_CONFIG_KEY_*) env=1 ;; esac
+    k=$((k + 1))
+  done
+  if [ "$4" -eq 1 ] || [ "$env" -eq 1 ] || [ "$cfg" -eq 1 ]; then
+    case "$SEG_RAW" in *[Aa][Ll][Ii][Aa][Ss].*)
+      pairs=$(alias_pairs "$SEG_RAW" "$cfg") || { echo "GUARD: could not read the alias definitions; failing closed" >&2; exit 2; }
+      while IFS=$'\t' read -r kind name rest; do
+        [ -n "$kind" ] || continue
+        if [ "${#rest}" -gt 8192 ]; then emit_deny "a git alias definition this long cannot be checked. Define it in smaller parts."; fi
+        body=$(unquote_text "$rest")
+        body=${body#"${body%%[![:space:]]*}"}
+        if [ "$kind" = D ]; then
+          alias_eval define "$name" "$body" "$gdir"
+          if [ "${#ALIAS_DEFS}" -lt 8192 ]; then ALIAS_DEFS="$ALIAS_DEFS$name"$'\t'"$body"$'\n'; fi
+        else
+          alias_eval use "$name" "$body" "$gdir"
+          # a quoted value before the command word comes out of the splitter with its spaces turned into '_'
+          if [ "$env" -eq 1 ] && [ "${body//_/}" != "$body" ]; then alias_eval use "$name" "${body//_/ }" "$gdir"; fi
+        fi
+      done <<<"$pairs" ;;
+    esac
+  fi
+  case "$sub" in ""|-*) return 0 ;; esac
+  case "$GIT_BUILTINS" in *" $sub "*) return 0 ;; esac
+  alias_lookup "$sub" "$gdir"
+  [ -n "$ALIAS_BODY" ] || return 0
+  k=$((sidx + 1))
+  while [ "$k" -lt "$NT" ]; do args="$args ${TOKS[$k]}"; k=$((k + 1)); done
+  alias_eval use "$sub" "$ALIAS_BODY" "$gdir" "${args# }"
+}
+
 check_git() { # $1 = index of git token
-  local j gdir=$SIM_CWD a sub k prev
+  local j gdir=$SIM_CWD a sub k prev has_c=0
   j=$(( $1 + 1 ))
   while [ "$j" -lt "$NT" ]; do
     a=${TOKS[$j]}
     case "$a" in
       -C) if [ "${#TOKS[$((j + 1))]}" -gt 4096 ]; then emit_deny "git -C with a path too long to check."; fi
           gdir=$(resolve_path "${TOKS[$((j + 1))]:-.}" "$gdir"); j=$((j + 2)) ;;
-      -c|--git-dir|--work-tree|--namespace|--exec-path) j=$((j + 2)) ;;
+      -c) case "${TOKS[$((j + 1))]:-}" in [Aa][Ll][Ii][Aa][Ss].*) has_c=1 ;; esac; j=$((j + 2)) ;;
+      --config-env) case "${TOKS[$((j + 1))]:-}" in [Aa][Ll][Ii][Aa][Ss].*) emit_deny "a git alias set with --config-env takes its value from an environment variable the guard cannot read. Set the command directly." ;; esac
+          j=$((j + 2)) ;;
+      --config-env=*) case "${a#--config-env=}" in [Aa][Ll][Ii][Aa][Ss].*) emit_deny "a git alias set with --config-env takes its value from an environment variable the guard cannot read. Set the command directly." ;; esac
+          j=$((j + 1)) ;;
+      --git-dir|--work-tree|--namespace|--exec-path) j=$((j + 2)) ;;
       -*) j=$((j + 1)) ;;
       *) break ;;
     esac
@@ -448,6 +601,7 @@ check_git() { # $1 = index of git token
       prev=$a; k=$((k + 1))
     done
   fi
+  check_git_alias "$1" "$j" "$gdir" "$has_c"
   [ "$sub" != push ] || check_push "$j" "$gdir"
 }
 
@@ -971,11 +1125,13 @@ join_continuations() { # backslash-newline is a line continuation: `git push \` 
 }
 
 CMD_ALL=""   # the text being scanned (for checks that span segments)
-scan_text() { # scan one text (heredoc bodies already stripped); a deny exits, so this only returns when it is clean
+scan_text() { # text [dir [1 when dir is not known]]: scan one text (heredoc bodies already stripped); a deny exits,
+  # so this only returns when it is clean. The text of a git alias is scanned from the directory it runs in.
   local seg segs p1=$1
   # every piece of per-scan state starts fresh: the simulated cd, the redirect carry-over; the time ceiling
-  # (SECONDS) keeps counting across scans
-  SIM_CWD=$CWD_PHYS; SIM_UNKNOWN=0; SEG_RAW=""; SEG_AFTER_REDIR=0; NEXT_AFTER_REDIR=0; DEFB=""
+  # (SECONDS) keeps counting across scans. The aliases defined by this command start with an empty list.
+  SIM_CWD=${2:-$CWD_PHYS}; SIM_UNKNOWN=${3:-0}; SEG_RAW=""; SEG_AFTER_REDIR=0; NEXT_AFTER_REDIR=0; DEFB=""
+  if [ "$ALIAS_DEPTH" -eq 0 ]; then ALIAS_DEFS=""; fi
   CMD_ALL=$1
   # a grep/rg pattern names no file (grep -n "ching.env" f): quote-data.pl masks the pattern words for pass 1
   case "$1" in
