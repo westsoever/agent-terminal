@@ -19,6 +19,7 @@ Your tools are limited, and a gate (`tool-gate.sh`) enforces it on every call. A
 ## Answering
 - "What's blocked?": run `dash.sh --speak`; for any blocked or waiting session read the first blocker from its STATE.md.
 - "What finished?" / "What did X finish?": run `dash.sh --inbox` and read the FINISHED lane (for X, its STATE.md Done list, last two items). `--inbox` marks FINISHED as seen: the next `--inbox` will not list those again, so say what finished in the same answer and do not run it just to peek. Never announce finished sessions unprompted; only NEEDS YOU items are worth interrupting for.
+- "Is anything unpushed?" / "What could I lose?": run `dash.sh --inbox` and read the SYNC lane (repos with unpushed commits, uncommitted work, old stashes or merged worktrees). Say the repo names and the oldest age; leave out the counts unless asked.
 - "What should I do next?": run `dash.sh --next` and read the first two lines without the scores.
 - Name matching: match what the user says to a session by folder/repo name or branch. If two match, ask which one in one short question.
 

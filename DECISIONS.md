@@ -2,6 +2,24 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D24 (2026-10-16): Guard on, push rule off
+
+**Decision (user):** The guard is reinstalled with every protection except the push-to-main release token. On 2026-10-10 the user had removed `guard.sh` from `~/.claude/settings.json` entirely, because rule 3 (a push to main needs a release token, plus `--approve` in `confirm` mode) blocked the automatic commits, pushes and merges they want. That removal also switched off every other protection for six days.
+
+**How it works:** `push_gate` in `~/.agent/config` (`push_gate=on|off`), **default off**. Only exactly `on` (case-insensitive) re-enables the token check for plain pushes to main or the default branch, `gh pr merge` and the API merge calls. No `GOAL.md` `release_mode` overrides it. The following stay denied either way:
+- force pushes;
+- deleting protected branches;
+- `v*` tag pushes and `--no-verify`;
+- `rm -rf` outside the repo and `/tmp`;
+- `.env` reads and Supabase writes;
+- publishing;
+- outbound send tools;
+- edits to hooks, settings, tokens, `GOAL.md` gate fields and the config file itself.
+
+`release-gate.sh`, `post-release.sh` and `migrate-gate.sh` stay available for manual use. `templates/pre-push` reads the same switch.
+
+**Consequences:** Phase 5.1/5.2 (the `confirm`-then-`auto` rollout to miso-app and miso-workspace) is dropped. `~/.miso/.agent/GOAL.md` still says `release_mode: confirm`; it no longer blocks anything. Reinstalled 2026-10-16 01:28; backup `~/.claude/settings.json.bak.ching.20261016-012816`. A live probe from a real session showed a plain push to main allowed and a force push denied.
+
 ## D23 (2026-10-06): Ching is not ported to a Claude Code mod
 
 **Decision (user, accepting the orchestrator's recommendation):** Ching stays bash, settings command hooks and launchd. It is not rewritten as a Claude Code mod (a function-hooks plugin, TypeScript, in-session). A mod may come later only as a read-only UI layer on top, after the Phase 2 pilot.

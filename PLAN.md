@@ -200,30 +200,30 @@ Order matters. Each phase has a **checkpoint**; I stop there.
 
 Work in `/tmp/agent-sandbox` (a fresh git repo). Back up `~/.claude/settings.json` first.
 
-- [ ] **0.1** Test a `PreToolUse` deny hook under `claude -p --permission-mode bypassPermissions`. Also test `permissions.deny` rules in bypass mode.
-- [ ] **0.2** Test `Stop` hook JSON: block with reason, find the exact loop-prevention field, confirm the 3-retry cap works.
-- [ ] **0.3** Test `Notification` matchers `agent_needs_input` and `agent_completed` in a normal foreground session.
-- [ ] **0.4** *(You do one step)* Start one Desktop Code-tab session and one VS Code session in the sandbox. A logging `SessionStart` hook records whether it fired in each.
-- [ ] **0.5** *(You do one step)* With two sessions running, send a `SendMessage` from one to the other while the target is (a) busy and (b) idle. Record whether the idle one wakes and acts.
+- [x] **0.1** Test a `PreToolUse` deny hook under `claude -p --permission-mode bypassPermissions`. Also test `permissions.deny` rules in bypass mode.
+- [x] **0.2** Test `Stop` hook JSON: block with reason, find the exact loop-prevention field, confirm the 3-retry cap works.
+- [x] **0.3** Test `Notification` matchers `agent_needs_input` and `agent_completed` in a normal foreground session.
+- [x] **0.4** *(You do one step)* Start one Desktop Code-tab session and one VS Code session in the sandbox. A logging `SessionStart` hook records whether it fired in each.
+- [x] **0.5** *(You do one step)* With two sessions running, send a `SendMessage` from one to the other while the target is (a) busy and (b) idle. Record whether the idle one wakes and acts.
 - [ ] **0.6** Install VoiceMode with local Whisper + Kokoro (pin the version, install `ffmpeg portaudio` via brew, `uv` if missing). Measure time from end-of-speech to first spoken word. Confirm macOS mic permission for the app you run it in.
 - [ ] **0.7** Start two sessions that both call `converse`. Confirm the second waits instead of talking over the first.
-- [ ] **0.8** Browser verification harness: in the sandbox, serve a tiny page, have a session open it with Chrome DevTools MCP, exercise it, read console/network, take a screenshot, and write an evidence file. Confirms the "see it working" step in 5.2 before it is relied on.
-- [ ] **0.9** Release token mechanics: in the sandbox with a local bare remote standing in for `origin`, confirm `guard.sh` denies a push to `main` with no token, allows it with a token for `HEAD`, and denies it again after a new commit.
-- [ ] **0.10** *Read-only:* check whether your Supabase plan offers database branching (list branches / project details). Nothing is created.
+- [x] **0.8** Browser verification harness: in the sandbox, serve a tiny page, have a session open it with Chrome DevTools MCP, exercise it, read console/network, take a screenshot, and write an evidence file. Confirms the "see it working" step in 5.2 before it is relied on.
+- [x] **0.9** Release token mechanics: in the sandbox with a local bare remote standing in for `origin`, confirm `guard.sh` denies a push to `main` with no token, allows it with a token for `HEAD`, and denies it again after a new commit.
+- [x] **0.10** *Read-only:* check whether your Supabase plan offers database branching (list branches / project details). Nothing is created.
 
 **Checkpoint 0:** a results table (pass/fail per item, with evidence). Anything that fails switches that part of the design to its fallback in section 3. You approve before Phase 1.
 
 ### Phase 1: Build the core kit (still no real repos)
 
-- [ ] **1.1** Create the project structure from section 5. Version it with a **local** `git init` in `ching` (see question 3). No GitHub remote is created in this step.
-- [ ] **1.2** `brew install terminal-notifier`; write `notify.sh`; find the Claude app bundle id for click-to-activate.
-- [ ] **1.3** Write `session-start.sh`, `pre-compact.sh`, `stop-check.sh`, `guard.sh`, using the schemas confirmed in Phase 0.
-- [ ] **1.4** Write `handoff.md` and `next.md` slash commands.
-- [ ] **1.5** Write templates: `GOAL.md`, `STATE.md`, `NEXT.md`, the `AGENTS.md` autonomy block, gitignore lines.
-- [ ] **1.6** Write `dash.sh` (including `--speak`) and the `~/.agent-repos` format.
-- [ ] **1.7** Write `release-gate.sh`, `post-release.sh` and the verification-evidence template (5.2), and `migrate-gate.sh` with its migration lint (5.3). Add `release_mode` and the per-repo test command to the `GOAL.md` template.
-- [ ] **1.8** Write `install.sh`: idempotent, backs up `settings.json`, shows a diff before applying.
-- [ ] **1.9** Tests in a throwaway repo: SessionStart injects, Stop retries then ends, notification shows repo name, each guardrail denies, the release token flow (no token, valid token, stale token), a destructive migration is blocked while an additive one passes, running `install.sh` twice changes nothing.
+- [x] **1.1** Create the project structure from section 5. Version it with a **local** `git init` in `ching` (see question 3). No GitHub remote is created in this step.
+- [x] **1.2** `brew install terminal-notifier`; write `notify.sh`; find the Claude app bundle id for click-to-activate.
+- [x] **1.3** Write `session-start.sh`, `pre-compact.sh`, `stop-check.sh`, `guard.sh`, using the schemas confirmed in Phase 0.
+- [x] **1.4** Write `handoff.md` and `next.md` slash commands.
+- [x] **1.5** Write templates: `GOAL.md`, `STATE.md`, `NEXT.md`, the `AGENTS.md` autonomy block, gitignore lines.
+- [x] **1.6** Write `dash.sh` (including `--speak`) and the `~/.agent-repos` format.
+- [x] **1.7** Write `release-gate.sh`, `post-release.sh` and the verification-evidence template (5.2), and `migrate-gate.sh` with its migration lint (5.3). Add `release_mode` and the per-repo test command to the `GOAL.md` template.
+- [x] **1.8** Write `install.sh`: idempotent, backs up `settings.json`, shows a diff before applying.
+- [x] **1.9** Tests in a throwaway repo: SessionStart injects, Stop retries then ends, notification shows repo name, each guardrail denies, the release token flow (no token, valid token, stale token), a destructive migration is blocked while an additive one passes, running `install.sh` twice changes nothing.
 
 **Checkpoint 1:** test output plus the exact `settings.json` diff. You approve before `install.sh` touches your real settings. **Done: approved, hooks installed (D13, `CHECKPOINT-1.md`).**
 
@@ -250,26 +250,27 @@ Built per D10: the shared contracts land first, then parallel implementers on di
 - [x] **1.6.2** `notify.sh`: the budgeted `waiting` kind.
 - [x] **1.6.3** `ching-watch.sh`: detect waiting sessions and send the banner for finished sessions with open work.
 - [x] **1.6.4** `ching-watch.sh`: one spoken note per waiting spell (presence, voice lock, quiet hours, speech gap).
-- [ ] **1.6.5** Live smoke section, docs, and the real-machine check from launchd. (real-machine check from launchd pending)
+- [x] **1.6.5** Live smoke section, docs, and the real-machine check from launchd. (silent launchd check done 2026-10-16, docs/live-checks.md and tests/live-watch.sh; the spoken check from launchd is still open and must run in the daytime)
 
 **Checkpoint 1.6:** test output, the `ching-watch.sh` diff and the real-machine check. You approve before `nudge` merges into `main`.
 
 ### Phase 2: Pilot on a couple of real sessions across different folders (2-3 days of real use)
 
 - [x] **2.1** Run `install.sh` on your real `~/.claude/settings.json` (machine-wide from this point; no per-repo setup is needed for hooks, state, notifications, `dash.sh` or the guardrails). *Done 2026-10-06 10:01 after the user chose "install as designed" (rule 10 denies Telegram/Discord/Gmail/Slack reply and send tools for sessions). Backup `~/.claude/settings.json.bak.ching.20261006-100147`; launchd job `org.ching.watch` loaded; a second run changed nothing; the watcher logged `context` events.*
-- [ ] **2.2** *(prepared 2026-10-06: miso opted in through the worktree `~/bbq/.worktrees/miso-ching-pilot`, branch `ching-pilot`, `release_mode: confirm`. miso's `bun test` has failed on main since 2026-10-02 (7 local-registry tests), so the first pilot task there is getting CI green. First task done locally 2026-10-06: the failing tests came from the root `overrides: { zod: ^4.4.3 }` forcing zod 4 onto shadcn, which needs zod 3 (`deepPartial`); dropping the override gives shadcn its own zod 3.25.76 and leaves everything else on zod 4.4.3. Commit 70b0869 on `ching-pilot` (not pushed; the full miso gate is green, 2612 tests). It still has to reach main through a normal feature branch and PR, since `ching-pilot` is never pushed. Pilot folders picked 2026-10-06: the miso worktree above, plus `~/bbq/bbqos` (plain repo on main, not opted in, so it exercises the machine-wide hooks without a `GOAL.md`). No real non-repo working folder exists on this machine (the AIW shared drive is a git repo), so the third slot stays open until real non-repo work comes up.)* Pick two or three real sessions in different folders (for example one repo, one worktree, one non-repo folder). Optionally, in one repo on a branch: add the autonomy block to `AGENTS.md`, add gitignore lines, write `.agent/GOAL.md` with the real test command (from `package.json`) to opt that repo into the Stop check and the release/migrate gates.
-- [ ] **2.3** Work normally with those sessions. Record the three metrics in section 7.
+- [x] **2.2** *(prepared 2026-10-06: miso opted in through the worktree `~/bbq/.worktrees/miso-ching-pilot`, branch `ching-pilot`, `release_mode: confirm`. miso's `bun test` has failed on main since 2026-10-02 (7 local-registry tests), so the first pilot task there is getting CI green. First task done locally 2026-10-06: the failing tests came from the root `overrides: { zod: ^4.4.3 }` forcing zod 4 onto shadcn, which needs zod 3 (`deepPartial`); dropping the override gives shadcn its own zod 3.25.76 and leaves everything else on zod 4.4.3. Commit 70b0869 on `ching-pilot` (not pushed; the full miso gate is green, 2612 tests). It still has to reach main through a normal feature branch and PR, since `ching-pilot` is never pushed. Pilot folders picked 2026-10-06: the miso worktree above, plus `~/bbq/bbqos` (plain repo on main, not opted in, so it exercises the machine-wide hooks without a `GOAL.md`). No real non-repo working folder exists on this machine (the AIW shared drive is a git repo), so the third slot stays open until real non-repo work comes up.)* Pick two or three real sessions in different folders (for example one repo, one worktree, one non-repo folder). Optionally, in one repo on a branch: add the autonomy block to `AGENTS.md`, add gitignore lines, write `.agent/GOAL.md` with the real test command (from `package.json`) to opt that repo into the Stop check and the release/migrate gates. *(2026-10-16: 70b0869 reached miso main as 643d6ad on 2026-10-06, CI green. The third slot can be a real non-repo folder such as ~/Downloads/tricount_v2.)*
+- [ ] **2.3** Work normally with those sessions. Record the three metrics in section 7. *(tooling done 2026-10-16: `bin/metrics.sh --days N`; stays open until the Checkpoint 2 review)*
 - [ ] **2.4** Read miso's `release.yml` and fill in its release path in 5.2 *(done 2026-10-06; it is a tag-triggered npm publish, see 5.2)*. Run the browser verification step for real on one change *(open: needs a real change)*.
 - [ ] **2.5** If a migration is needed during the pilot, run it through `migrate-gate.sh` with you watching the first one.
 - [ ] **2.6** *(v4)* Tune the notification budget, stall threshold and context levels from what the pilot shows (`notify` and `stall` events). The first real release goes through the review step with you watching.
+- [x] **2.7** *(added 2026-10-16)* Read-only sync check: `bin/sync-check.sh`, run by the watcher every 6 hours. Unpushed, behind, uncommitted, merged-but-kept worktrees and stashes, shown in `~/.agent/sync-check.md`, `sync` events, the SYNC lane of `dash.sh --inbox` and at most one banner a day.
 
 **Checkpoint 2:** metrics review. We tune `GOAL.md` and the policy before adding anything.
 
 ### Phase 3: Voice, level A (dictate + spoken status)
 
-- [ ] **3.1** Add `mcp__voicemode__converse` and the plugin's tool name to the permission allowlist.
-- [ ] **3.2** Make `dash.sh --speak` available as a command the dispatcher (and you) can run.
-- [ ] **3.3** Document the `/voice` push-to-talk fallback for dictating into the focused worker.
+- [x] **3.1** Add `mcp__voicemode__converse` and the plugin's tool name to the permission allowlist.
+- [x] **3.2** Make `dash.sh --speak` available as a command the dispatcher (and you) can run.
+- [x] **3.3** Document the `/voice` push-to-talk fallback for dictating into the focused worker.
 
 **Checkpoint 3:** you try it for a day; tell me what feels slow or wrong.
 
@@ -277,21 +278,23 @@ Built per D10: the shared contracts land first, then parallel implementers on di
 
 Runs only if Phase 0.5 passed. If it failed, the dispatcher is status-only and relay stays manual via `/voice`.
 
-- [ ] **4.1** Create the dispatcher: `dispatcher/AGENTS.md` (short spoken replies, never edits code, read back and confirm destructive/deploy/push instructions, refuses to relay anything the guardrails would deny).
-- [ ] **4.2** Give it only: `dash.sh`, file reads of `STATE.md`, `ListAgents`, `SendMessage`, `converse`.
+- [x] **4.1** Create the dispatcher: `dispatcher/AGENTS.md` (short spoken replies, never edits code, read back and confirm destructive/deploy/push instructions, refuses to relay anything the guardrails would deny).
+- [x] **4.2** Give it only: `dash.sh`, file reads of `STATE.md`, `ListAgents`, `SendMessage`, `converse`.
 - [ ] **4.3** Acceptance test, spoken: "What's blocked?", "What did miso finish?", "Tell miso to run the tests again", and a risky one ("push miso-workspace") that must be read back and refused or confirmed.
 
 **Checkpoint 4:** you try the four acceptance phrases and judge.
 
 ### Phase 5: Roll out to the other repos
 
-- [ ] **5.1** miso-app (guardrails 3 and 4 and the release gate must already be active and tested). `release_mode: confirm` for the first release, you watch it land, then switch to `auto`.
-- [ ] **5.2** miso-workspace, last. Add the `spaces.lock` / deploy-chain note to its `GOAL.md` so sessions know a push releases to production with no preview. Same `confirm`-then-`auto` rule.
-- [ ] **5.3** Add a cap reminder to `dash.sh`: warn when more than 5 sessions are active.
+- [~] **5.1** *(dropped 2026-10-16 by D24: the push rule is off, so there is no confirm-mode rollout)* miso-app (guardrails 3 and 4 and the release gate must already be active and tested). `release_mode: confirm` for the first release, you watch it land, then switch to `auto`.
+- [~] **5.2** *(dropped 2026-10-16 by D24: the push rule is off, so there is no confirm-mode rollout)* miso-workspace, last. Add the `spaces.lock` / deploy-chain note to its `GOAL.md` so sessions know a push releases to production with no preview. Same `confirm`-then-`auto` rule.
+- [x] **5.3** Add a cap reminder to `dash.sh`: warn when more than 5 sessions are active.
 
 **Checkpoint 5:** a week of metrics across all three.
 
 ### Phase 6: Learning loop (D11), specified after the pilot
+
+Draft spec (2026-10-16, needs the owner's answers to its 10 questions; build still waits on pilot metrics per D16): `docs/superpowers/specs/2026-10-16-phase6-learning-loop-design.md`.
 
 Gets its own spec once the pilot has produced real `events.jsonl` data. The design inputs harvested in v4 (spec section 7):
 - lesson records `{task_type, what_worked, what_failed, do_differently, quality}`, with keyword-gated retrieval and the top 3 injected at SessionStart;
