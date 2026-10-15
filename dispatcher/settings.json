@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "ListAgents",
+      "SendMessage",
+      "ToolSearch",
+      "mcp__voicemode__converse",
+      "mcp__plugin_voicemode_voicemode__converse",
+      "Bash(~/.claude/ching/bin/dash.sh:*)",
+      "Bash(@CHING@/bin/dash.sh:*)",
+      "Bash(~/.claude/ching/dispatcher/relay-log.sh:*)",
+      "Bash(@CHING@/dispatcher/relay-log.sh:*)",
+      "Read(//**/.agent/STATE.md)",
+      "Read(//**/.agent/NEXT.md)",
+      "Read(//**/sessions/*/STATE.md)",
+      "Read(//**/sessions/*/NEXT.md)"
+    ],
+    "deny": [
+      "Edit",
+      "Write",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch",
+      "Agent",
+      "Skill",
+      "Monitor"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {"type": "command", "command": "@CHING@/dispatcher/tool-gate.sh", "timeout": 10}
+        ]
+      }
+    ]
+  }
+}
