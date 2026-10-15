@@ -10,8 +10,8 @@ Test method: `claude -p --model haiku --permission-mode bypassPermissions --sett
 |------|--------|------------------------------|
 | 0.1 PreToolUse deny under bypass | **PASS** (hook JSON deny, hook exit 2, and `permissions.deny` all block) | none |
 | 0.2 Stop hook block + loop field | **PASS** (`stop_hook_active`, per-session counter works; built-in cap observed) | none |
-| 0.3 Notification `agent_needs_input` / `agent_completed` | **NOT TESTABLE headlessly: needs user** | Use `Stop` + `idle_prompt` and classify in script, unless the user test passes |
-| 0.4 SessionStart in Desktop / VS Code | **PASS** (user ran it 2026-10-05; log shows SessionStart with entrypoint `claude-desktop` and `claude-vscode`, plus `cli` inside VS Code's terminal; project-level hooks, user-level hooks still to re-check) | Per-repo `.claude/settings.json` hooks, or run managed sessions in CLI/VS Code |
+| 0.3 Notification `agent_needs_input` / `agent_completed` | **PASS as a result (2026-10-16): they never fire for foreground sessions; they fired only while `claude agents` was open.** The `Stop` + `idle_prompt` (+ `permission_prompt`) design stands. Details: "Track A re-check" below | Stop + `idle_prompt`, as designed |
+| 0.4 SessionStart in Desktop / VS Code | **PASS** (user ran it 2026-10-05; log shows SessionStart with entrypoint `claude-desktop` and `claude-vscode`, plus `cli` inside VS Code's terminal; project-level hooks, user-level hooks re-checked 2026-10-16: PASS, see "Track A re-check" below) | Per-repo `.claude/settings.json` hooks, or run managed sessions in CLI/VS Code |
 | 0.5 SendMessage wakes idle session | **PASS** (user-reported 2026-10-05; `/tmp/agent-sandbox/ping.txt` contains `ping`, written 14:14; busy vs idle cases not separately logged, so the user's word covers both) | Dispatcher reports only; `/voice` into the worker |
 | 0.6 VoiceMode (partial) | **RECORDED** (version, local services, lock path). Latency not measured | n/a |
 | 0.7 Conch lock | **DESCRIBED from source, not run live.** Surprise: default is NOT "wait" | See 0.7 |
@@ -66,7 +66,7 @@ Test 2, hook that always blocks with no cap of its own (`hooks/stop-always.sh`):
 
 Design note for `stop-check.sh`: the counter is what enforces "3 retries"; `stop_hook_active` alone would allow only 1 retry if used as the exit condition. Use the counter, and reset it when the checks pass.
 
-## 0.3 Notification matchers: NOT TESTABLE headlessly (needs user)
+## 0.3 Notification matchers: NOT TESTABLE headlessly (needs user); resolved 2026-10-16, see "Track A re-check" at the end
 
 - In `claude -p`, a Notification hook (matcher `""`, logging) **did not fire** for a normal short run (`logs/notification.log` never created), while SessionStart and Stop hooks did fire in the same run.
 - Docs (via claude-code-guide, hooks-guide): `agent_needs_input` and `agent_completed` are for **background sessions while the agent view is open**, i.e. `claude --bg` / `claude agents`. `idle_prompt` fires about 60 s after a response; `permission_prompt` about 6 s into a permission wait. None can occur in `-p` bypass runs.
@@ -168,3 +168,41 @@ Proposed fixes (not applied; need the user's OK):
 2. **Faster Whisper model**: switch from large-v2 to `large-v3-turbo` or `small.en` (both listed by `voicemode whisper model`). Cuts the 2.9 s; accuracy trade-off to be checked on the user's voice and accent.
 3. **Short spoken replies** and `converse` called once per turn (speak and listen in one call), never several blocking calls in a row.
 4. Re-measure after 1 to 3 with a pass line the user picks (the plan's 3 s was a guess).
+
+
+## Track A re-check, 2026-10-16 (0.3 and 0.4, run without the owner)
+
+### 0.3 Notification types: PASS (as a finding)
+
+Run 00:30 to 00:42 CEST on Claude Code 2.1.301, `--model haiku` everywhere, in the rebuilt sandbox `/private/tmp/agent-sandbox/repo` (already trusted in `~/.claude.json`, so no trust prompt was accepted; `setup.sh` rebuilt it). Interactive sessions were driven through tmux; the logging hook is the sandbox project `Notification` hook with an empty matcher. The full log is `/tmp/agent-sandbox/logs/clients.log` (kept). Times are local.
+
+| Time | Session | notification_type |
+|---|---|---|
+| 00:31:58 | a5f80c2f, foreground, idle after one reply (Stop at 00:30:57) | `idle_prompt` (61 s later) |
+| 00:33:13 | 9ccca84f, foreground, `--permission-mode default`, Bash needing approval | `permission_prompt` (about 8 s after the prompt) |
+| 00:34:44 | 9ccca84f, after the answer and Stop | `idle_prompt` |
+| 00:35:33 | 81d1c9f1, `claude --bg` "ask me which colour" | `permission_prompt` |
+| 00:36:06 | 722835b7, `claude --bg` "Reply with just: ok" (finished 00:35:06) | `idle_prompt` |
+| 00:37:10, 00:37:14, 00:37:55 | e6f573db (a tmux process, not one of the sessions above) | `agent_needs_input` |
+| 00:37:58 | e6f573db | `agent_completed` |
+| 00:38:58 | 81d1c9f1 | `idle_prompt` |
+| 00:39:46, 00:41:21 | b12d9a66, an extra foreground session with the agent view still open | `permission_prompt`, then `idle_prompt` |
+
+Findings:
+- **`agent_needs_input` and `agent_completed` never fired for a foreground session**: not idle, not at a permission prompt, not with the agent view open (the extra run).
+- **They fired only while `claude agents` was open**, and the session id on those lines (e6f573db) belongs to none of the sessions that were started. The background sessions themselves only emitted `permission_prompt` and `idle_prompt`. Inference, not verified: the agent-view process emits the `agent_*` types. A project hook sees them only if the agent view runs in that project's cwd.
+- So the design fallback in PLAN section 3 is confirmed: classify foreground sessions from `Stop` + `idle_prompt`; `permission_prompt` also exists for permission waits (about 8 s in). Ching's installed `Notification` entries match `idle_prompt` only; adding `permission_prompt` is an option for faster "needs input" detection (not done here).
+- Not verified: whether the view would also have emitted `agent_completed` for the "ok" session (it finished before the view was open); why one question produced three `agent_needs_input` lines; foreground sessions of other users in the agent view.
+- Cleanup verified: tmux session killed, both background sessions stopped (`claude stop`; they stay listed, `claude rm` not run), no daemon, no process with cwd in the sandbox. Nothing was written to `~/.claude.json`, `~/.claude/settings.json` or `~/.agent`.
+
+### 0.4 Hooks fire from user-level settings, including non-repo folders: PASS
+
+The hooks of `~/.claude/settings.json` (user level) are the only source of these events: `~/.claude/settings.local.json` has no hooks and the folders involved have no project settings that call ching. Read from `~/.agent/events.jsonl`, sessions whose cwd is not inside a git repo and not a sandbox path (not `/tmp`, `/private/tmp`, `/var/folders`):
+
+- 16 distinct sessions in 8 folders (`~`, `~/Downloads`, `~/Downloads/tricount_v2`, `~/Downloads/tricount_update`, `~/Downloads/grocery_rework/*`, `~/.claude/projects/-Users-clyde/memory`, and a session-registry folder), from 2026-10-06T18:05Z to 2026-10-15T22:33Z.
+- Events from them: `session_start` 22, `prompt` (UserPromptSubmit) 88, `stop_ok` (Stop) 67, `notify` 182 (Notification `idle_prompt` and Stop), `session_end` 14, `context` 28 (watcher), `nudge_spoken` 5 (watcher).
+- The session that ran this check (id 2db151bf..., cwd `~`, started 22:22:24Z) logged `session_start`, then `notify idle` (suppressed, quiet hours) 70 s later, then `prompt`.
+- `PreToolUse` (guard) also fired from user settings: 74 `deny` events (2026-10-05 to 2026-10-10), 70 of them in real folders. **Caveat found on 2026-10-16: the guard entry is no longer in `~/.claude/settings.json`** (see the track A report; a force push in a fresh session was not denied).
+- Not shown by this evidence: which client (Desktop, VS Code, CLI) each session came from; the log does not record the entrypoint. The 2026-10-05 sandbox run covers Desktop and VS Code for project-level hooks.
+- PLAN 2.2 says no real non-repo working folder exists on this machine; the log shows there are (`~`, `~/Downloads/...`), so the third pilot slot can be filled from them.
+

@@ -328,7 +328,7 @@ Four parallel agents, then an independent review of the merged result. Details a
 
 ### Open after the fix wave (the final review's "fix soon" list, plus what the re-reviews listed as out of scope)
 
-- Stop hook and ladder: skip the ladder when the same failing tree already failed it; lens F3/F4 (a time limit and `--max-turns` per `claude` call, a process-group kill); F5 a reserved "no verdict" exit code;
+- (DONE 2026-10-06 in the fix-soon wave, see above and the status table below; kept for the record) Stop hook and ladder: skip the ladder when the same failing tree already failed it; lens F3/F4 (a time limit and `--max-turns` per `claude` call, a process-group kill); F5 a reserved "no verdict" exit code;
   F8 a time limit on the "nothing changed" skip and a `check_skipped` event; F9 check that `jq` exists first; F12 serialise `meta_set` (the watcher is now a second writer).
 - Checkpoint rule cost: ask only for the six-line block edit, skip it when the tree has not changed since the prompt, and add an opt-out for scripted runs (`claude -p` replaced its answer with the checkpoint reply in the live smoke).
 - Notifications: `session-start.sh` sets `working` on a resume, so a false 20-minute stall alert can fire and eat the shared 4-a-day budget (consider exempting `handoff`); a zero-usage record can reset `ctx_level`.
@@ -349,7 +349,26 @@ Four parallel agents, then an independent review of the merged result. Details a
 - Installer and tests: confirm before loading the plist on a non-tty run; dry-run and absent-plist tests; export `LAUNCH_AGENTS_DIR` in `tests/lib.sh`; `CHING_TEST_LADDER_DAILY` is documented only in the header of `bin/test-escalate.sh`;
   the `## exercised` placeholder in `templates/VERIFY.md` still satisfies the gate (the gate checks form only, by design); the MIT permission text is missing from the lens files.
 
-### Lens findings on `stop-check.sh` not fixed (F1, F2, F6 are fixed in ce5ae94)
+### Lens findings on `stop-check.sh`: status checked 2026-10-16 (track A; the bullets below keep the original wording)
+
+I re-read `bin/stop-check.sh`, `bin/test-escalate.sh` and `bin/lib.sh` on `main` (54065fe) and matched each finding to the code and the commit that fixed it:
+
+| Finding | Status | Where |
+|---|---|---|
+| F1 recursion through a `test_command` that starts Claude | FIXED | ce5ae94 (marker `CHING_STOP_CHECK_RUNNING`) |
+| F2 paid ladder on the stop that hits the cap | FIXED | ce5ae94 |
+| F3 hook timeout versus the ladder | FIXED | 49417ab (one deadline, `STOP_CHECK_DEADLINE` 780 s, limits and `--max-turns` per model call); 42d2184 (a check cut off at the deadline is a no verdict) |
+| F4 timed-out `test_command` leaves its children | FIXED | ee760d3 (process-group kill); 499a25a (a TERM/INT/HUP to the hook kills the whole check, ends as no verdict) |
+| F5 bookkeeping failures fail open or false-block | FIXED | 7af13fe (exit 3 "no verdict", `stop_no_verdict` event) |
+| F6 non-numeric or zero caps | FIXED | ce5ae94 (82f6994 for the green-run epoch) |
+| F7 any write to `STATE.md` satisfies the checkpoint | see "Track A fixes" at the end of this section | |
+| F8 green-run fingerprint is stale-prone | PARTLY | 5df71da (fingerprint taken before the run, TTL, `check_skipped` event); gitignored/external inputs are still not part of it |
+| F9 missing `jq` fails open silently | FIXED | 7af13fe (checked first, loud no verdict) |
+| F10 first `test_command:` line wins; `stop_ok` does not say no check ran | OPEN | |
+| F11 untracked FIFO/device symlink hangs the fingerprint | OPEN (bounded by the 780 s deadline since F3) | |
+| F12 session ids escape `sessions/`; concurrent `meta_set` loses keys | FIXED | a81c37e (ids hashed), 997ac9e (`meta_set` as one perl call under `flock`) |
+
+Also fixed in the same wave and listed as open further down: the ladder skip for a tree that already failed it (5df71da) and "a tree is recorded as ladder failed only when a model really ran" (499a25a); the cheaper checkpoint rule (1b8e760); the machine-wide daily ladder ceiling (1ca0554). The merges are f4350da and ed49669.
 
 - F3 Important: hook timeout 900 s versus the model ladder (up to 3 check runs plus 2 `claude -p` calls without timeout or `--max-turns`); a killed hook allows the stop and orphans the children. Reasoned from `install.sh`, not observed; needs a single-deadline design.
 - F4 Important: `alarm`+`exec` kills only the top bash of a timed-out `test_command`, not its process group; forked children stay alive. Observed; fix is a process-group kill, not done.
