@@ -2,6 +2,7 @@
 
 status: idle
 <!-- status is one of: idle | working | input | blocked | done. dash.sh reads this line. -->
+<!-- task_type (optional, last line of the block) is one of: build | fix | research | merge/sync | ops/config | writing | data. Leave (none) and the learner classifies the session; a type written here wins. -->
 
 <!-- ching:checkpoint -->
 result: (none)
@@ -10,6 +11,7 @@ next_action: (none)
 files_changed: 0
 examined: (none)
 not_examined: (none)
+task_type: (none)
 <!-- /ching:checkpoint -->
 
 ## Done

@@ -273,6 +273,11 @@ All events are emitted with `ev KIND DATA_JSON` from `lib.sh`, so strings are ca
 - `learn_run`: `{"component":"corrections|skills|report|lessons","scanned":n,"candidates":n,"proposals":n,"outcome":"ok|nothing-new|truncated|capped|error|disabled","covered":n}`. `covered` appears only for corrections.
 - `proposal`: `{"id":"<proposal id>","action":"approved|rejected|snoozed"}`, emitted by `ching-proposals` (D).
 - `learn_event_ok` always keeps these two kinds, even though they carry the `.work` cwd or none.
+- `checkpoint` (extended, `stop-check.sh`, from the STATE.md checkpoint block when the gate accepts it): `{"status":"<status line>","blocker":"...","next_action":"...","not_examined":"...","task_type":"build|fix|research|merge/sync|ops/config|writing|data"}`.
+  - `not_examined` is always present (the gate requires the key). `learn-report.sh` reads it as the blind-spot ledger's input.
+  - `task_type` is present only when the block has a `task_type:` line naming one of D26's seven types. Case and blanks are ignored, `merge` or `sync` becomes `merge/sync`, and `ops` or `config` becomes `ops/config`. The template's `(none)`, a missing line and any other word give no field, and the learner classifies the session instead (D26: the session's own type wins when present). `learn-report.sh` maps each session id to the `task_type` of its checkpoint events.
+  - ev drops all the data of a line over 1 KB, so the free text is budgeted to fit: `blocker` and `next_action` are cut to 120 characters, `not_examined` to 300. A longer `not_examined` is cut after its last whole item (items end at `; ` or `, `, the ledger's own separators) when that keeps at least 150 characters, else at 300.
+- `tests` (new, `stop-check.sh`): `{"outcome":"pass|fail","secs":n}`, one per run of the GOAL.md `test_command` (through test-escalate.sh, so the verdict includes any model fix and `secs` is the whole run's wall time in seconds). A run cut by `STOP_CHECK_TIMEOUT` is `fail`. No event for a skipped run (`check_skipped`, unchanged tree), a folder with no `test_command`, or a run cut off at the hook deadline (no verdict: `stop_deadline`). `learn-report.sh` reads `outcome` for test runs, failures, green first time and minutes to green (from the event timestamps).
 
 ## 9. Fixtures (`tests/fixtures/learn/`)
 

@@ -14,9 +14,10 @@ Write the handoff for this session. Work from facts (git log, git status, test o
    files_changed: <number>
    examined: <what this work covered>
    not_examined: <what it deliberately did not check>
+   task_type: <optional: build | fix | research | merge/sync | ops/config | writing | data>
    <!-- /ching:checkpoint -->
    ```
-   The Stop hook and `dash.sh` parse this block. Then keep the sections Done, In progress, Blocked, Decisions, Assumptions made, Releases, Relayed instructions, Recommended next step. Move finished items to Done, list real blockers under Blocked (one bullet each, with what you need), record every decision with its reason and every assumption you made. Leave the automatic `ching:snapshot` block alone.
+   `task_type` is optional: write the one type that fits the session's work, or leave the line out (or `(none)`) and the learner classifies the session later; a type written here wins. The Stop hook and `dash.sh` parse this block. Then keep the sections Done, In progress, Blocked, Decisions, Assumptions made, Releases, Relayed instructions, Recommended next step. Move finished items to Done, list real blockers under Blocked (one bullet each, with what you need), record every decision with its reason and every assumption you made. Leave the automatic `ching:snapshot` block alone.
 3. Rewrite `NEXT.md` as a prompt that is complete on its own, so it can be pasted into a brand-new session with no other context: goal in one line, where things stand (branch, last commit, what is done), the single next concrete step with file paths, constraints (the Autonomy policy: do not ask, decide and log), and a done-check (the repo's test command if there is one).
 4. If a repo `.agent/GOAL.md` exists, run its `test_command` and put the result in STATE.md.
 5. Reply with at most five lines: status, what is blocked (if anything), and the first line of NEXT.md.
