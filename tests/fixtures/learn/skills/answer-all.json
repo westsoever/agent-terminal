@@ -1,0 +1,21 @@
+{
+  "skills": [
+    {"sequence": ["sqlite3 data.db", "jq .", "Write"], "keep": true, "slug": "export-table", "name": "export-table",
+     "proposal": "description: Export a table from the local SQLite database to a file. Use when the owner asks for a data export.",
+     "why_not_covered": "No installed skill exports local database tables."},
+    {"sequence": ["pandoc notes.md", "Write", "open notes.pdf"], "keep": true, "slug": "notes-to-pdf", "name": "notes-to-pdf",
+     "proposal": "description: Turn markdown notes into a PDF and open it. Use when the owner asks for a PDF of notes.",
+     "why_not_covered": "No installed skill converts notes to PDF."},
+    {"sequence": ["wrangler build", "wrangler deploy", "mcp__probe__health", "git tag"], "keep": true, "slug": "deploy-and-tag", "name": "deploy-and-tag",
+     "proposal": "description: Build and deploy the worker, check its health, then tag the release. Use when the owner asks to deploy.",
+     "why_not_covered": "The wrangler skill documents commands but does not run a deploy with a health check and tag."},
+    {"sequence": ["supabase db", "supabase migration", "bun test", "git add", "git commit"], "keep": true, "slug": "apply-migration", "name": "apply-migration",
+     "proposal": "description: Apply a new database migration, run the tests and commit. Use when the owner adds a migration.",
+     "why_not_covered": "The supabase skill covers the platform, not this apply-test-commit routine."},
+    {"sequence": ["gh pr view", "gh pr diff", "Read", "bun test", "gh pr review", "gh pr merge"], "keep": true, "slug": "review-and-merge-pr", "name": "review-and-merge-pr",
+     "proposal": "description: Review an open pull request, run the tests and merge it when they pass. Use when the owner asks to review and merge a PR.",
+     "why_not_covered": "code-review reviews a diff but never runs the tests or merges."},
+    {"sequence": ["made up", "not a", "candidate"], "keep": true, "slug": "invented", "name": "invented",
+     "proposal": "description: This sequence was never sent.", "why_not_covered": "none"}
+  ]
+}
