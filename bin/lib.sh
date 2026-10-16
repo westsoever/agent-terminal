@@ -448,10 +448,15 @@ _learn_limited() {
 }
 
 # learn_model_call MODEL < PROMPT: the learner's one way to call a model (spec 5.6). Runs
-#   "${CHING_CLAUDE_BIN:-claude}" -p --model MODEL --tools "" --output-format json
+#   "${CHING_CLAUDE_BIN:-claude}" -p --model MODEL --tools "" --output-format json --strict-mcp-config --disable-slash-commands
 # with the prompt on stdin, in $(learn_work_dir), with CHING_LEARNER=1 (guard learner mode) and
 # CLAUDE_MEM_INTERNAL=1 (claude-mem does not observe the run, D27), cut after LEARN_CALL_TIMEOUT seconds. Prints
 # the model's answer: the one JSON document in the envelope's .result, compact, a ```json fence removed.
+# --tools "" only removes the built-in tools: checked live on 2026-10-17 (claude 2.1.302), the run still had every
+# MCP server (Gmail send, Drive share, ...) and its prompt cost 211k cache-creation tokens, more than the daily cap.
+# --strict-mcp-config (no --mcp-config given: no MCP servers) and --disable-slash-commands (no skills) leave the
+# model with no tools at all (init message: tools [], mcp_servers []) and about 6k tokens per call. Hooks still run,
+# so guard learner mode stays the second layer.
 # Every token the envelope reports (input, output, cache read, cache creation) is added to
 # .work/tokens-<local YYYY-MM-DD>; once that total reaches LEARN_TOKEN_CAP no call starts. Each call adds one
 # line to .work/learn.log (claude's stderr goes there too).
@@ -471,7 +476,8 @@ learn_model_call() {
     return 5
   fi
   out=$(cd "$work" && CHING_LEARNER=1 CLAUDE_MEM_INTERNAL=1 _learn_limited "$lim" \
-        "${CHING_CLAUDE_BIN:-claude}" -p --model "$model" --tools "" --output-format json 2>>"$logf"); rc=$?
+        "${CHING_CLAUDE_BIN:-claude}" -p --model "$model" --tools "" --output-format json \
+        --strict-mcp-config --disable-slash-commands 2>>"$logf"); rc=$?
   tok=$(printf '%s' "$out" | jq -r '[.usage.input_tokens, .usage.output_tokens, .usage.cache_read_input_tokens,
         .usage.cache_creation_input_tokens] | map(. // 0) | add' 2>/dev/null) || tok=0
   case "$tok" in ''|*[!0-9]*) tok=0 ;; esac

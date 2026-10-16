@@ -276,4 +276,83 @@ if [ "$(uname)" = Darwin ] && printf '' | script -q /dev/null true >/dev/null 2>
 else
   echo "no usable script(1) pty: tty prompt tests skipped" >"$T_ROOT/skipped.t_install"
 fi
+
+# ---------- Phase 6: the learner job (org.ching.learn) and the claude-mem exclusion (D27) ----------
+LD="$WORK/learn-claude"; LLA="$WORK/learn-la"; LAH="$WORK/learn-ah"; CMS="$WORK/cm/settings.json"
+mkdir -p "$LD" "$WORK/cm"; printf '{}\n' >"$LD/settings.json"
+linst() { env SETTINGS_FILE="$LD/settings.json" CLAUDE_DIR="$LD" AGENT_HOME="$LAH" AGENT_REPOS_FILE="$WORK/learn-repos" \
+  LAUNCH_AGENTS_DIR="$LLA" CLAUDE_MEM_SETTINGS="$CMS" "$KIT/install.sh" "$@" </dev/null 2>&1; }
+LP="$LLA/org.ching.learn.plist"
+# claude-mem is not installed: its settings are neither created nor mentioned as a change
+out=$(linst --dry-run); rc=$?
+assert_eq "learn: dry-run exits 0" "0" "$rc"
+assert_contains "learn: dry-run shows the learner plist diff" "$out" "+++ $LP (after install)"
+assert_contains "learn: dry-run lists the write and load" "$out" "would: write $LP and launchctl bootstrap it"
+assert_no_file "learn: dry-run writes no plist" "$LP"
+assert_not_contains "learn: no claude-mem settings: nothing planned for it" "$out" "CLAUDE_MEM_EXCLUDED_PROJECTS"
+n=$(wc -l <"$WORK/launchctl.log")
+out=$(linst --yes); rc=$?
+assert_eq "learn: install exits 0" "0" "$rc"
+assert_ok "learn: the plist is valid" plutil -lint "$LP"
+assert_eq "learn: label" "org.ching.learn" "$(plutil -extract Label raw -o - "$LP")"
+assert_eq "learn: runs learn.sh through the kit link" "$LD/ching/bin/learn.sh" "$(plutil -extract ProgramArguments.1 raw -o - "$LP")"
+assert_eq "learn: no argument (learn.sh decides the weekly part)" "2" "$(plutil -extract ProgramArguments raw -o - "$LP")"
+assert_eq "learn: every day at 05:30" "5 30" "$(plutil -extract StartCalendarInterval.Hour raw -o - "$LP") $(plutil -extract StartCalendarInterval.Minute raw -o - "$LP")"
+assert_eq "learn: no weekday (daily)" "" "$(plutil -extract StartCalendarInterval.Weekday raw -o - "$LP" 2>/dev/null)"
+assert_eq "learn: not run at load" "" "$(plutil -extract RunAtLoad raw -o - "$LP" 2>/dev/null)"
+assert_eq "learn: CHING_LEARNER=1" "1" "$(plutil -extract EnvironmentVariables.CHING_LEARNER raw -o - "$LP")"
+assert_eq "learn: CLAUDE_MEM_INTERNAL=1" "1" "$(plutil -extract EnvironmentVariables.CLAUDE_MEM_INTERNAL raw -o - "$LP")"
+assert_eq "learn: AGENT_HOME" "$LAH" "$(plutil -extract EnvironmentVariables.AGENT_HOME raw -o - "$LP")"
+assert_contains "learn: PATH reaches claude in ~/.local/bin" "$(plutil -extract EnvironmentVariables.PATH raw -o - "$LP")" "$HOME/.local/bin"
+assert_eq "learn: launchd output goes to AGENT_HOME/learn.log" "$LAH/learn.log" "$(plutil -extract StandardOutPath raw -o - "$LP")"
+assert_contains "learn: bootstrapped" "$(tail -n +$((n + 1)) "$WORK/launchctl.log")" "bootstrap gui/$(id -u) $LP"
+assert_file "learn: the watcher is installed too" "$LLA/org.ching.watch.plist"
+n=$(wc -l <"$WORK/launchctl.log")
+out=$(linst --yes)
+assert_contains "learn: a second run has nothing to do" "$out" "nothing to do"
+assert_eq "learn: a second run does not call launchctl" "$n" "$(wc -l <"$WORK/launchctl.log")"
+sed 's|<integer>30</integer>|<integer>45</integer>|' "$LP" >"$LP.t" && mv "$LP.t" "$LP"
+out=$(linst); rc=$?
+assert_eq "learn: a changed plist without a tty or --yes is refused" "1" "$rc"
+assert_contains "learn: ... the diff shows the old minute" "$out" "<integer>45</integer>"
+linst --yes >/dev/null
+assert_eq "learn: --yes restores the minute" "30" "$(plutil -extract StartCalendarInterval.Minute raw -o - "$LP")"
+
+# claude-mem installed: the learner's .work joins CLAUDE_MEM_EXCLUDED_PROJECTS, with a backup first
+printf '{\n  "CLAUDE_MEM_RUNTIME": "worker",\n  "CLAUDE_MEM_EXCLUDED_PROJECTS": "/Users/x/secret/**"\n}\n' >"$CMS"; chmod 640 "$CMS"
+CM_BEFORE=$(cat "$CMS")
+out=$(linst --dry-run)
+assert_contains "claude-mem: dry-run shows the settings diff" "$out" "+++ $CMS (after install)"
+assert_contains "claude-mem: dry-run says what it adds" "$out" "would: back up $CMS and add $LAH/proposals/.work to CLAUDE_MEM_EXCLUDED_PROJECTS"
+assert_eq "claude-mem: dry-run leaves the file" "$CM_BEFORE" "$(cat "$CMS")"
+out=$(linst); rc=$?
+assert_eq "claude-mem: without a tty or --yes it is refused" "1" "$rc"
+assert_eq "claude-mem: ... and the file is left" "$CM_BEFORE" "$(cat "$CMS")"
+out=$(linst --yes); rc=$?
+assert_eq "claude-mem: install exits 0" "0" "$rc"
+assert_eq "claude-mem: the entry is appended, the old one kept" "/Users/x/secret/**,$LAH/proposals/.work" "$(jq -r .CLAUDE_MEM_EXCLUDED_PROJECTS "$CMS")"
+assert_eq "claude-mem: other settings untouched" "worker" "$(jq -r .CLAUDE_MEM_RUNTIME "$CMS")"
+assert_eq "claude-mem: a backup holds the old file" "$CM_BEFORE" "$(cat "$CMS".bak.ching.*)"
+assert_eq "claude-mem: the file keeps its mode" "640" "$(stat -f %Lp "$CMS")"
+CMA=$(cat "$CMS")
+out=$(linst --yes)
+assert_contains "claude-mem: a second run has nothing to do" "$out" "nothing to do"
+assert_eq "claude-mem: ... and leaves the file byte for byte" "$CMA" "$(cat "$CMS")"
+assert_eq "claude-mem: ... with one backup" "1" "$(ls "$CMS".bak.ching.* | wc -l | tr -d ' ')"
+printf '{"CLAUDE_MEM_RUNTIME":"worker"}\n' >"$CMS"; linst --yes >/dev/null
+assert_eq "claude-mem: no key yet: the key is created" "$LAH/proposals/.work" "$(jq -r .CLAUDE_MEM_EXCLUDED_PROJECTS "$CMS")"
+printf '{"CLAUDE_MEM_EXCLUDED_PROJECTS":["not","a string"]}\n' >"$CMS"; CMODD=$(cat "$CMS")
+out=$(linst --yes)
+assert_contains "claude-mem: a value of another type: a warning" "$out" "leaving it alone"
+assert_eq "claude-mem: ... and the file is untouched" "$CMODD" "$(cat "$CMS")"
+printf 'not json\n' >"$CMS"; out=$(linst --yes); rc=$?
+assert_eq "claude-mem: a broken settings file does not stop the install" "0" "$rc"
+assert_eq "claude-mem: ... nor gets rewritten" "not json" "$(cat "$CMS")"
+printf '{"CLAUDE_MEM_EXCLUDED_PROJECTS":"/a,%s"}\n' "$LAH/proposals/.work" >"$CMS"
+out=$(linst --uninstall --yes); rc=$?
+assert_eq "learn: uninstall exits 0" "0" "$rc"
+assert_no_file "learn: uninstall removes the learner plist" "$LP"
+assert_contains "learn: uninstall boots the learner out" "$(cat "$WORK/launchctl.log")" "bootout gui/$(id -u)/org.ching.learn"
+assert_eq "claude-mem: uninstall takes only our entry out" "/a" "$(jq -r .CLAUDE_MEM_EXCLUDED_PROJECTS "$CMS")"
+assert_not_contains "learn: the real claude-mem settings are never the target in tests" "$CMS" "/Users/clyde/.claude-mem"
 exit 0

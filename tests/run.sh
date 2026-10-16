@@ -7,6 +7,17 @@ T_ROOT=$(mktemp -d /tmp/ching-tests.XXXXXX)
 export T_ROOT
 [ -z "${KEEP:-}" ] && trap 'rm -rf "$T_ROOT"' EXIT
 
+# A sentinel "real" home (spec 6a question 10): the suite runs with HOME pointing here and no AGENT_HOME or CLAUDE_DIR,
+# so a test or script that escapes its sandbox (writes through $HOME/.agent before tests/lib.sh redirects HOME, or a
+# hook started without AGENT_HOME) lands here instead of in the real ~/.agent/sessions. It must be unchanged at the end.
+SENTINEL_HOME="$T_ROOT/sentinel-real-home"
+mkdir -p "$SENTINEL_HOME/.agent/sessions/sentinel-session" "$SENTINEL_HOME/.claude/projects"
+printf 'cwd=/sentinel\nstate=ended\n' >"$SENTINEL_HOME/.agent/sessions/sentinel-session/meta"
+sentinel_snapshot() { (cd "$SENTINEL_HOME" && find . -print | LC_ALL=C sort && find . -type f -exec shasum {} + | LC_ALL=C sort); }
+SENTINEL_BEFORE=$(sentinel_snapshot)
+export HOME="$SENTINEL_HOME"
+unset AGENT_HOME CLAUDE_DIR
+
 pids=""
 for f in "$HERE"/t_*.sh; do
   name=$(basename "$f" .sh)
@@ -33,6 +44,14 @@ for f in "$HERE"/t_*.sh; do
   printf '%-14s %6s %6s\n' "$name" "$p" "$fl"
   total_pass=$((total_pass + p)); total_fail=$((total_fail + fl))
 done
+SENTINEL_AFTER=$(sentinel_snapshot)
+if [ "$SENTINEL_BEFORE" = "$SENTINEL_AFTER" ]; then
+  printf '%-14s %6s %6s\n' sentinel 1 0; total_pass=$((total_pass + 1))
+else
+  printf '%-14s %6s %6s\n' sentinel 0 1; total_fail=$((total_fail + 1))
+  printf 'FAIL\tsentinel\tthe suite wrote into the sentinel real home %s: %s\n' "$SENTINEL_HOME" \
+    "$(diff <(printf '%s\n' "$SENTINEL_BEFORE") <(printf '%s\n' "$SENTINEL_AFTER") | grep '^[<>] \./' | head -10 | tr '\n' ' ')" >>"$T_ROOT/results.sentinel"
+fi
 if [ "$total_fail" -gt 0 ]; then
   echo; echo "== failures"
   grep -h '^FAIL' "$T_ROOT"/results.* | cut -f2- | sed 's/\t/: /'

@@ -234,7 +234,7 @@ The golden files `tests/fixtures/learn/work/prompts.jsonl` and `toolseq.jsonl` a
 
 `learn_model_call MODEL < PROMPT` does these steps:
 
-1. Runs `"$CHING_CLAUDE_BIN" -p --model MODEL --tools "" --output-format json`, with the prompt on stdin.
+1. Runs `"$CHING_CLAUDE_BIN" -p --model MODEL --tools "" --output-format json --strict-mcp-config --disable-slash-commands`, with the prompt on stdin. `--tools ""` alone removes only the built-in tools: a live check on 2026-10-17 showed every MCP server still loaded (Gmail send, Drive share, ...) and 211k prompt tokens per call. With the two extra flags the run has no tools and no MCP servers, at about 6k tokens.
 2. Runs it with cwd `$(learn_work_dir)`, `CHING_LEARNER=1` and `CLAUDE_MEM_INTERNAL=1`, in its own process group, and kills it after `LEARN_CALL_TIMEOUT` seconds.
 3. Reads the envelope: `{type:"result", subtype, is_error, result:"<text>", usage:{input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens}, ...}`.
 4. Adds all four usage numbers to `.work/tokens-<local day>`.
