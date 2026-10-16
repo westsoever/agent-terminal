@@ -2,6 +2,19 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D28 (2026-10-17): Spot-check policy, auto-title removed, menu bar dot, overnight autonomy
+
+**Decisions (user):**
+- **Spot-check:** the owner reviewed items 1-10 of the label spot-check. Items 11-21 and policy questions A-C were left blank and are read as "keep the agent's label".
+  - Merge or push instructions that carry "keep everything / don't delete progress" count as corrections, even when stated up front.
+  - Re-confirming an instruction the assistant should already have acted on ("then let's merge it") is a correction.
+  - Product feedback stays "not".
+  - `templates/learn-prompts/corrections.md` and `~/.agent/proposals/.eval/labels.jsonl` are updated (10 items `owner_reviewed`).
+  - New patterns the owner named: merge right away when asked and report after; notice when the build drifts from what was asked; build in soii-dev and sync to soiisauce on release (cos is only an install); run migrations yourself.
+- **Session auto-title skill:** removed (moved to the Trash on 2026-10-17). Its SessionEnd hook caused the 2026-10-05 registry flood: each titling run was a session that triggered another.
+- **Menu bar dot:** a small dot in the macOS menu bar shows whether Ching is running. Later it will show transcripts and push notifications for sessions that need input. It is a separate macOS app (`ui/menubar`), not a Claude Code mod, so D23 still holds.
+- **Overnight (2026-10-17 ~01:45):** "Keep driving the sessions until everything is done. Take decisions for yourself and the other agents." The orchestrator session (ChingRollOut) made the remaining build and install calls under this.
+
 ## D27 (2026-10-16): The learner stays out of claude-mem; claude-mem is to be replaced in the long run
 
 **Decision (user):**

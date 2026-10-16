@@ -306,6 +306,16 @@ Gets its own spec once the pilot has produced real `events.jsonl` data. The desi
 
 Everything writes only to `~/.agent/proposals/`. The model call is a local `claude -p` started by launchd. It never writes skills, guard or settings by itself.
 
+- [x] **6.0** Contracts: `proposal_write`, `learn_filter`, redaction, fixtures, `claude` stub (2026-10-16).
+- [x] **6.1** Extractor and weekly report with the feedback section (`learn-extract.sh`, `learn-report.sh`).
+- [x] **6.2** Correction detector and eval runner (`learn-corrections.sh`, `learn-eval.sh`); the labelling policy was updated from the owner's spot-check (D28).
+- [x] **6.3** Skill-candidate miner (`learn-skills.sh`).
+- [x] **6.4** Plumbing: `learn.sh`, the proposals CLI (approve is human-only), the PROPOSALS lane, guard learner mode, the `org.ching.learn` plist, the claude-mem exclusion.
+- [x] **6.5** Event fields: `checkpoint` gets `not_examined`/`task_type`, a new `tests` event.
+- [x] **6.6** Verifier round 1 (2026-10-17): the fixes are merged (the learner calls are isolated from the owner's hooks, a hard token cap, a human-only approve).
+- [ ] **6.7** Verifier round 2 (session Ching01), then install on the real machine and check the first nightly run.
+- [ ] **6b** Lessons at SessionStart: unbuilt until the weekly report shows that rules alone are not enough (question 5).
+
 ### Later (not scheduled)
 
 - Phone voice via VoiceMode Connect (routes audio through voicemode.dev's cloud; needs your explicit decision).
