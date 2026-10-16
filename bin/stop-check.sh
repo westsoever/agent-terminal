@@ -162,6 +162,36 @@ ckpt_bad_keys() {
   printf '%s' "${bad# }"
 }
 
+# ckpt_task_type FILE: the block's optional task_type when it is one of the fixed types (D26: build, fix, research,
+# merge/sync, ops/config, writing, data; case and blanks ignored, merge or sync -> merge/sync, ops or config ->
+# ops/config), else empty: the template's (none), a missing line and any other word leave the type to the learner.
+ckpt_task_type() {
+  local t
+  t=$(checkpoint_get "$1" task_type | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+  case "$t" in
+    build|fix|research|merge/sync|ops/config|writing|data) printf '%s' "$t" ;;
+    merge|sync) printf 'merge/sync' ;;
+    ops|config) printf 'ops/config' ;;
+  esac
+}
+# ckpt_event FILE: log the checkpoint event (spec 4.3): status, blocker, next_action, not_examined, and task_type
+# when ckpt_task_type gives one. ev cuts strings to 300 characters but drops ALL the data of a line over 1 KB, so
+# the free text is budgeted to fit: blocker and next_action 120 characters each, not_examined (the blind-spot
+# ledger's input) 300, cut after its last whole item (items end at "; " or ", ") when that keeps at least half.
+ckpt_event() {
+  local st=$1 status
+  status=$(sed -n 's/^status:[[:space:]]*//p' "$st" | head -1)
+  # shellcheck disable=SC2016 # jq source
+  ev checkpoint "$(jq -nc --arg s "$status" --arg b "$(checkpoint_get "$st" blocker)" --arg n "$(checkpoint_get "$st" next_action)" \
+    --arg ne "$(checkpoint_get "$st" not_examined)" --arg t "$(ckpt_task_type "$st")" '
+    def cut($m): .[0:$m];
+    def items($m): if length <= $m then .
+      else .[0:$m + 1] | ([capture("^(?<k>.*)(;|, )").k][0] // "" | sub("\\s+$"; "")) as $k
+        | if ($k | length) * 2 >= $m then $k else .[0:$m] end end;
+    {status: $s, blocker: ($b | cut(120)), next_action: ($n | cut(120)), not_examined: ($ne | items(300))}
+    + (if $t == "" then {} else {task_type: $t} end)')"
+}
+
 checkpoint_gate() {
   [ "$REPO_MODE" -eq 1 ] || return 0
   local prompted st status nblocks=0 at_block cur=missing bad="" why="" reason
@@ -185,9 +215,7 @@ checkpoint_gate() {
     fi
   fi
   if [ -z "$why" ]; then
-    status=$(sed -n 's/^status:[[:space:]]*//p' "$st" | head -1)
-    ev checkpoint "$(jq -nc --arg s "$status" --arg b "$(checkpoint_get "$st" blocker)" --arg n "$(checkpoint_get "$st" next_action)" \
-      '{status:$s,blocker:$b,next_action:$n}')"
+    ckpt_event "$st"
     return 0
   fi
   [ "${CHING_NO_CHECKPOINT:-}" != 1 ] || return 0
@@ -324,6 +352,12 @@ wait "$ESC_PID" || rc=$?
 ESC_PID=""
 trap - TERM INT HUP
 TRIED=$(cat "$OUT.report" 2>/dev/null || true)
+END_AT=$(date +%s)
+# The tests event (spec 4.3): the verdict of this run, model fixes included, and its wall time. A run cut off
+# at the hook deadline has no verdict and logs none (stop_deadline below); a run cut by STOP_CHECK_TIMEOUT failed.
+if [ "$rc" -eq 0 ]; then ev tests "$(jq -nc --argjson s $((END_AT - RUN_AT)) '{outcome:"pass",secs:$s}')"
+elif [ "$rc" -ne 142 ] || [ "$END_AT" -lt "$DEADLINE" ]; then ev tests "$(jq -nc --argjson s $((END_AT - RUN_AT)) '{outcome:"fail",secs:$s}')"
+fi
 
 if [ "$rc" -eq 0 ]; then
   # Record the tree as it was before the run, and only when the run (and any model fix) left it unchanged:
@@ -334,7 +368,7 @@ if [ "$rc" -eq 0 ]; then
 fi
 # Cut off at the deadline: the check never finished, so there is no verdict to act on. Blocking would only
 # send the model to "fix" a check that may be fine, three times over 13 minutes each.
-if [ "$rc" -eq 142 ] && [ "$(date +%s)" -ge "$DEADLINE" ]; then
+if [ "$rc" -eq 142 ] && [ "$END_AT" -ge "$DEADLINE" ]; then
   ev stop_deadline "$(jq -nc --argjson b "$BUDGET" --argjson e "$(($(date +%s) - START))" '{budget:$b,elapsed:$e}')"
   set_state blocked
   notify blocked "Done-check out of time after ${BUDGET}s (STOP_CHECK_DEADLINE), no verdict: $TEST_CMD"
