@@ -2,6 +2,27 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D27 (2026-10-16): The learner stays out of claude-mem; claude-mem is to be replaced in the long run
+
+**Decision (user):**
+- Yes to Phase 6 question 8. The learner's runs are kept out of claude-mem in two ways: `CLAUDE_MEM_INTERNAL=1` in the `org.ching.learn` job, and `~/.agent/proposals/.work` in `CLAUDE_MEM_EXCLUDED_PROJECTS` (`~/.claude-mem/settings.json`, which `install.sh` backs up first).
+- Long-run direction: **replace claude-mem.** Ching's own data (events, checkpoints, transcripts, the learner's proposals and, later, lessons) should take over what claude-mem does today.
+
+**Consequences:** nothing in Ching may come to depend on claude-mem. Its data can be read as an input while it is still installed, but never required. Replacing it is a later item, not part of stage 6a.
+
+## D26 (2026-10-16): Build Phase 6 stage 6a now (amends D16)
+
+**Decision (user):** yes to Phase 6 question 9. Stage 6a is built now, before the pilot metrics: the contracts, the extractor and report, the correction detector, the skills miner and the plumbing. The reason to wait (design on real data) no longer holds, because 6a reads transcripts and 221 real sessions already exist. Stage 6b (lessons) stays unbuilt (question 5).
+
+**Defaults for questions 1-6:** the spec's recommendations are used as starting values, and the weekly report can correct them:
+- nightly run at 05:30, weekly run on Monday at 05:30;
+- `LEARN_MODEL_CLASSIFY=haiku`, `LEARN_MODEL_DRAFT=sonnet`, `LEARN_TOKEN_CAP=200000`;
+- the learner assigns `task_type`, and a session's own line wins when present;
+- rule target: a single repo's `AGENTS.md`, or global when the pattern spans 2+ places;
+- `LEARN_SKILL_MAX=3`.
+
+**Question 7:** the labelled set is rebuilt during step 0, and the owner spot-checks about 20 labels. **Question 10:** done the same evening. The 4,615 empty `/private/tmp` registry entries from 2026-10-05 were moved to `~/.agent/archive/registry-private-tmp-2026-10-05/`, with a tarball next to it: 18 MB on disk, 0.9 MB of content. The test that wrote them still has to be found and fixed.
+
 ## D25 (2026-10-16): Voice pass line 8 s; no `/voice` fallback
 
 **Decision (user):**

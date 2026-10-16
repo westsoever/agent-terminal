@@ -1,6 +1,6 @@
 # Phase 6: learning loop, design spec
 
-Status: **DRAFT for the owner's review**, 2026-10-16. Nothing here is built. Implements D11 within the limits of PLAN.md section 6 (Phase 6) and the Track B inputs in `2026-10-05-hermes-harvest-design.md` section 7. D16 said Phase 6 is specified after the pilot. The pilot is still running (PLAN 2.3 metrics are not recorded), so this spec builds on the event data gathered so far plus transcripts, and it says where that data is too thin.
+Status: **approved for stage 6a**, 2026-10-16 (D26, D27). The owner said yes to questions 7-10, and questions 1-6 use the recommendations as defaults. Stage 6b stays unbuilt. Implements D11 within the limits of PLAN.md section 6 (Phase 6) and the Track B inputs in `2026-10-05-hermes-harvest-design.md` section 7. D16 said Phase 6 is specified after the pilot. The pilot is still running (PLAN 2.3 metrics are not recorded), so this spec builds on the event data gathered so far plus transcripts, and it says where that data is too thin.
 
 ## 1. Goal
 

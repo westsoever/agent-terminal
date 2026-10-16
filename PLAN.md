@@ -294,7 +294,7 @@ Runs only if Phase 0.5 passed. If it failed, the dispatcher is status-only and r
 
 ### Phase 6: Learning loop (D11), specified after the pilot
 
-Draft spec (2026-10-16, needs the owner's answers to its 10 questions; build still waits on pilot metrics per D16): `docs/superpowers/specs/2026-10-16-phase6-learning-loop-design.md`.
+Spec (2026-10-16; the owner answered on the same day: stage 6a is built now per D26, which amends D16; the learner stays out of claude-mem per D27): `docs/superpowers/specs/2026-10-16-phase6-learning-loop-design.md`.
 
 Gets its own spec once the pilot has produced real `events.jsonl` data. The design inputs harvested in v4 (spec section 7):
 - lesson records `{task_type, what_worked, what_failed, do_differently, quality}`, with keyword-gated retrieval and the top 3 injected at SessionStart;
@@ -310,6 +310,7 @@ Everything writes only to `~/.agent/proposals/`. The model call is a local `clau
 
 - Phone voice via VoiceMode Connect (routes audio through voicemode.dev's cloud; needs your explicit decision).
 - ~~Director loop~~: replaced by the Phase 6 learning loop (D11).
+- Replace claude-mem with Ching's own memory (D27): events, checkpoints, transcripts and approved lessons.
 - Cloud sessions for long migrations. Hooks may not fire there; test first.
 - `ching-ui` Claude Code mod (D23), only if the pilot shows visibility or notification as the weak spot: read-only pane for `dash.sh --inbox`/`--next`, status-line entry, toasts for other sessions' events. Never enforcement.
 
