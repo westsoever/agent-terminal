@@ -218,7 +218,7 @@ The golden files `tests/fixtures/learn/work/prompts.jsonl` and `toolseq.jsonl` a
 
 - Tokens come from the `tool_use` blocks of the assistant lines that `learn_filter lines` keeps, so sidechain lines are already gone. They are made this way:
   - Most tools give their name, such as `Read` or `mcp__x__y`.
-  - Bash removes a leading `cd <dir> &&` or `cd <dir>;`, splits on whitespace, drops words that start with `-` and `NAME=value` words, and keeps the first two words joined by a space (`git fetch`, `bun test`). This is naive, so `git -C dir status` gives `git dir`. A may handle that better if it updates the golden file.
+  - Bash removes leading `cd <dir> &&` or `cd <dir>;` parts (repeated, and a quoted dir may hold spaces), splits on whitespace, drops words that start with `-` and `NAME=value` words, and keeps the first two words joined by a space (`git fetch`, `bun test`). For `git`, the argument of `-C` and `-c` is dropped too, so `git -C dir status` gives `git status`. Only the first 16 words are looked at (a heredoc can hold thousands). A command with no word left gives `Bash`. No golden line changed with these rules.
   - Skill gives `Skill:<skill name>`. The prefix is an addition to the spec, to tell skills apart from tool names.
 - Plumbing calls are dropped before anything else:
   - `ToolSearch` and `TodoWrite`
@@ -229,6 +229,13 @@ The golden files `tests/fixtures/learn/work/prompts.jsonl` and `toolseq.jsonl` a
 - `prompts` (an addition to the spec) marks where each counted prompt fell: `tokens[i:]` came after the prompt with that `ts`. It joins to `prompts.jsonl` on `(sid, ts)`, which C needs for "the human prompt that preceded the sequence". `i` may equal `tokens` length.
 - There is always one line per sid, holding the whole session so far. The extractor rewrites the line when the session grows.
 - In the counted fixture sessions, every timestamp is between 11:00 and 13:04 UTC. The local date is therefore the same in every timezone from UTC−11 to UTC+10. Tests that check dates should still pin `TZ` (for example `TZ=UTC`).
+
+### 6.3 The extractor's other files (A's own; others need not read them)
+
+- `text` and `prev_assistant_tail` are redacted whole, then cut, so a cut cannot split a secret and hide it from redaction.
+- `events.jsonl`: the `learn_filter events` lines of `$AGENT_HOME/events.jsonl` and its rotated `events-<UTC stamp>.jsonl` files, cumulative, oldest file first. Events files are tracked by inode, so a rotated file carries on from its offset and the new live file starts at 0. The weekly report reads this file.
+- `offsets`: a first line `# gen <n>`, then one TSV line per source file: `path|inode`, key, `dev:ino`, byte offset, head length, sha1 of the first head-length bytes, path. A file is read again from 0 when it shrank, its head changed or (transcripts) its inode changed.
+- `extract-state.json`: `{gen, files: {path: {tail, intr, sids}}, sessions: {sid: {seen, ok, cwd, day, tokens, prompts}}}`, what the next run continues from. `seen` without `ok` marks a session none of whose lines count (for example `sdk-cli`); the report drops those sessions' events. When the `gen` of `offsets` and of this file differ (a run died between writes), everything is rebuilt from 0.
 
 ## 7. The model call
 
