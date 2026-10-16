@@ -21,7 +21,7 @@ $AGENT_HOME/proposals/            mode 0700, made by proposals_root
 
 - `AGENT_HOME` defaults to `~/.agent`; `CLAUDE_DIR` defaults to `~/.claude`. Transcripts are `$CLAUDE_DIR/projects/*/*.jsonl` (one level deep only, so subagent files below a session directory are never read).
 - Kinds: `rule skill blindspot prune lesson` (`$PROPOSAL_KINDS`). Components: `corrections skills report blindspot lessons` (`$PROPOSAL_COMPONENTS`).
-- Files under `.work/` are written with `umask 077`.
+- Files under `.work/` are written with `umask 077`. Every learner script (`learn-extract.sh`, `learn-corrections.sh`, `learn-skills.sh`, `learn-report.sh`, `learn-eval.sh`) sets it at the top, so a run by hand or through `--classify` writes nothing more open.
 
 ## 2. Settings and environment
 
@@ -33,7 +33,7 @@ $AGENT_HOME/proposals/            mode 0700, made by proposals_root
 | `LEARN_MODEL_DRAFT` | `sonnet` | B stage 3, C (D26) |
 | `LEARN_TOKEN_CAP` | `200000` | `learn_model_call`, per local day (D26) |
 | `LEARN_SKILL_MAX` | `3` | C, proposals per run (D26) |
-| `LEARN_MAX_SNIPPETS` | `200` | B and C input cap; hitting it logs `learn_run{outcome: truncated}` |
+| `LEARN_MAX_SNIPPETS` | `200` | B and C input cap; hitting it logs `learn_run{outcome: truncated}`. B sends its stage-1 hits oldest first (by `ts`), and when `lib.sh` has `learn_budget_left` it also cuts the batch to about (tokens left today) / 450 snippets, at least 5 |
 | `LEARN_CALL_TIMEOUT` | `300` | `learn_model_call`, seconds per call |
 | `LEARN_DISABLE` | empty | D: component names to skip, separated by commas or spaces |
 
@@ -255,7 +255,7 @@ The canned answers in `tests/fixtures/learn/stub/` set the answer schemas. B own
 
 - `corrections-classify`: `{"labels":[{"id":"<sid>@<ts>","label":"correction"|"not","pattern":"<one-line normalised pattern, corrections only>"}]}`. The id is the prompt's `sid@ts` from `prompts.jsonl`. The stub returns every fixture label whatever was sent, so the caller ignores ids it did not send. The fixture holds three patterns over three sessions each. The version pattern is in 3 sessions on 2 days and becomes a proposal. The pnpm pattern is in 3 sessions on 1 day and does not. The YYYY-MM-DD pattern is in 3 sessions on 3 days, but `agents-CLAUDE.md` already covers it.
 - `corrections-draft`: `{"rules":[{"pattern","covered":false,"slug","target","proposal","patch","why_not_covered"} | {"pattern","covered":true,"covered_by"}]}`. The canned patch applies to `tests/fixtures/learn/agents-CLAUDE.md`, the fixture for `~/.agents/CLAUDE.md`.
-- `skills`: `{"skills":[{"sequence":[tokens],"keep":true,"slug","name","proposal","why_not_covered"} | {"sequence","keep":false,"reason"}]}`.
+- `skills`: `{"skills":[{"id","sequence":[tokens],"keep":true,"slug","name","proposal","why_not_covered"} | {"id","sequence","keep":false,"reason"}]}`. Each candidate goes to the model with an `id` (`c1`, `c2`, ... in rank order) and redacted (`learn_redact --jsonl`). An answer is matched on its `id`, else on its `sequence` as sent (redacted) or as mined; anything else is ignored. `proposal` is the description text only: a leading `description:` key, and front matter around it, are taken off.
 
 The stub's own knobs are listed at the top of `tests/fixtures/learn/claude-stub`:
 
@@ -270,8 +270,8 @@ The stub's own knobs are listed at the top of `tests/fixtures/learn/claude-stub`
 
 All events are emitted with `ev KIND DATA_JSON` from `lib.sh`, so strings are capped at 300 characters.
 
-- `learn_run`: `{"component":"corrections|skills|report|lessons","scanned":n,"candidates":n,"proposals":n,"outcome":"ok|nothing-new|truncated|capped|error|disabled","covered":n}`. `covered` appears only for corrections.
-- `proposal`: `{"id":"<proposal id>","action":"approved|rejected|snoozed"}`, emitted by `ching-proposals` (D).
+- `learn_run`: `{"component":"corrections|skills|report|lessons","scanned":n,"candidates":n,"proposals":n,"outcome":"ok|nothing-new|truncated|capped|error|disabled","covered":n}`. `covered` appears only for corrections. `proposals` counts new proposal files only; a refreshed open proposal is not counted. The components' own events carry a name (`learn-corrections`, `learn-skills`) and the `.work` directory as cwd.
+- `proposal`: `{"id":"<proposal id>","action":"approved|rejected|snoozed"}`, emitted by `ching-proposals` (D). `learn-report.sh` counts them per component in its feedback section (spec 6.5): the component comes from the archived file's `component:` line, else from the id's kind (rule: corrections, skill: skills, blindspot: blindspot, lesson and prune: lessons). An archived file that no event names counts on its mtime, with its `status:`. A component whose decisions since its last approval or snooze are all rejections, the first of them in week W-3 or earlier, is flagged with the `LEARN_DISABLE` name that turns it off (`report` for blindspot).
 - `learn_event_ok` always keeps these two kinds, even though they carry the `.work` cwd or none.
 - `checkpoint` (extended, `stop-check.sh`, from the STATE.md checkpoint block when the gate accepts it): `{"status":"<status line>","blocker":"...","next_action":"...","not_examined":"...","task_type":"build|fix|research|merge/sync|ops/config|writing|data"}`.
   - `not_examined` is always present (the gate requires the key). `learn-report.sh` reads it as the blind-spot ledger's input.

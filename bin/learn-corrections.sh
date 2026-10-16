@@ -12,9 +12,10 @@
 #     .work/corrections-labels.jsonl. None: learn_run{outcome: nothing-new} and no model call.
 #  2. Stage 1 (deterministic): the cues in S1_JQ over the whole prompt, plus every prompt that follows an
 #     interrupt. A prompt with no hit is cached with label "-".
-#  3. Stage 2: the hits, at most LEARN_MAX_SNIPPETS and oldest first, go to one learn_model_call with
-#     LEARN_MODEL_CLASSIFY (the rest wait for the next run, outcome truncated). Each sent prompt is cached as
-#     "correction" with a one-line pattern, or "not". Known patterns go along so that a repeat reuses its pattern.
+#  3. Stage 2: the hits, oldest first (by ts), at most LEARN_MAX_SNIPPETS (and, when lib.sh has learn_budget_left,
+#     about tokens-left/450, at least 5), go to one learn_model_call with LEARN_MODEL_CLASSIFY; the rest wait for
+#     the next run (outcome truncated). Each sent prompt is cached as "correction" with a one-line pattern, or
+#     "not". Known patterns go along so that a repeat reuses its pattern.
 #     A failed or capped call caches nothing for the hits, so the next run sends them again.
 #  4. Clusters (deterministic): cached corrections grouped by normalised pattern (lower case, blanks squeezed,
 #     trailing period dropped). A cluster counts at 3+ sessions on 2+ local days. Then, per cluster:
@@ -29,9 +30,9 @@
 #  Target (D26): <repo>/AGENTS.md when every evidence cwd is inside that one repo (a worktree counts as its main
 #  checkout); otherwise the global ~/.agents/CLAUDE.md. A repo target that is public (named in LEARN_PUBLIC_REPOS,
 #  or a github.com remote that `gh repo view` reports PUBLIC) says so in the first sentence of ## proposal.
-#  Proposal files are written only by proposal_write. The run ends with one learn_run event: {component:
-#  corrections, scanned: new prompts, candidates: stage-1 hits sent to stage 2, proposals: new files,
-#  outcome: ok|nothing-new|truncated|capped|error, covered: clusters dropped as covered}.
+#  Proposal files are written only by proposal_write. The run ends with one learn_run event (name learn-corrections,
+#  cwd .work): {component: corrections, scanned: new prompts, candidates: stage-1 hits sent to stage 2, proposals:
+#  new files, outcome: ok|nothing-new|truncated|capped|error, covered: clusters dropped as covered}.
 # Env: AGENT_HOME; the LEARN_* settings (learn_setting; LEARN_PUBLIC_REPOS: repo paths or names, blank or comma
 #   separated); CHING_CLAUDE_BIN (learn_model_call); CHING_GLOBAL_RULES (default ~/.agents/CLAUDE.md);
 #   CHING_GH_BIN (default gh); LEARN_CORRECTIONS_TEMPLATE (default templates/learn-prompts/corrections.md).
@@ -40,6 +41,7 @@ set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
+umask 077   # everything under .work (learn.log, the --classify prompt) is private, on every path
 TEMPLATE=${LEARN_CORRECTIONS_TEMPLATE:-$SELF_DIR/../templates/learn-prompts/corrections.md}
 GLOBAL_RULES=${CHING_GLOBAL_RULES:-$HOME/.agents/CLAUDE.md}
 
@@ -122,9 +124,10 @@ CACHE=$(WORKF corrections-labels.jsonl) || exit 3
 COVERED=$(WORKF corrections-covered.txt) || exit 3
 LOG=$(WORKF learn.log) || exit 3
 TMPD=$(WORKF corrections-tmp/.keep) || exit 3; TMPD=${TMPD%/*}
-rm -rf "$TMPD"; (umask 077; mkdir -p "$TMPD")
+rm -rf "$TMPD"; mkdir -p "$TMPD"
 trap 'rm -rf "$TMPD"' EXIT
-umask 077
+# ev() reads these: the learner's events carry its own .work as cwd (learn_event_ok keeps learn_run anyway)
+SID=""; NAME=learn-corrections; CWD=$(learn_work_dir)
 
 SCANNED=0 CANDIDATES=0 PROPOSALS=0 COVERED_N=0 OUTCOME=ok
 log() { printf '%s corrections: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$LOG" 2>/dev/null || true; }
@@ -166,8 +169,22 @@ if [ "$SCANNED" -eq 0 ]; then OUTCOME=nothing-new; finish; fi
 # 2. stage 1
 stage1 <"$TMPD/new" >"$TMPD/s1"
 jq -c 'select(.stage1_hits == []) | {id, label: "-"}' "$TMPD/s1" >>"$CACHE"
-jq -c 'select(.stage1_hits != [])' "$TMPD/s1" >"$TMPD/hits"
+# oldest first: prompts.jsonl is in transcript order, not time order
+jq -s -c 'map(select(.stage1_hits != []))
+  | sort_by((.ts | try (sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) catch 0),
+            (.ts | try ((capture("(?<f>\\.[0-9]+)Z$").f // "0") | tonumber) catch 0), .id)[]' "$TMPD/s1" >"$TMPD/hits"
 max=$(learn_setting LEARN_MAX_SNIPPETS); case "$max" in ''|*[!0-9]*|0) max=200 ;; esac
+# the daily budget, when lib.sh has the helper: about 450 tokens per snippet, at least 5 snippets
+if declare -F learn_budget_left >/dev/null; then
+  left=$(learn_budget_left 2>/dev/null || true)
+  case "$left" in
+    ''|*[!0-9]*) ;;
+    *) fit=$((left / 450)); [ "$fit" -ge 5 ] || fit=5
+       if [ "$fit" -lt "$max" ] && [ "$(grep -c . "$TMPD/hits" || true)" -gt "$fit" ]; then
+         log "budget: $left tokens left today; classify batch cut to $fit"; max=$fit
+       fi ;;
+  esac
+fi
 if [ "$(grep -c . "$TMPD/hits" || true)" -gt "$max" ]; then set_outcome truncated; fi
 head -n "$max" "$TMPD/hits" >"$TMPD/send"
 CANDIDATES=$(grep -c . "$TMPD/send" || true)

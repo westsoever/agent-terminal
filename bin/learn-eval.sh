@@ -20,6 +20,7 @@ set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
+umask 077   # the stage-2 calls write under .work: private, as every learner script
 
 LABELS=$AGENT_HOME/proposals/.eval/labels.jsonl STAGE2=0 MISSES=0
 while [ $# -gt 0 ]; do

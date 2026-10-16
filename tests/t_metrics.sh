@@ -397,5 +397,7 @@ t1=$(date +%s)
 assert_eq "big log: exit 0" "0" "$rc"
 assert_eq "big log: questions counted (367 of the 1100 stops in a block, 46 blocks)" "$((367 * 46))" "$(tcell TOTAL asked)"
 assert_eq "big log: 400 sessions" "400" "$(tcell TOTAL sess)"
-if [ $((t1 - t0)) -le 20 ]; then pass "big log ($((size / 1048576)) MiB) in $((t1 - t0)) s, under 20 s"; else fail "big log ($((size / 1048576)) MiB) too slow" "  took $((t1 - t0)) s"; fi
+# The limit catches a pathological slowdown (a per-line jq or a quadratic step takes minutes), not a few seconds of
+# noise: alone it takes a few seconds, but 22-26 s were seen while the whole suite ran in parallel, so 60 s leaves room.
+if [ $((t1 - t0)) -le 60 ]; then pass "big log ($((size / 1048576)) MiB) in $((t1 - t0)) s, under 60 s"; else fail "big log ($((size / 1048576)) MiB) too slow" "  took $((t1 - t0)) s (limit 60 s)"; fi
 exit 0

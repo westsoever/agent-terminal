@@ -9,7 +9,13 @@
 #     - notifications delivered, and suppressed by reason (notify events)
 #     - per task_type: sessions, stop retries, test runs and time to green, once checkpoint events carry
 #       task_type and `tests` events exist (spec 4.3); until then one line says so
-#     - week on week, only when both weeks have data
+#     - week on week: a measure shows a change only when both weeks have data for it (prompts for sessions
+#       and prompts, events for the rest); otherwise its row shows "-"
+#     - feedback (spec 6.5): approved, rejected and snoozed per component, in the week and up to its end, from
+#       `proposal` events (the component from the archived file, else from the id's kind) and from archive/
+#       files that no event names (on their mtime). A component whose decisions since its last approval or
+#       snooze are all rejections, the first of them 4 or more weeks ago (in week W-3 or earlier), is flagged
+#       with the LEARN_DISABLE name that turns it off (blindspot proposals come from the report step)
 #     - the blind-spot ledger
 #   proposals/blindspot-<slug>.md  (through proposal_write) for each not_examined item seen in 3 or more
 #     checkpoints across 2 or more sessions. Items come from checkpoint events (data.not_examined) and from the
@@ -63,6 +69,7 @@ else
   WEEK=$(at_noon "$MON" +%G-W%V)
 fi
 SUN=$(at_noon "$MON" -v+6d +%Y-%m-%d)
+W2MON=$(at_noon "$MON" -v-14d +%Y-%m-%d)   # a rejection streak that began before this day spans 4 or more weeks
 PMON=$(at_noon "$MON" -v-7d +%Y-%m-%d)
 PREV=$(at_noon "$PMON" +%G-W%V)
 TZNAME=$(at_noon "$MON" +%Z)
@@ -164,7 +171,8 @@ while IFS= read -r it; do
         if [ "$rc" -eq 4 ]; then continue; fi
         if [ "$rc" -eq 0 ]; then
           case "$out" in
-            written*|refreshed*) PROPS=$((PROPS + 1)); status="${out%% *} ${out##*/}" ;;
+            written*) PROPS=$((PROPS + 1)); status="${out%% *} ${out##*/}" ;;   # learn_run counts new files only
+            refreshed*) status="${out%% *} ${out##*/}" ;;
             skipped*) status=$(printf '%s' "$out" | cut -d' ' -f1-2) ;;
           esac
         else
@@ -176,6 +184,30 @@ while IFS= read -r it; do
   fi
   printf '%s' "$it" | jq -c --arg s "$status" '{n, raw, checkpoints, sessions, status: $s}' >>"$TMP/ledger-out"
 done <"$TMP/ledger"
+
+# ---------- feedback: decisions per component (proposal events, and archive/ files no event names) ----------
+: >"$TMP/archive"
+for f in "$ROOT"/archive/*.md; do
+  [ -f "$f" ] && [ ! -L "$f" ] || continue
+  id=$(proposal_get "$f" id); [ -n "$id" ] || { id=${f##*/}; id=${id%%.*}; }
+  m=$(file_mtime "$f")
+  jq -nc --arg id "$id" --arg c "$(proposal_get "$f" component)" --arg s "$(proposal_get "$f" status)" \
+    --arg day "$(date -r "$m" +%Y-%m-%d)" --arg w "$(date -r "$m" +%G-W%V)" '{id:$id, component:$c, status:$s, day:$day, w:$w}' >>"$TMP/archive"
+done
+# shellcheck disable=SC2016 # jq source
+jq -R -n -c --slurpfile a "$TMP/archive" --arg sun "$SUN" "$WEEKOF"'
+  def localday: tostring | (try (sub("\\.[0-9]+"; "") | fromdateiso8601 | strflocaltime("%Y-%m-%d")) catch "");
+  def kindcomp: {rule: "corrections", skill: "skills", blindspot: "blindspot", lesson: "lessons", prune: "lessons"}[split("-")[0]] // "unknown";
+  def acts: IN("approved", "rejected", "snoozed");
+  ($a | map(select(.component != "")) | map({key: .id, value: .component}) | from_entries) as $comp
+  | [inputs | fromjson? // empty
+     | select(type == "object" and .kind == "proposal" and (.data.id | type) == "string" and (.data.action | type) == "string" and (.data.action | acts))
+     | {id: .data.id, action: .data.action, ts: (.ts | tostring), day: (.ts | localday), w: (.ts | week)}] as $ev
+  | ($ev | map({key: .id, value: true}) | from_entries) as $named
+  | ($ev + [$a[] | select($named[.id] | not) | (.status | sub(":.*$"; "")) as $act | select($act | acts)
+            | {id, action: $act, ts: (.day + "T12:00:00Z"), day, w}])[]
+  | select(.day != "" and .day <= $sun) | . + {component: ($comp[.id] // (.id | kindcomp))}' "$EVW" >"$TMP/decisions" \
+  || die "cannot read the proposal decisions"
 
 # ---------- the report ----------
 # shellcheck disable=SC2016 # jq source
@@ -266,13 +298,39 @@ def stats($w):
            (if ($tests | length) == 0 then "", "No tests events yet, so time to green cannot be measured." else empty end)) end end),
   "",
   "## Week on week", "",
-  (if $now.events + $now.prompts == 0 or $before.events + $before.prompts == 0
+  # a measure is compared only when both weeks have data from its source: prompts, or events
+  ({prompts: ($before.prompts > 0 and $now.prompts > 0), events: ($before.events > 0 and $now.events > 0)}) as $both
+  | (if $now.events + $now.prompts == 0 or $before.events + $before.prompts == 0
    then "Not shown: \(if $before.events + $before.prompts == 0 then $prev else $week end) has no data."
+   elif ($both.prompts or $both.events) | not
+   then "Not shown: no measure has data in both weeks (\($prev): \($before.prompts) prompts, \($before.events) events; \($week): \($now.prompts) prompts, \($now.events) events)."
    else ("| measure | \($prev) | \($week) | change |", "|---|---:|---:|---:|",
-     ([["sessions", "sessions"], ["prompts", "prompts"], ["stop retries", "retries"], ["stalls", "stalls"],
-       ["context handoffs", "handoffs"], ["denies", "denies"], ["notifications delivered", "delivered"],
-       ["notifications suppressed", "suppressed"]][]
-      | [.[0], $before[.[1]], $now[.[1]], (($now[.[1]] - $before[.[1]]) | if . > 0 then "+\(.)" else tostring end)] | row)) end),
+     ([["sessions", "sessions", "prompts"], ["prompts", "prompts", "prompts"], ["stop retries", "retries", "events"], ["stalls", "stalls", "events"],
+       ["context handoffs", "handoffs", "events"], ["denies", "denies", "events"], ["notifications delivered", "delivered", "events"],
+       ["notifications suppressed", "suppressed", "events"]][]
+      | .[2] as $src
+      | [.[0], (if $before[$src] > 0 then $before[.[1]] else "-" end), (if $now[$src] > 0 then $now[.[1]] else "-" end),
+         (if $both[$src] then (($now[.[1]] - $before[.[1]]) | if . > 0 then "+\(.)" else tostring end) else "-" end)] | row),
+     (if $both.prompts and $both.events then empty
+      else "", "A \"-\" means that week has no \(if $both.prompts then "events" else "prompts" end) to compare, so the change is not shown." end)) end),
+  "",
+  "## Feedback on proposals", "",
+  (if ($d | length) == 0 then "No proposal decided yet (no proposal events, no files in archive/)."
+   else ("Approved, rejected and snoozed proposals per component: in the week, and in all up to its end (proposal events, and archive/ files no event names).", "",
+     "| component | approved | rejected | snoozed | approved in all | rejected in all | snoozed in all |",
+     "|---|---:|---:|---:|---:|---:|---:|",
+     ($d | group_by(.component)[] | . as $g
+      | [$g[0].component]
+        + ([["approved", "rejected", "snoozed"][] as $x | [$g[] | select(.w == $week and .action == $x)] | length])
+        + ([["approved", "rejected", "snoozed"][] as $x | [$g[] | select(.action == $x)] | length])
+      | row),
+     ($d | group_by(.component) | map(sort_by(.day, .ts)
+        | (map(.action != "rejected") | rindex(true)) as $last
+        | (if $last == null then . else .[$last + 1:] end) as $streak
+        | select(($streak | length) > 0 and $streak[0].day < $w2mon)
+        | {c: .[0].component, since: $streak[0].day, n: ($streak | length)}) as $flags
+      | if ($flags | length) == 0 then empty
+        else "", ($flags[] | "- \(.c): only rejections since \(.since) (\(.n) in a row, 4 weeks or more). To turn it off: LEARN_DISABLE=\(if .c == "blindspot" then "report" else .c end)") end)) end),
   "",
   "## Blind spots (all checkpoints so far)", "",
   "An item becomes a blindspot proposal at 3 checkpoints in 2 or more sessions.",
@@ -284,7 +342,7 @@ def stats($w):
   ] | join("\n")
 '
 jq -n -r --slurpfile p "$TMP/prompts" --slurpfile e "$TMP/events" --slurpfile l "$TMP/ledger-out" \
-  --arg week "$WEEK" --arg prev "$PREV" --arg mon "$MON" --arg sun "$SUN" --arg tz "$TZNAME" --arg home "$HOME" \
+  --slurpfile d "$TMP/decisions" --arg w2mon "$W2MON" --arg week "$WEEK" --arg prev "$PREV" --arg mon "$MON" --arg sun "$SUN" --arg tz "$TZNAME" --arg home "$HOME" \
   --arg gen "$(date -u -r "$NOW" +%Y-%m-%dT%H:%M:%SZ)" "$REPORT_JQ" >"$TMP/report" \
   || die "cannot build the report"
 
