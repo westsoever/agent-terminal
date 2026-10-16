@@ -16,6 +16,7 @@ $AGENT_HOME/proposals/            mode 0700, made by proposals_root
     prompts.jsonl  toolseq.jsonl  extractor output (A); format in section 6
     offsets                       extractor byte offsets (A; format is A's choice)
     tokens-YYYY-MM-DD             model tokens spent that local day (learn_model_call)
+    tokens.lock                   flock for every update of tokens-YYYY-MM-DD
     learn.log                     one line per model call, plus claude's stderr
 ```
 
@@ -35,12 +36,13 @@ $AGENT_HOME/proposals/            mode 0700, made by proposals_root
 | `LEARN_SKILL_MAX` | `3` | C, proposals per run (D26) |
 | `LEARN_MAX_SNIPPETS` | `200` | B and C input cap; hitting it logs `learn_run{outcome: truncated}` |
 | `LEARN_CALL_TIMEOUT` | `300` | `learn_model_call`, seconds per call |
+| `LEARN_CALL_OVERHEAD` | `4000` | `learn_estimate_tokens`: tokens a call costs beyond its prompt's bytes / 3.5 (about 2.7k fixed prompt, measured 2026-10-17, and an allowance for the answer) |
 | `LEARN_DISABLE` | empty | D: component names to skip, separated by commas or spaces |
 
 Other environment:
 
 - `CHING_CLAUDE_BIN` (default `claude`): the binary `learn_model_call` runs. Tests point it at `tests/fixtures/learn/claude-stub`.
-- `CHING_LEARNER=1` and `CLAUDE_MEM_INTERNAL=1`: `learn_model_call` sets both on every call. D's launchd job sets them too. With `CHING_LEARNER=1`, guard learner mode applies (D builds that).
+- `CHING_LEARNER=1` and `CLAUDE_MEM_INTERNAL=1`: `learn_model_call` sets both on every call. D's launchd job sets them too. With `CHING_LEARNER=1`, guard learner mode applies (D builds that), and Ching's own `session-start.sh` (every mode), `stop-check.sh` and `notify.sh` exit 0 at once: a learner call is no session, is never gated and never notifies. That is the second layer under the settings isolation in section 7.
 
 ## 3. Functions in `bin/lib.sh`
 
@@ -53,7 +55,9 @@ Source `lib.sh` the way every script does (`. "$SELF_DIR/lib.sh"`). All of these
 | `learn_filter MODE FILE...` | prints the lines that count, compact JSON, one per line, in file order. MODE `prompts`: counted human prompts. `lines`: user and assistant lines of countable sessions (use this for tool calls). `events`: countable `events.jsonl` lines. Skipped project directories are never opened. Malformed lines and missing files are skipped. | 0; 2 for an unknown MODE |
 | `learn_skip_project DIR` | true when a `~/.claude/projects/<dir>` is skipped whole (only the last path part is judged) | 0 skip, 1 keep |
 | `learn_redact [--jsonl]` | stdin to stdout with credentials replaced by `[REDACTED]` (section 5.3). `--jsonl`: one JSON value per line, every string inside is redacted; an unchanged line comes out byte for byte, a changed one is re-encoded with sorted keys (key order is never part of a contract), and a non-JSON line is redacted as text | 0 |
-| `learn_model_call MODEL < PROMPT` | the only way to call a model (section 7). Prints the model's JSON answer, compact, one line | 0 ok; 1 call failed, timed out or not a success envelope; 2 the answer is not exactly one JSON document; 3 `.work` unusable; 5 daily token cap reached, no call made; 64 no MODEL |
+| `learn_model_call MODEL < PROMPT` | the only way to call a model (section 7). Prints the model's JSON answer, compact, one line | 0 ok; 1 call failed, timed out or not a success envelope; 2 the answer is not exactly one JSON document; 3 `.work` unusable; 5 capped: the call's estimate does not fit what is left of today's `LEARN_TOKEN_CAP`, no call made; 64 no MODEL |
+| `learn_budget_left` | tokens left today under `LEARN_TOKEN_CAP` (never below 0), read without the lock | 0 |
+| `learn_estimate_tokens < TEXT` | what a call with TEXT as its prompt is expected to cost: bytes / 3.5 rounded up, plus `LEARN_CALL_OVERHEAD` | 0 |
 | `proposal_fingerprint TEXT` | sha1 (40 lower-case hex) of TEXT lower-cased, with whitespace runs squeezed to one space and trimmed | 0 |
 | `proposal_slug TEXT` | lower case, every run of other characters becomes `-`, at most 50 characters, no dash at either end | 0 |
 | `proposals_root` | makes `$AGENT_HOME/proposals` (0700; an existing one is tightened) and prints its canonical path | 3 if it is a symlink or cannot be made |
@@ -144,6 +148,8 @@ The JSON on stdin looks like this:
 
 - Every string is redacted first. Each quote then has newlines and tabs turned into spaces and is cut to 300 characters. A cwd that is empty becomes `-`.
 - A line in the free text that starts with `## ` is demoted to `### ` so that it cannot end a section early. A patch line may not be a bare `` ``` ``.
+- A rule's patch must be unified-diff syntax: every line is a header (`--- `, `+++ `, `diff `, `index `, the mode, similarity and rename lines), a hunk (`@@ `), context (a leading space, or a blank line), `+`, `-` or `\ No newline at end of file`, and it has at least one `--- `, `+++ ` and `@@ ` line. So a `## ` line (which would end the `## patch` section early) or prose is refused (exit 2). `+## Heading` is fine.
+- Control characters never reach a header or evidence line. In `target`, `cwd` and `quote` each run of them becomes one space (a `target` with a newline is still refused). A `sid` loses them and any blanks outright, so it stays one word; one left empty is refused.
 - `evidence` may be empty, in which case the file says `- (none)`. Choosing which and how many quotes to send is the caller's job.
 - For kinds other than rule and skill, a missing `why_not_covered` is written as `not applicable`.
 - `fingerprint` is what deduplication keys on. For rules, it is the normalised one-line pattern. For skills, it is the token sequence joined with `" > "`. Always use `proposal_fingerprint`.
@@ -164,7 +170,7 @@ It fails without writing anything:
 
 | Exit | Cause |
 |---|---|
-| 2 | bad input: not JSON, a missing or invalid field, an unknown kind or component, a bad slug, no `.md`, a rule without a patch, a rule or skill without a why, `sessions`/`days` not whole numbers, an evidence `day` that is not `YYYY-MM-DD` |
+| 2 | bad input: not JSON, a missing or invalid field, an unknown kind or component, a bad slug, no `.md`, a rule without a patch or with a patch that is not unified-diff syntax, a rule or skill without a why, `sessions`/`days` not whole numbers, an evidence `day` that is not `YYYY-MM-DD` |
 | 3 | unsafe path (section 3), or a path that is not at the top of the root |
 | 4 | PATH already holds a proposal with a different fingerprint. Pick another slug, for example by adding `-2` |
 | 1 | the write itself failed |
@@ -241,13 +247,23 @@ The golden files `tests/fixtures/learn/work/prompts.jsonl` and `toolseq.jsonl` a
 
 `learn_model_call MODEL < PROMPT` does these steps:
 
-1. Runs `"$CHING_CLAUDE_BIN" -p --model MODEL --tools "" --output-format json --strict-mcp-config --disable-slash-commands`, with the prompt on stdin. `--tools ""` alone removes only the built-in tools: a live check on 2026-10-17 showed every MCP server still loaded (Gmail send, Drive share, ...) and 211k prompt tokens per call. With the two extra flags the run has no tools and no MCP servers, at about 6k tokens.
-2. Runs it with cwd `$(learn_work_dir)`, `CHING_LEARNER=1` and `CLAUDE_MEM_INTERNAL=1`, in its own process group, and kills it after `LEARN_CALL_TIMEOUT` seconds.
-3. Reads the envelope: `{type:"result", subtype, is_error, result:"<text>", usage:{input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens}, ...}`.
-4. Adds all four usage numbers to `.work/tokens-<local day>`.
-5. Takes `.result`, removes a `` ```json `` fence, requires exactly one JSON document, and prints it compact.
+1. Estimates the call (`learn_estimate_tokens` of the prompt) and, holding an flock on `.work/tokens.lock`, reserves that estimate in `.work/tokens-<local day>`. When the day is already at `LEARN_TOKEN_CAP`, or the reservation would pass it, there is no call: exit 5, a `rc=capped ... estimate=<n>` line in `learn.log`. The caller then logs `learn_run{outcome: capped}`.
+2. Runs `"$CHING_CLAUDE_BIN" -p --model MODEL --tools "" --output-format json --strict-mcp-config --disable-slash-commands --no-session-persistence --setting-sources "" --settings '<json>'`, with the prompt on stdin. The `<json>` is `{"autoMemoryEnabled":false,"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"<lib.sh's dir>/guard.sh","timeout":15}]}]}}`.
+3. Runs it with cwd `$(learn_work_dir)`, `CHING_LEARNER=1` and `CLAUDE_MEM_INTERNAL=1`, in its own process group, and kills it after `LEARN_CALL_TIMEOUT` seconds (or when its watchdog is sent TERM, INT or HUP).
+4. Reads the envelope: `{type:"result", subtype, is_error, result:"<text>", usage:{input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens}, ...}`.
+5. Replaces the reservation with the sum of the four usage numbers, again under the lock (a failed call counts what its envelope reports, usually 0).
+6. Takes `.result`, removes a `` ```json `` fence, requires exactly one JSON document, and prints it compact.
 
-There is no model call when `tokens-<day>` is already at or above `LEARN_TOKEN_CAP` (exit 5). The caller then logs `learn_run{outcome: capped}`.
+What each flag is for, from live checks on 2026-10-17 (claude 2.1.302, the `stream-json --verbose` init message, AGENT_HOME in /tmp):
+
+- `--tools ""` alone removes only the built-in tools. Every MCP server stayed loaded (Gmail send, Drive share, ...) at 211k prompt tokens per call. `--strict-mcp-config` (no MCP servers) and `--disable-slash-commands` (no skills) leave `tools: []`, `mcp_servers: []`, `skills: []`.
+- Without `--setting-sources ""` every call ran the owner's hooks (found by the stage-6a verifier): Ching's `session-start.sh` (a registry entry), `stop-check.sh`, `notify.sh` (a "Done" line holding the model's JSON, a popup), the settings' osascript "Session finished" popup, and plugin hooks such as `remember` (its SessionEnd summarizer likely starts a model call outside the cap). With it no user, project or local settings load, so no user hooks and no plugins (only the built-in `cc-plugin-*` ones), and no hook fired. Auth is unchanged: HOME stays real and OAuth comes from the keychain (a sandboxed HOME breaks auth).
+- `--settings` adds back exactly one hook, `guard.sh` for every tool, so guard learner mode stays the second layer (with no tools it has nothing to see). A SessionStart/Stop/SessionEnd hook passed the same way did fire, so hooks from `--settings` do load under `--setting-sources ""`.
+- `autoMemoryEnabled: false`: otherwise each call makes an empty `~/.claude/projects/<cwd>/memory/`, and the fixed prompt is about 700 tokens larger.
+- `--no-session-persistence`: no transcript under `~/.claude/projects`.
+- Cost: a one-line prompt came to 2,747 tokens (input 2, cache read 649, cache creation 2,087, output 9), against about 6k before. What claude itself still writes under the real HOME is its own runtime state (`~/.claude.json`, `~/.claude/sessions/`, remote-settings and policy caches), which any run with the real HOME does.
+
+The cap is an estimate check, not a guarantee: an answer longer than the overhead allows, or a prompt that tokenises worse than 3.5 bytes per token, can still pass it, but a call that plainly does not fit (a 70k-token classify batch with 50k left) never starts. A component that batches should size the batch to fit: build the prompt, and while `learn_estimate_tokens < prompt` is above `learn_budget_left`, drop items and log `truncated`; with nothing left to send, log `capped` and make no call.
 
 The prompt's first line is `ching-learn-task: <name>`. This lets the stub pick its canned answer, and it makes logs readable. Task names: `corrections-classify`, `corrections-draft`, `skills`. The prompt templates go in `templates/learn-prompts/` (B and C).
 
@@ -270,7 +286,10 @@ The stub's own knobs are listed at the top of `tests/fixtures/learn/claude-stub`
 
 All events are emitted with `ev KIND DATA_JSON` from `lib.sh`, so strings are capped at 300 characters.
 
-- `learn_run`: `{"component":"corrections|skills|report|lessons","scanned":n,"candidates":n,"proposals":n,"outcome":"ok|nothing-new|truncated|capped|error|disabled","covered":n}`. `covered` appears only for corrections.
+- `learn_run`: `{"component":"corrections|skills|report|lessons|extract|learn","scanned":n,"candidates":n,"proposals":n,"outcome":"ok|nothing-new|truncated|capped|error|disabled|missing","covered":n,"rc":n}`.
+  - `covered` appears only for corrections.
+  - `learn.sh` emits the `extract` events (the extractor emits none of its own), `missing` (the component's file does not exist yet), `disabled` (`LEARN_DISABLE`), and `error` with `rc`: the component's exit code, 142 when `LEARN_COMPONENT_TIMEOUT` stopped it, 143 or 130 when `learn.sh` itself was sent TERM or INT (it kills the component's whole process group first).
+  - Component `learn` is `learn.sh` itself failing before any component ran (an unusable proposals root, a lock it cannot take), outcome `error`.
 - `proposal`: `{"id":"<proposal id>","action":"approved|rejected|snoozed"}`, emitted by `ching-proposals` (D).
 - `learn_event_ok` always keeps these two kinds, even though they carry the `.work` cwd or none.
 - `checkpoint` (extended, `stop-check.sh`, from the STATE.md checkpoint block when the gate accepts it): `{"status":"<status line>","blocker":"...","next_action":"...","not_examined":"...","task_type":"build|fix|research|merge/sync|ops/config|writing|data"}`.

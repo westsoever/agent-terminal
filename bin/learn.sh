@@ -13,7 +13,8 @@
 # component. Fails quiet: every component's output and a line per step go to .work/learn.log; a component that
 # exits non-zero, or runs past LEARN_COMPONENT_TIMEOUT seconds (default 3600), gives learn_run {outcome: error}. It
 # never touches hooks, sessions or anything outside $AGENT_HOME/proposals (events.jsonl aside). Prints one summary
-# line. Exit 0, also when a component failed; 64 for a bad argument.
+# line. Exit 0, also when a component failed; 64 for a bad argument. TERM or INT stops the running component's whole
+# process group before the lock is released (learn_run {outcome: error, rc: 143 or 130}) and exits 143 or 130.
 # Env: AGENT_HOME LEARN_DISABLE LEARN_COMPONENT_TIMEOUT LEARN_LOCK_STALE (seconds, default 14400)
 #      LEARN_COMPONENT_DIR (where the learn-*.sh files are; default this directory, tests)
 set -euo pipefail
@@ -61,6 +62,20 @@ if ! mkdir "$LOCK" 2>/dev/null; then
   rm -rf "$LOCK"; mkdir "$LOCK" 2>/dev/null || { log "learn: cannot take $LOCK"; run_event learn error; exit 0; }
 fi
 trap 'rm -rf "$LOCK"' EXIT
+# TERM or INT (launchd stopping the job, ^C): the component runs in a process group of its own, which the signal
+# sent to this script's group does not reach. Stop its watchdog, which takes the whole group down (TERM, then KILL
+# after 3 s) and exits, then log, emit the component's error event and exit; the EXIT trap releases the lock last.
+CHILD=""; CUR=""
+on_signal() { # NAME EXIT-CODE
+  trap '' TERM INT
+  log "learn: SIG$1 while ${CUR:-nothing} ran; stopping"
+  if [ -n "$CHILD" ]; then kill -TERM "$CHILD" 2>/dev/null || true; wait "$CHILD" 2>/dev/null || true; fi
+  [ -z "$CUR" ] || run_event "$CUR" error "$(jq -nc --argjson rc "$2" '{rc: $rc}')"
+  echo "learn: stopped by SIG$1"
+  exit "$2"
+}
+trap 'on_signal TERM 143' TERM
+trap 'on_signal INT 130' INT
 
 WEEK=$(date +%G-W%V)
 STAMP="$WORK/weekly-stamp"
@@ -83,7 +98,13 @@ run_component() { # name script
   log "$name: start ($script)"
   start=$(date +%s)
   rc=0
-  ( cd "$WORK" && _learn_limited "$TMO" /bin/bash "$COMP_DIR/$script" ) </dev/null >>"$LOGF" 2>&1 || rc=$?
+  # in the background, so a signal is handled at once (bash runs a trap only after a foreground command ends);
+  # exec makes the watchdog's pid the one in CHILD
+  CUR=$name
+  ( cd "$WORK" && exec perl -e "$_LEARN_LIMITED_PL" "$TMO" /bin/bash "$COMP_DIR/$script" ) </dev/null >>"$LOGF" 2>&1 &
+  CHILD=$!
+  wait "$CHILD" || rc=$?
+  CHILD=""; CUR=""
   secs=$(( $(date +%s) - start ))
   if [ "$rc" -eq 0 ]; then
     log "$name: ok (${secs}s)"; SUMMARY="$SUMMARY $name=ok"

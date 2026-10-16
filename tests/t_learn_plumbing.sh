@@ -89,6 +89,34 @@ assert_eq "learn: a component past LEARN_COMPONENT_TIMEOUT is stopped (error, rc
 assert_contains "learn: ... and the log says why" "$(cat "$P/.work/learn.log")" "stopped after 1s"
 mkcomp skills
 
+# TERM or INT to learn.sh (launchd stopping the job, ^C): the running component's whole process group (it runs in
+# a group of its own) is killed before the lock is released, and the component gets an error event
+cat >"$CD/learn-skills.sh" <<EOS
+( sleep 30; echo late >>"$WORK/late.log" ) &
+echo \$! >"$WORK/grandchild.pid"; echo \$\$ >"$WORK/comp.pid"
+sleep 30
+EOS
+alive() { kill -0 "$1" 2>/dev/null && [ "$(ps -o stat= -p "$1" 2>/dev/null | cut -c1)" != Z ]; }
+for sig in TERM INT; do
+  rm -f "$WORK/comp.pid" "$WORK/grandchild.pid" "$WORK/late.log"; reset_ev
+  # perl puts INT back to its default: a background job of a script starts with INT ignored, and then cannot trap it
+  perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV' env -u CHING_LEARNER -u CLAUDE_MEM_INTERNAL LEARN_COMPONENT_DIR="$CD" "$L" --weekly >"$WORK/sig.out" 2>&1 &
+  lp=$!
+  for _ in $(seq 1 100); do [ -s "$WORK/grandchild.pid" ] && break; sleep 0.1; done
+  cpid=$(cat "$WORK/comp.pid" 2>/dev/null); gpid=$(cat "$WORK/grandchild.pid" 2>/dev/null)
+  assert_eq "learn $sig: the component is running" "yes yes" "$(alive "$cpid" && echo yes) $(alive "$gpid" && echo yes)"
+  t0=$(date +%s); kill -"$sig" "$lp"; wait "$lp"; rc=$?
+  assert_eq "learn $sig: exits 128 + the signal" "$([ $sig = TERM ] && echo 143 || echo 130)" "$rc"
+  assert_eq "learn $sig: ... within a few seconds" "1" "$(( $(date +%s) - t0 < 5 ))"
+  assert_eq "learn $sig: the component is gone" "" "$(alive "$cpid" && echo alive)"
+  assert_eq "learn $sig: ... and its child too (the whole group)" "" "$(alive "$gpid" && echo alive)"
+  assert_eq "learn $sig: ... nothing left in its process group" "" "$(kill -0 -"$cpid" 2>/dev/null && echo alive)"
+  assert_no_file "learn $sig: the lock is released" "$P/.work/learn.lock"
+  assert_eq "learn $sig: learn_run error for the component" "skills error $rc" "$(evs | jq -r '"\(.component) \(.outcome) \(.rc)"')"
+  assert_contains "learn $sig: the log says so" "$(cat "$P/.work/learn.log")" "learn: SIG$sig while skills ran"
+done
+mkcomp skills
+
 # the lock: a fresh one skips the run, a stale one is taken over
 mkdir "$P/.work/learn.lock"; rm -f "$WORK/order.log"
 out=$(lrun --weekly); rc=$?

@@ -179,6 +179,7 @@ learn_setting() {
     LEARN_SKILL_MAX) def=3 ;;
     LEARN_MAX_SNIPPETS) def=200 ;;
     LEARN_CALL_TIMEOUT) def=300 ;;
+    LEARN_CALL_OVERHEAD) def=4000 ;;
   esac
   if [ -n "${!1:-}" ]; then printf '%s' "${!1}"; else config_get "$1" "$def"; fi
 }
@@ -362,9 +363,23 @@ proposal_write() {
     echo "proposal_write: '$id' is not <kind>-<slug> (lower-case letters, digits, single dashes, at most 80 characters)" >&2; return 2
   fi
   json=$(jq -c . 2>/dev/null) || { echo "proposal_write: stdin is not JSON" >&2; return 2; }
+  # control characters never reach a header or evidence line: a newline in a sid would start a line (or a "## "
+  # section) of its own, an escape sequence would play in a terminal. Runs become one space; a sid loses them
+  # (and blanks) outright, so it stays one word. A non-object is left for the checks below to refuse.
+  json=$(printf '%s' "$json" | jq -c '
+    def clean: if type == "string" then gsub("[[:cntrl:]]+"; " ") else . end;
+    if type == "object" then
+      (if has("target") and (.target | type) == "string" and (.target | test("\n") | not) then .target |= clean else . end)
+      | (if (.evidence | type) == "array" then .evidence |= map(if type == "object" then
+          (if (.sid | type) == "string" then .sid |= gsub("[[:cntrl:][:space:]]+"; "") else . end)
+          | (if has("cwd") then .cwd |= clean else . end) | (if has("quote") then .quote |= clean else . end)
+        else . end) else . end)
+    else . end' 2>/dev/null) || { echo "proposal_write: stdin is not JSON" >&2; return 2; }
   err=$(printf '%s' "$json" | jq -r --arg kind "$kind" --arg comps "$PROPOSAL_COMPONENTS" '
     def str($k): (.[$k] | type) == "string" and (.[$k] | test("\\S"));
     def nat($k): (.[$k] | type) == "number" and .[$k] >= 0 and .[$k] == (.[$k] | floor);
+    # a unified diff line: a header, a hunk, context, +, -, "\ No newline", or blank (a context line some tools strip)
+    def badline: [.patch | split("\n")[] | select(test("^(--- |\\+\\+\\+ |@@ |[ +\\-\\\\]|$|diff |index |(new|deleted) file mode |old mode |new mode |similarity index |rename (from|to) )") | not)] | first;
     if type != "object" then "not a JSON object"
     elif has("kind") and .kind != $kind then "kind \(.kind) does not match the file name (\($kind))"
     elif (.fingerprint | type) != "string" or (.fingerprint | test("^[0-9a-f]{40}$") | not) then "fingerprint must be 40 lower-case hex (proposal_fingerprint)"
@@ -377,6 +392,8 @@ proposal_write() {
     elif any(.evidence[]; (type != "object") or ((.sid | type) != "string") or (.sid == "") or ((.day | type) != "string") or (.day | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$") | not)) then "every evidence item needs sid and day (YYYY-MM-DD)"
     elif $kind == "rule" and (str("patch") | not) then "a rule needs a patch (unified diff)"
     elif has("patch") and (.patch | type) == "string" and (.patch | split("\n") | index(["```"]) != null) then "a patch line cannot be a bare ``` fence"
+    elif $kind == "rule" and (badline != null) then "the patch must be a unified diff (headers, @@, context, + and - lines only); this line is not: \(badline | .[0:80])"
+    elif $kind == "rule" and ((.patch | test("(?m)^--- ")) and (.patch | test("(?m)^\\+\\+\\+ ")) and (.patch | test("(?m)^@@ ")) | not) then "the patch must be a unified diff with ---, +++ and @@ lines"
     elif ($kind == "rule" or $kind == "skill") and (str("why_not_covered") | not) then "why_not_covered is required for \($kind)"
     else "" end' 2>/dev/null) || err="unreadable input"
   [ -z "$err" ] || { echo "proposal_write: $err" >&2; return 2; }
@@ -394,7 +411,7 @@ proposal_write() {
   days=$(printf '%s' "$json" | jq -r .days)
   evidence=$(printf '%s' "$json" | jq -r '
     if (.evidence | length) == 0 then "- (none)" else
-    .evidence[] | "- \(.sid[0:8]) \(.day) \((.cwd // "-") | gsub("[\\r\\n\\t]+"; " ") | if . == "" then "-" else . end) \"\((.quote // "") | gsub("[\\r\\n\\t]+"; " ") | .[0:300])\""
+    .evidence[] | "- \(.sid[0:8]) \(.day) \((.cwd // "-") | gsub("[[:cntrl:]]+"; " ") | if . == "" then "-" else . end) \"\((.quote // "") | gsub("[[:cntrl:]]+"; " ") | .[0:300])\""
     end')
 
   if [ "${st%% *}" = open ]; then
@@ -431,58 +448,130 @@ proposal_write() {
 }
 
 # _learn_limited SECS CMD...: run CMD in a process group of its own; after SECS the whole group gets TERM, then
-# KILL, and the exit code is 142. A trimmed copy of test-escalate.sh run_limited (that one also handles the
-# runner itself being signalled); a hung `claude` must not hold the nightly job, nor its children the pipe.
-_learn_limited() {
-  perl -e '
-    use POSIX ":sys_wait_h";
-    my $t = shift @ARGV;
-    my $pid = fork;
-    defined $pid or exit 1;
-    if (!$pid) { setpgrp(0, 0); exec { $ARGV[0] } @ARGV; POSIX::_exit(127); }
-    $SIG{ALRM} = sub { kill "TERM", -$pid; select undef, undef, undef, 0.5; kill "KILL", -$pid; waitpid($pid, 0); exit 142 };
-    alarm $t if $t > 0;
-    waitpid($pid, 0);
-    exit($? & 127 ? 128 + ($? & 127) : $? >> 8);
-  ' "$@"
+# KILL, and the exit code is 142. A trimmed copy of test-escalate.sh run_limited; a hung `claude` must not hold the
+# nightly job, nor its children the pipe. The watchdog itself, sent TERM, INT or HUP (launchd stopping the job,
+# learn.sh's own signal trap), does the same to the group before it exits 128+signal: CMD never outlives it. The
+# group gets up to 3 s after TERM, so a nested watchdog (learn.sh > component > learn_model_call > claude) can stop
+# its own group first. learn.sh runs the program text directly (exec perl -e "$_LEARN_LIMITED_PL") so the pid it
+# signals is the watchdog's.
+# shellcheck disable=SC2016 # perl source, not shell
+_LEARN_LIMITED_PL='
+  use POSIX ":sys_wait_h";
+  my $t = shift @ARGV;
+  my $pid = fork;
+  defined $pid or exit 1;
+  if (!$pid) { setpgrp(0, 0); $SIG{$_} = "DEFAULT" for qw(TERM INT HUP); exec { $ARGV[0] } @ARGV; POSIX::_exit(127); }
+  sub stop {
+    my $code = shift;
+    kill "TERM", -$pid; kill "TERM", $pid;
+    for (1 .. 30) { waitpid($pid, WNOHANG); last unless kill 0, -$pid; select undef, undef, undef, 0.1; }
+    kill "KILL", -$pid; waitpid($pid, 0); exit $code;
+  }
+  $SIG{ALRM} = sub { stop(142) };
+  $SIG{TERM} = sub { stop(143) }; $SIG{INT} = sub { stop(130) }; $SIG{HUP} = sub { stop(129) };
+  alarm $t if $t > 0;
+  waitpid($pid, 0);
+  exit($? & 127 ? 128 + ($? & 127) : $? >> 8);
+'
+_learn_limited() { perl -e "$_LEARN_LIMITED_PL" "$@"; }
+
+# learn_estimate_tokens < TEXT: what a learn_model_call with TEXT as its prompt is expected to cost, in tokens:
+# the bytes / 3.5, rounded up, plus LEARN_CALL_OVERHEAD (default 4000: about 2.7k tokens of fixed prompt per call,
+# measured live on 2026-10-17 with the isolation flags below, and an allowance for the answer). An estimate: a
+# long answer or a prompt in another script can still pass it.
+learn_estimate_tokens() {
+  local bytes ovh
+  bytes=$(wc -c | tr -d ' ')
+  ovh=$(learn_setting LEARN_CALL_OVERHEAD); case "$ovh" in ''|*[!0-9]*) ovh=4000 ;; esac
+  printf '%s\n' $(( (bytes * 2 + 6) / 7 + ovh ))
+}
+
+# learn_budget_left: the tokens left today under LEARN_TOKEN_CAP (never below 0). A component that batches its
+# input sizes the batch so that learn_estimate_tokens of the prompt fits this; learn_model_call refuses (exit 5) a
+# call whose estimate does not fit. Read without the lock: a hint, the refusal is the check.
+learn_budget_left() {
+  local cap used
+  cap=$(learn_setting LEARN_TOKEN_CAP); case "$cap" in ''|*[!0-9]*) cap=200000 ;; esac
+  used=$(cat "$(learn_work_dir)/tokens-$(date +%Y-%m-%d)" 2>/dev/null || true); used=${used%%[!0-9]*}
+  [ -n "$used" ] || used=0
+  if [ "$used" -ge "$cap" ]; then echo 0; else echo $((cap - used)); fi
+}
+
+# _learn_tokens_add FILE LOCK DELTA [CAP]: add DELTA (may be negative) to the day total in FILE, holding an flock
+# on LOCK, and print the new total. With CAP: refuse (exit 5, print the total unchanged) when the total is already
+# at CAP or the sum would pass it. Exit 3 when the files cannot be used.
+_learn_tokens_add() {
+  ( umask 077; perl -e '
+    use Fcntl ":flock";
+    my ($f, $lk, $d, $cap) = @ARGV;
+    open(my $l, ">>", $lk) or exit 3;
+    flock($l, LOCK_EX) or exit 3;
+    my $u = 0;
+    if (open(my $h, "<", $f)) { my $x = <$h>; $u = $1 if defined $x && $x =~ /^(\d+)/; close $h; }
+    if (defined $cap && $cap ne "" && ($u >= $cap || $u + $d > $cap)) { print "$u\n"; exit 5; }
+    my $n = $u + $d; $n = 0 if $n < 0;
+    my $tmp = "$f.tmp.$$";
+    open(my $o, ">", $tmp) or exit 3; print $o "$n\n"; close $o or exit 3;
+    rename($tmp, $f) or exit 3;
+    print "$n\n";
+  ' "$@" )
 }
 
 # learn_model_call MODEL < PROMPT: the learner's one way to call a model (spec 5.6). Runs
-#   "${CHING_CLAUDE_BIN:-claude}" -p --model MODEL --tools "" --output-format json --strict-mcp-config --disable-slash-commands
+#   "${CHING_CLAUDE_BIN:-claude}" -p --model MODEL --tools "" --output-format json --strict-mcp-config
+#     --disable-slash-commands --no-session-persistence --setting-sources "" --settings <LEARN_CALL_SETTINGS>
 # with the prompt on stdin, in $(learn_work_dir), with CHING_LEARNER=1 (guard learner mode) and
 # CLAUDE_MEM_INTERNAL=1 (claude-mem does not observe the run, D27), cut after LEARN_CALL_TIMEOUT seconds. Prints
 # the model's answer: the one JSON document in the envelope's .result, compact, a ```json fence removed.
-# --tools "" only removes the built-in tools: checked live on 2026-10-17 (claude 2.1.302), the run still had every
-# MCP server (Gmail send, Drive share, ...) and its prompt cost 211k cache-creation tokens, more than the daily cap.
-# --strict-mcp-config (no --mcp-config given: no MCP servers) and --disable-slash-commands (no skills) leave the
-# model with no tools at all (init message: tools [], mcp_servers []) and about 6k tokens per call. Hooks still run,
-# so guard learner mode stays the second layer.
-# Every token the envelope reports (input, output, cache read, cache creation) is added to
-# .work/tokens-<local YYYY-MM-DD>; once that total reaches LEARN_TOKEN_CAP no call starts. Each call adds one
-# line to .work/learn.log (claude's stderr goes there too).
+# Isolation, checked live on 2026-10-17 (claude 2.1.302, stream-json init message):
+#   --tools "" only removes the built-in tools: the run still had every MCP server (Gmail send, Drive share, ...)
+#   and its prompt cost 211k cache-creation tokens. --strict-mcp-config (no MCP servers) and
+#   --disable-slash-commands (no skills) leave tools [] and mcp_servers [].
+#   The owner's hooks still ran on every call (Ching's session-start/stop-check/notify, a "Session finished" popup,
+#   the remember plugin's SessionEnd summarizer). --setting-sources "" loads no user, project or local settings, so
+#   no user hooks and no plugins (only the built-in cc-plugin-* ones; no hook fired); auth is unchanged (OAuth from
+#   the keychain, HOME stays real). --settings then adds back one hook, guard.sh in learner mode for every tool, so
+#   the guard stays the second layer (there are no tools for it to see), and turns auto-memory off (else an empty
+#   ~/.claude/projects/<.work>/memory is made). --no-session-persistence: no transcript under ~/.claude/projects.
+#   With all of it a call costs about 2.7k tokens before the prompt's own.
+# Budget: the call's learn_estimate_tokens is reserved in .work/tokens-<local YYYY-MM-DD> before it starts and
+# replaced by every token the envelope reports (input, output, cache read, cache creation) after it, each under an
+# flock on .work/tokens.lock. When the reservation does not fit under LEARN_TOKEN_CAP no call starts. Each call
+# adds one line to .work/learn.log (claude's stderr goes there too).
 # Exit: 0 ok | 1 the call failed, timed out, or gave no success envelope | 2 the answer is not one JSON document |
-#       3 .work cannot be used | 5 capped, no call made | 64 no MODEL.
+#       3 .work cannot be used | 5 capped (the estimate does not fit what is left today), no call made |
+#       64 no MODEL.
 learn_model_call() {
-  local model=${1:-} tokf logf work cap lim used out rc tok res
+  local model=${1:-} tokf logf lockf work cap lim est total out rc tok res pf settings
   [ -n "$model" ] || { echo "learn_model_call: no model given" >&2; return 64; }
   tokf=$(proposal_safe_path ".work/tokens-$(date +%Y-%m-%d)") || return 3
   logf=$(proposal_safe_path .work/learn.log) || return 3
+  lockf=$(proposal_safe_path .work/tokens.lock) || return 3
   work=${tokf%/*}
   cap=$(learn_setting LEARN_TOKEN_CAP); case "$cap" in ''|*[!0-9]*) cap=200000 ;; esac
   lim=$(learn_setting LEARN_CALL_TIMEOUT); case "$lim" in ''|*[!0-9]*) lim=300 ;; esac
-  used=$(cat "$tokf" 2>/dev/null || true); case "$used" in ''|*[!0-9]*) used=0 ;; esac
-  if [ "$used" -ge "$cap" ]; then
-    { (umask 077; printf '%s model=%s rc=capped tokens=0 day_total=%s cap=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$model" "$used" "$cap" >>"$logf"); } 2>/dev/null
+  pf=$(umask 077; mktemp "$work/.prompt.XXXXXX") || return 3
+  cat >"$pf" || { rm -f "$pf"; return 3; }
+  est=$(learn_estimate_tokens <"$pf")
+  rc=0; total=$(_learn_tokens_add "$tokf" "$lockf" "$est" "$cap") || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    rm -f "$pf"
+    [ "$rc" -eq 5 ] || { echo "learn_model_call: cannot update $tokf" >&2; return 3; }
+    { (umask 077; printf '%s model=%s rc=capped tokens=0 estimate=%s day_total=%s cap=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$model" "$est" "$total" "$cap" >>"$logf"); } 2>/dev/null
     return 5
   fi
+  settings=$(jq -nc --arg g "$(printf '%q' "$LIB_DIR/guard.sh")" \
+    '{autoMemoryEnabled: false, hooks: {PreToolUse: [{matcher: "*", hooks: [{type: "command", command: $g, timeout: 15}]}]}}')
   out=$(cd "$work" && CHING_LEARNER=1 CLAUDE_MEM_INTERNAL=1 _learn_limited "$lim" \
         "${CHING_CLAUDE_BIN:-claude}" -p --model "$model" --tools "" --output-format json \
-        --strict-mcp-config --disable-slash-commands 2>>"$logf"); rc=$?
+        --strict-mcp-config --disable-slash-commands --no-session-persistence \
+        --setting-sources "" --settings "$settings" <"$pf" 2>>"$logf"); rc=$?
+  rm -f "$pf"
   tok=$(printf '%s' "$out" | jq -r '[.usage.input_tokens, .usage.output_tokens, .usage.cache_read_input_tokens,
         .usage.cache_creation_input_tokens] | map(. // 0) | add' 2>/dev/null) || tok=0
   case "$tok" in ''|*[!0-9]*) tok=0 ;; esac
-  { (umask 077; printf '%s\n' $((used + tok)) >"$tokf"
-     printf '%s model=%s rc=%s tokens=%s day_total=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$model" "$rc" "$tok" $((used + tok)) >>"$logf"); } 2>/dev/null
+  total=$(_learn_tokens_add "$tokf" "$lockf" $((tok - est))) || total="?"
+  { (umask 077; printf '%s model=%s rc=%s tokens=%s day_total=%s estimate=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$model" "$rc" "$tok" "$total" "$est" >>"$logf"); } 2>/dev/null
   if [ "$rc" -ne 0 ] || [ "$(printf '%s' "$out" | jq -r '.is_error' 2>/dev/null)" != false ]; then
     echo "learn_model_call: the call failed (exit $rc)" >&2; return 1
   fi
