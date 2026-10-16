@@ -3,8 +3,10 @@
 #   ching-proposals list [--all]          open proposals: kind id: first sentence (sessions/days); --all adds decided ones
 #   ching-proposals show <id>             the whole file, the patch coloured
 #   ching-proposals diff <id>             a rule: the patch applied to a copy of the live target, as a diff
-#   ching-proposals approve <id>          only a person at a terminal (stdin and stdout a TTY):
-#                                           rule: shows the change, asks y/N, then patches the target (the old
+#   ching-proposals approve <id>          only a person at a terminal, never a Claude Code session (see below). It
+#                                         shows what will happen, then shows a short random code and reads it back
+#                                         from /dev/tty (typed once; anything else cancels):
+#                                           rule: shows the change, then patches the target (the old
 #                                                 version is kept in archive/<id>.target-before)
 #                                           skill: writes nothing into ~/.claude/skills; prints the prompt that starts
 #                                                 a skill-creator session
@@ -13,7 +15,21 @@
 #   ching-proposals reject <id> [reason]  adds the fingerprint (and the reason) to rejected.txt: never proposed again
 #   ching-proposals snooze <id> <days>    hidden until then; the learner may propose it again after that date
 # Every decision sets the file's status, moves it to archive/ and emits a `proposal` event {id, action}.
-# A session cannot approve: the TTY check here, and guard.sh denies `ching-proposals approve` from any session.
+# Only a person approves (spec 6.4), in three layers here:
+#   1. refused when a Claude Code session started it: one of SESSION_VARS is set, or a process up the parent chain is
+#      claude (ps comm or argv[0] named claude, or a claude-code / claude/versions path). The walk catches a session
+#      that unset the variables;
+#   2. stdin and stdout must be a TTY;
+#   3. a random code is shown and must be typed back on /dev/tty. A pty wrapper (script -q /dev/null) fed a blind
+#      answer cannot know it, and anything typed ahead is flushed before the question.
+# guard.sh adds a cheap fourth layer: a session may call ching-proposals only directly, as list, show, diff, reject,
+# snooze or help. Residual risk: a session that detaches a process from its own tree (double fork, launchd, a tmux
+# server it started), clears the variables, then reads the code off the screen and types it back. That is deliberate
+# circumvention rather than an over-eager session, and such a session could as well edit the target by hand.
+# Tests only: CHING_TEST=1 with CHING_TEST_ANCESTRY_STOP=<pid> ends the parent walk at that pid (the suite itself may run
+# inside a session). It is honoured only when AGENT_HOME, HOME and a rule's target all resolve inside a
+# /tmp/ching-tests.* sandbox (tests/run.sh makes it), so it can never approve a real proposal or change a real file;
+# with CHING_TEST=1 anywhere else approve exits 3.
 # Colour: when stdout is a terminal, unless NO_COLOR is set; CHING_COLOR=always|never overrides.
 # Env: AGENT_HOME (default ~/.agent; proposals live in $AGENT_HOME/proposals) HOME (a target's ~)
 set -euo pipefail
@@ -130,6 +146,81 @@ show_diff() { # label -> the change REAL -> NEW as a unified diff
   diff -u --label "$1 (now)" --label "$1 (after approve)" "$REAL" "$NEW" | paint || true
 }
 
+# ---------- who is asking: only a person approves (spec 6.4; the layers are described at the top) ----------
+# What a Claude Code Bash tool sets (seen in a real session, Claude Code 2.1.301, 2026-10-17): CLAUDECODE=1,
+# CLAUDE_CODE_ENTRYPOINT=cli, CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_EXECPATH, CLAUDE_CODE_CHILD_SESSION, CLAUDE_PID and
+# AI_AGENT=claude-code_<version>_agent; IDE integrations add CLAUDE_CODE_SSE_PORT. Not every CLAUDE_CODE_* name: people
+# export CLAUDE_CODE_USE_BEDROCK and the like in their own shell. CHING_LEARNER is the learner job (guard.sh).
+SESSION_VARS="CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SESSION_ID CLAUDE_CODE_EXECPATH CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SSE_PORT CLAUDE_PID AI_AGENT CHING_LEARNER"
+TEST_MODE=0
+under_sandbox() { # path -> 0 when it resolves inside a /tmp/ching-tests.* folder (tests/run.sh's sandbox)
+  local r
+  r=$(perl -MCwd=realpath -e 'my $r = realpath($ARGV[0]); print defined $r ? $r : ""' "$1" 2>/dev/null) || return 1
+  case "$r" in /private/tmp/ching-tests.?*/?*|/tmp/ching-tests.?*/?*) return 0 ;; esac
+  return 1
+}
+test_mode() { # CHING_TEST=1 -> TEST_MODE=1 when AGENT_HOME and HOME are in the sandbox; anywhere else exit 3
+  [ "${CHING_TEST:-}" = 1 ] || return 0
+  if ! under_sandbox "$AGENT_HOME" || ! under_sandbox "$HOME"; then
+    die "CHING_TEST is honoured only inside the test sandbox (/tmp/ching-tests.*); not approving" 3
+  fi
+  TEST_MODE=1
+}
+claude_ancestor() { # -> prints "pid name" of the nearest claude process up the parent chain (exit 0), exit 1 when
+  # there is none, exit 2 when the process table cannot be read. One ps call per column set, then a walk in awk.
+  local stop=1 tab args
+  if [ "$TEST_MODE" -eq 1 ] && [[ "${CHING_TEST_ANCESTRY_STOP:-}" =~ ^[0-9]+$ ]]; then stop=$CHING_TEST_ANCESTRY_STOP; fi
+  tab=$(ps -axww -o pid= -o ppid= -o comm= 2>/dev/null) && [ -n "$tab" ] || return 2
+  args=$(ps -axww -o pid= -o args= 2>/dev/null) && [ -n "$args" ] || return 2
+  { printf '%s\n' "$tab"; echo "--args--"; printf '%s\n' "$args"; } | awk -v start="$PPID" -v stop="$stop" '
+    function isclaude(p,   c, a, w, n, i) {   # comm, or the first or second word of args (node .../bin/claude)
+      c = tolower(comm[p]); sub(/.*\//, "", c)
+      if (c == "claude") return 1
+      a = tolower(args[p]); n = split(a, w, " ")
+      for (i = 1; i <= n && i <= 2; i++) { sub(/.*\//, "", w[i]); if (w[i] == "claude") return 1 }
+      return (a ~ /claude-code\/cli/ || a ~ /@anthropic-ai\/claude-code/ || a ~ /\/claude\/versions\//)
+    }
+    $0 == "--args--" { part = 2; next }
+    part != 2 { p = $1; pp[p] = $2; $1 = ""; $2 = ""; sub(/^ +/, ""); comm[p] = $0; next }
+    { p = $1; $1 = ""; sub(/^ +/, ""); args[p] = $0 }
+    END {
+      p = start; n = 0
+      while (p > 1 && p != stop && n < 200) {
+        if (isclaude(p)) { print p " " comm[p]; exit 0 }
+        if (!(p in pp)) break
+        p = pp[p]; n++
+      }
+      exit 1
+    }'
+}
+session_check() { # id -> exits unless this was started by a person, not by a Claude Code session (layer 1)
+  local v hit rc=0 how="Open your own terminal window (not Claude Code's ! prompt) and run: ching-proposals approve ${1:-<id>}"
+  for v in $SESSION_VARS; do
+    if [ -n "${!v:-}" ]; then die "approve is for the person at a terminal, not a Claude Code session ($v is set). $how"; fi
+  done
+  hit=$(claude_ancestor) || rc=$?
+  case "$rc" in
+    0) die "approve is for the person at a terminal, not a Claude Code session (it runs under claude, process $hit). $how" ;;
+    1) ;;
+    *) die "approve cannot read the process table to check who is asking; not approving" ;;
+  esac
+}
+confirm() { # question -> 0 when the person typed the shown code back on the terminal (layer 3). The answer is read
+  # from /dev/tty, not stdin, and whatever was typed or piped ahead is flushed first, so only someone who read the
+  # code can answer.
+  local code ans=""
+  ( : <>/dev/tty ) 2>/dev/null || die "cannot open /dev/tty to ask for the confirmation code; run it in a terminal"
+  exec 3<>/dev/tty
+  code=$(od -An -N4 -tu1 /dev/urandom | awk '{ s = "abcdefghjkmnpqrstuvwxyz23456789"; for (i = 1; i <= NF; i++) printf "%s", substr(s, $i % 31 + 1, 1) }')
+  [ "${#code}" -eq 4 ] || die "could not make a confirmation code"
+  perl -MPOSIX=tcflush,TCIFLUSH -e 'tcflush(0, TCIFLUSH)' <&3 2>/dev/null || true
+  printf '\n%s Type %s to confirm (anything else cancels): ' "$1" "$code" >&3
+  IFS= read -r -t 600 ans <&3 || true
+  exec 3<&-
+  ans=$(printf '%s' "$ans" | tr -d '[:space:]' | tr 'A-Z' 'a-z')
+  [ "$ans" = "$code" ]
+}
+
 # decide FILE STATUS ACTION: set the status, move the file to archive/ (another copy with the same id gets a time
 # suffix), emit the proposal event. Prints the archived path.
 decide() {
@@ -180,9 +271,12 @@ case "$cmd" in
     exit 0 ;;
 
   approve)
-    # first, before anything is read: only a person at a terminal approves (spec 6.4). A session's Bash tool has no TTY.
+    # first, before anything is read: only a person at a terminal approves (spec 6.4). Not a session (layer 1), and a
+    # session's Bash tool has no TTY (layer 2); the code typed back (layer 3) comes once the person has seen the change.
+    test_mode
+    session_check "${1:-}"
     if [ ! -t 0 ] || [ ! -t 1 ]; then
-      die "approve is for a person at a terminal (stdin and stdout must be a TTY). Run it yourself: ching-proposals approve ${1:-<id>}"
+      die "approve is for the person at a terminal (stdin and stdout must be a TTY). Run it yourself: ching-proposals approve ${1:-<id>}"
     fi
     [ $# -ge 1 ] || die "usage: ching-proposals approve <id>" 64
     check_id "$1"; root_or_none decide; open_file
@@ -190,12 +284,17 @@ case "$cmd" in
     case "$kind" in
       rule)
         patched_copy "$FILE"
+        if [ "$TEST_MODE" -eq 1 ] && ! under_sandbox "$REAL"; then die "CHING_TEST: the target $REAL is outside the test sandbox; not approving" 3; fi
         target=$(proposal_get "$FILE" target)
         printf '%s\n\n' "$(proposal_section "$FILE" proposal)"
         show_diff "$target"
-        printf '\nApply this change to %s? [y/N] ' "$REAL"
-        ans=""; read -r ans || true
-        case "$ans" in y|Y|yes|YES) ;; *) echo "not applied; nothing changed"; exit 1 ;; esac
+        confirm "Apply this change to $REAL?" || { echo; echo "not applied; nothing changed"; exit 1; } ;;
+      *)
+        printf '%s %s:\n\n%s\n' "$kind" "$ID" "$(proposal_section "$FILE" proposal)"
+        confirm "Approve $ID?" || { echo; echo "not approved; nothing changed"; exit 1; } ;;
+    esac
+    case "$kind" in
+      rule)
         bak=$(proposal_safe_path "archive/$ID.target-before") || die "cannot use $ROOT/archive" 3
         if [ -e "$bak" ]; then bak=$(proposal_safe_path "archive/$ID.$(date -u +%Y%m%dT%H%M%SZ).target-before") || die "cannot use $ROOT/archive" 3; fi
         cp "$REAL" "$bak" && chmod 600 "$bak"

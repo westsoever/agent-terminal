@@ -1250,6 +1250,41 @@ gallow "ching-proposals reject" "$R" 'ching-proposals reject rule-x not useful'
 gallow "ching-proposals snooze" "$R" 'ching-proposals snooze rule-x 7'
 gallow "grep for approve in the CLI" "$R" 'grep -n approve bin/ching-proposals'
 gallow "a proposal id that contains approve" "$R" 'ching-proposals show rule-approve-merges'
+# the verifier's bypasses of the old token match (stage 6a): the allowlist denies every one
+gdeny "bypass: echo approve | xargs ching-proposals" "$R" 'echo approve rule-x | xargs ching-proposals'
+gdeny "bypass: xargs with options" "$R" 'echo rule-x | xargs -n1 ching-proposals approve'
+gdeny "bypass: a=approve; ching-proposals \$a" "$R" 'a=approve; ching-proposals $a rule-x'
+gdeny "bypass: \$(echo approve)" "$R" 'ching-proposals $(echo approve) rule-x'
+gdeny "bypass: backticks" "$R" 'ching-proposals `echo approve` rule-x'
+gdeny "bypass: appr\${x}ove" "$R" 'x=; ching-proposals appr${x}ove rule-x'
+gdeny "bypass: perl exec" "$R" "perl -e 'exec \"ching-proposals\", \"approve\", \"rule-x\"'"
+gdeny "bypass: eval" "$R" 'eval ching-proposals approve rule-x'
+gdeny "bypass: env wrapper" "$R" 'env ching-proposals approve rule-x'
+gdeny "bypass: the name in capitals (a case-insensitive volume)" "$R" 'CHING-PROPOSALS approve rule-x'
+gdeny "bypass: a glob that expands to the name" "$R" 'bin/ching-propos*ls approve rule-x'
+gdeny "bypass: find -exec" "$R" 'find bin -name ching-proposals -exec {} approve rule-x ;'
+gdeny "bypass: python" "$R" "python3 -c 'import os; os.execvp(\"ching-proposals\", [\"ching-proposals\", \"approve\", \"rule-x\"])'"
+gdeny "bypass: a copy of the CLI" "$R" 'cp bin/ching-proposals /tmp/cp2'
+gdeny "bypass: echo into a shell" "$R" 'echo ching-proposals approve rule-x | sh'
+gdeny "bypass: git -c core.pager" "$R" "git -c core.pager='ching-proposals approve rule-x' log"
+gdeny "bypass: an option before the subcommand" "$R" 'ching-proposals --x approve rule-x'
+gdeny "bypass: no subcommand at all" "$R" 'ching-proposals'
+gdeny_why "bypass: the reason names the allowlist" "$R" 'echo approve rule-x | xargs ching-proposals' "approving a learner proposal is for the person at a terminal. A session may only call ching-proposals directly"
+# what a session (and work on ching itself) still does
+gallow "ching-proposals diff" "$R" 'ching-proposals diff rule-x'
+gallow "ching-proposals help" "$R" 'ching-proposals --help'
+gallow "ching-proposals list with NO_COLOR=1" "$R" 'NO_COLOR=1 ching-proposals list --all'
+gallow "ching-proposals show by kit path, piped to head" "$R" "$HOME/.claude/ching/bin/ching-proposals show rule-x | head -20"
+gallow "list then show" "$R" 'ching-proposals list && ching-proposals show rule-x'
+gallow "shellcheck the CLI" "$R" 'cd bin && shellcheck -x -S warning ching-proposals'
+gallow "bash -n the CLI" "$R" 'bash -n bin/ching-proposals'
+gallow "sed -n the CLI" "$R" "sed -n '1,40p' bin/ching-proposals"
+gallow "git add the CLI" "$R" 'git add bin/ching-proposals tests/t_learn_plumbing.sh'
+gallow "a commit message that mentions approve" "$R" 'git commit -m "ching-proposals: approve asks for a code"'
+gallow "git log of the CLI" "$R" 'git log --oneline -- bin/ching-proposals'
+gallow "the README mentions it" "$R" 'grep -n "ching-proposals approve" README.md'
+# a wrapper script file shows the guard nothing to match; the CLI refuses it (t_learn_plumbing.sh "bypass a wrapper")
+gallow "a wrapper script file: not visible to the guard (the CLI refuses it)" "$R" 'bash /tmp/wrap.sh'
 
 PRL="$AGENT_HOME/proposals"; mkdir -p "$PRL/.work"
 ldeny() { local out; out=$(printf '%s' "$(guard_json "$2" "$3" "$4")" | CHING_LEARNER=1 "$BIN/guard.sh" 2>&1)
