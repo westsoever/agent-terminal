@@ -6,9 +6,12 @@
 # (`git worktree list`) of every repo found, shown when they hold repo state but have no live session,
 # plus the optional extra list in ~/.agent-repos.
 #   (default)  name, state, age, ctx (● healthy ◐ watch ○ handoff ? unknown), tokens today, folder, note
-#   --speak    short spoken summary that leads with how many need you; warns above 5 active sessions
+#   --speak    short spoken summary that leads with how many need you; warns above 5 active sessions; ends with
+#              "N proposals waiting." when the learner has any (proposals never send a notification)
 #   --inbox    NEEDS YOU (blocked/input), READY (release gate passed for the current HEAD, waiting for --approve),
-#              FINISHED (done since the last --inbox). --inbox marks FINISHED as seen: it writes the time to
+#              FINISHED (done since the last --inbox), PROPOSALS (the learner's open proposals in $AGENT_HOME/proposals,
+#              "kind id: first sentence (sessions/days)", most sessions first; snoozed and decided ones are hidden;
+#              decide them with bin/ching-proposals). --inbox marks FINISHED as seen: it writes the time to
 #              $AGENT_HOME/inbox.seen, so the next --inbox does not list those again. One entry per session.
 #   --next     top 5 by urgency x importance x recency (blocked and input sessions stay above working ones),
 #              each with its checkpoint next_action
@@ -297,6 +300,28 @@ sync_lane() { # --inbox's last lane
   done <"$TMP/sync.rows"
 }
 
+# ---- learner proposals (Phase 6 spec 6.1): read only, and the proposals folder is never created here ----
+PROP_DIR="$AGENT_HOME/proposals"
+proposal_rows() { # the open proposals, most sessions first: "kind id: first sentence (n sessions/m days)"
+  local f st today
+  [ -d "$PROP_DIR" ] && [ ! -L "$PROP_DIR" ] || return 0
+  today=$(date -r "$NOW" +%Y-%m-%d)
+  for f in "$PROP_DIR"/*.md; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    case "${f##*/}" in report-*) continue ;; esac
+    st=$(proposal_get "$f" status)
+    case "$st" in
+      open) ;;
+      snoozed:*) if [[ "${st#snoozed:}" > "$today" ]]; then continue; fi ;;
+      *) continue ;;
+    esac
+    printf '%s\t%s\t%s %s: %s (%s sessions/%s days)\n' "$(proposal_get "$f" sessions)" "${f##*/}" \
+      "$(proposal_get "$f" kind)" "$(proposal_get "$f" id)" \
+      "$(proposal_section "$f" proposal | tr '\n' ' ' | perl -ne 's/\s+/ /g; s/^ //; s/(.*?[.!?])(\s.*|$)/$1/; print substr($_, 0, 160)')" \
+      "$(proposal_get "$f" sessions)" "$(proposal_get "$f" days)"
+  done | sort -t $'\t' -k1,1rn -k2,2 | cut -f3
+}
+
 case "$MODE" in
   table)
     if [ "$total" -eq 0 ]; then echo "no Claude sessions seen in the last ${HOURS}h"; sync_line; exit 0; fi
@@ -345,6 +370,9 @@ case "$MODE" in
     lane "NEEDS YOU" "$TMP/needs"
     lane "READY" "$TMP/ready"
     lane "FINISHED (since last look)" "$TMP/fin"
+    echo "PROPOSALS (decide with bin/ching-proposals)"
+    proposal_rows >"$TMP/props"
+    if [ -s "$TMP/props" ]; then sed 's/^/  /' "$TMP/props"; else echo "  (nothing)"; fi
     sync_lane
     mkdir -p "$AGENT_HOME"
     printf '%s\n' "$NOW" >"$SEEN_F"
@@ -378,7 +406,12 @@ case "$MODE" in
 esac
 
 # ---- spoken summary: short sentences, no paths, no ids ----
-if [ "$total" -eq 0 ]; then echo "No Claude sessions in the last $HOURS hours."; exit 0; fi
+props_said() { # " N proposals waiting." or nothing
+  local n
+  n=$(proposal_rows | grep -c . || true)
+  if [ "$n" -eq 1 ]; then printf ' 1 proposal waiting.'; elif [ "$n" -gt 1 ]; then printf ' %s proposals waiting.' "$n"; fi
+}
+if [ "$total" -eq 0 ]; then echo "No Claude sessions in the last $HOURS hours.$(props_said)"; exit 0; fi
 need=$((blocked + waiting)); out=""
 if [ "$need" -eq 1 ]; then out="1 needs you. "; elif [ "$need" -gt 1 ]; then out="$need need you. "; fi
 out="$out$active active session"; [ "$active" -eq 1 ] || out="${out}s"; out="$out out of $total."
@@ -400,4 +433,4 @@ if [ "$n" -eq 0 ]; then
 fi
 [ "$done_n" -eq 0 ] || out="$out $done_n finished."
 if [ "$active" -gt 5 ]; then out="$out Warning: that is more than five active sessions; consider parking some."; fi
-echo "$out"
+echo "$out$(props_said)"

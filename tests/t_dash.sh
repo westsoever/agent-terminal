@@ -348,4 +348,43 @@ printf '%s\n' "$SYR" >"$WORK/sy-repos"
 CHING_INCLUDE_SANDBOX=1 SYNC_NO_FETCH=1 AGENT_HOME="$SYA" AGENT_REPOS_FILE="$WORK/sy-repos" "$BIN/sync-check.sh" --quiet
 assert_contains "sync: sync-check.sh then dash.sh: the count line" "$(sydash | tail -1)" "sync: 1 repo needs attention (oldest <1h) - bin/dash.sh --inbox"
 assert_contains "sync: ... and the lane" "$(sydash --inbox | sed -n '/^SYNC/,$p')" "  syrepo: 1 dirty worktree (oldest <1h)"
+
+# ---------- Phase 6: the PROPOSALS lane (spec 6.1) ----------
+PAH="$WORK/pr-ah"; PCL="$WORK/pr-claude"; mkdir -p "$PAH" "$PCL"
+prdash() { AGENT_HOME="$PAH" CLAUDE_DIR="$PCL" AGENT_REPOS_FILE="$WORK/none" DASH_NOW="$NOW" "$BIN/dash.sh" "$@"; }
+assert_eq "proposals: no proposals folder: the lane says (nothing)" "  (nothing)" "$(lane_of "$(prdash --inbox)" PROPOSALS)"
+assert_no_file "proposals: dash never creates the proposals folder" "$PAH/proposals"
+assert_eq "proposals: the lane sits between FINISHED and SYNC" "FINISHED PROPOSALS SYNC" \
+  "$(prdash --inbox | grep -oE '^(FINISHED|PROPOSALS|SYNC)' | tr '\n' ' ' | sed 's/ $//')"
+assert_not_contains "proposals: none, --speak says nothing about them" "$(prdash --speak)" "proposal"
+PP="$PAH/proposals"; mkdir -p "$PP/archive"
+mkprop() { # file status sessions days first-sentences
+  local id=${1%.md}
+  printf 'id: %s\nkind: %s\nstatus: %s\ncreated: 2026-10-14T05:31:02Z\ncomponent: corrections\nfingerprint: %s\nsessions: %s\ndays: %s\ntarget: ~/.agents/CLAUDE.md\n\n## proposal\n%s\n\n## evidence\n- (none)\n' \
+    "$id" "${id%%-*}" "$2" "$(printf '%s' "$id" | shasum | cut -c1-40)" "$3" "$4" "$5" >"$PP/$1"
+}
+mkprop rule-no-version-bump.md open 3 2 "Add a rule that sessions never bump the version. The owner releases by hand."
+mkprop skill-sync-loop.md open 5 2 "Make a skill for the sync loop!
+It repeats."
+mkprop rule-later.md "snoozed:2999-01-01" 9 9 "Snoozed until later."
+mkprop rule-back.md "snoozed:2000-01-01" 1 1 "A snooze that ran out."
+mkprop rule-done.md approved 7 7 "Already approved at the top."
+cp "$PP/rule-no-version-bump.md" "$PP/archive/rule-old.md"
+printf 'weekly report\n' >"$PP/report-2026-W41.md"
+pl=$(lane_of "$(prdash --inbox)" PROPOSALS)
+assert_eq "proposals: open ones, most sessions first, as kind id: first sentence (sessions/days)" \
+  "  skill skill-sync-loop: Make a skill for the sync loop! (5 sessions/2 days)
+  rule rule-no-version-bump: Add a rule that sessions never bump the version. (3 sessions/2 days)
+  rule rule-back: A snooze that ran out. (1 sessions/1 days)" "$pl"
+assert_not_contains "proposals: a snooze that has not run out is hidden" "$pl" "rule-later"
+assert_not_contains "proposals: archived ones are hidden" "$pl" "rule-old"
+assert_not_contains "proposals: decided ones are hidden" "$pl" "rule-done"
+assert_not_contains "proposals: the weekly report is not a proposal" "$pl" "report"
+sp=$(prdash --speak)
+assert_contains "proposals: --speak adds one sentence with the count" "$sp" "3 proposals waiting."
+assert_eq "proposals: --speak says it once" "1" "$(printf '%s' "$sp" | grep -o 'proposals waiting' | wc -l | tr -d ' ')"
+rm -f "$PP/skill-sync-loop.md" "$PP/rule-back.md"
+assert_contains "proposals: one waiting is singular" "$(prdash --speak)" "1 proposal waiting."
+assert_not_contains "proposals: the default view does not list them" "$(prdash)" "no-version-bump"
+assert_not_contains "proposals: dash never sends a notification (it does not call notify.sh)" "$(grep -v '^#' "$BIN/dash.sh")" "notify.sh"
 exit 0

@@ -1235,4 +1235,65 @@ ls db/test | head -20; f=$(ls db/test | grep -iE "foundation|enrich" | head -1);
 grep -nE '^(write_goal|mk_repo|hook_json|assert_[a-z_]+)\(\)|NOTIFY_DRY_RUN|export ' tests/lib.sh | head -40; sed -n "$(grep -n '^write_goal()' tests/lib.sh | cut -d: -f1),+12p" tests/lib.sh
 export T_ROOT=$(mktemp -d /tmp/ching-tests.XXXXXX) && TNAME=t_install bash tests/t_install.sh >"$T_ROOT/t_install.log" 2>&1; echo "rc=$?"; grep '^FAIL' "$T_ROOT/results.t_install"
 EOF
+
+# ---------- Phase 6: `ching-proposals approve` is for the human; learner mode (CHING_LEARNER=1) ----------
+gdeny "ching-proposals approve from a session" "$R" 'ching-proposals approve rule-x'
+gdeny "approve through the kit path" "$R" "$HOME/.claude/ching/bin/ching-proposals approve rule-x"
+gdeny "approve under a fake pty" "$R" 'script -q /dev/null ching-proposals approve rule-x'
+gdeny "approve after a cd and &&" "$R" 'cd /tmp && bin/ching-proposals approve skill-y'
+gdeny "approve with the word quoted apart" "$R" "ching-proposals ap'prove' rule-x"
+gdeny "approve inside bash -c" "$R" "bash -c 'ching-proposals approve rule-x'"
+gdeny_why "approve: the reason names the person at a terminal" "$R" 'ching-proposals approve rule-x' "approving a learner proposal is for the person at a terminal"
+gallow "ching-proposals list" "$R" 'ching-proposals list'
+gallow "ching-proposals show" "$R" 'ching-proposals show rule-x'
+gallow "ching-proposals reject" "$R" 'ching-proposals reject rule-x not useful'
+gallow "ching-proposals snooze" "$R" 'ching-proposals snooze rule-x 7'
+gallow "grep for approve in the CLI" "$R" 'grep -n approve bin/ching-proposals'
+gallow "a proposal id that contains approve" "$R" 'ching-proposals show rule-approve-merges'
+
+PRL="$AGENT_HOME/proposals"; mkdir -p "$PRL/.work"
+ldeny() { local out; out=$(printf '%s' "$(guard_json "$2" "$3" "$4")" | CHING_LEARNER=1 "$BIN/guard.sh" 2>&1)
+  if is_deny "$out"; then pass "learner deny: $1"; else fail "learner deny: $1" "  input: $4"$'\n'"  guard said: ${out:-<allowed>}"; fi; }
+lallow() { local out; out=$(printf '%s' "$(guard_json "$2" "$3" "$4")" | CHING_LEARNER=1 "$BIN/guard.sh" 2>&1)
+  if [ -z "$out" ]; then pass "learner allow: $1"; else fail "learner allow: $1" "  input: $4"$'\n'"  guard said: $out"; fi; }
+fp_json() { jq -nc --arg p "$1" '{file_path: $p, content: "x"}'; }
+lallow "Write under proposals/" Write "$PRL/.work" "$(fp_json "$PRL/rule-x.md")"
+lallow "Write under proposals/.work, relative to the cwd" Write "$PRL/.work" "$(fp_json "prompts.jsonl")"
+lallow "Edit under proposals/" Edit "$PRL/.work" "$(jq -nc --arg p "$PRL/rule-x.md" '{file_path: $p, old_string: "a", new_string: "b"}')"
+lallow "Read anywhere" Read "$PRL/.work" "$(jq -nc --arg p "$R/README.md" '{file_path: $p}')"
+lallow "Grep" Grep "$PRL/.work" '{"pattern":"x","path":"."}'
+ldeny "Write outside proposals/" Write "$PRL/.work" "$(fp_json "$HOME/.agents/CLAUDE.md")"
+ldeny "Write to a skill" Write "$PRL/.work" "$(fp_json "$HOME/.claude/skills/new/SKILL.md")"
+ldeny "Edit outside proposals/" Edit "$PRL/.work" "$(jq -nc --arg p "$R/README.md" '{file_path: $p, old_string: "a", new_string: "b"}')"
+ldeny "Write that climbs out with .." Write "$PRL/.work" "$(fp_json "$PRL/../config")"
+ldeny "MultiEdit outside" MultiEdit "$PRL/.work" "$(jq -nc --arg p "$R/README.md" '{file_path: $p, edits: []}')"
+ldeny "NotebookEdit outside" NotebookEdit "$PRL/.work" "$(jq -nc --arg p "$R/n.ipynb" '{notebook_path: $p}')"
+ldeny "Write without a path" Write "$PRL/.work" '{"content":"x"}'
+ldeny "the proposals folder itself is not a file to write" Write "$PRL/.work" "$(fp_json "$PRL")"
+mkdir -p "$WORK/outside"; ln -s "$WORK/outside" "$PRL/link-out"
+ldeny "Write through a link inside proposals/ that leads out" Write "$PRL/.work" "$(fp_json "$PRL/link-out/x.md")"
+ln -s "$WORK/outside/f.md" "$PRL/file-link.md"
+ldeny "Write to a file link inside proposals/" Write "$PRL/.work" "$(fp_json "$PRL/file-link.md")"
+ldeny "Bash, even harmless" Bash "$PRL/.work" '{"command":"ls"}'
+ldeny "Bash redirect outside proposals/" Bash "$PRL/.work" "$(jq -nc --arg c "echo x > $HOME/.agents/CLAUDE.md" '{command: $c}')"
+ldeny "Bash redirect inside proposals/ (no shell at all)" Bash "$PRL/.work" "$(jq -nc --arg c "echo x > $PRL/.work/x" '{command: $c}')"
+ldeny "Monitor" Monitor "$PRL/.work" '{"command":"ls"}'
+ldeny "Skill" Skill "$PRL/.work" '{"skill":"commit"}'
+ldeny "an MCP send tool" mcp__claude_ai_Gmail__send_message "$PRL/.work" '{}'
+ldeny "any MCP tool" mcp__plugin_claude-mem_mcp-search__search "$PRL/.work" '{}'
+ldeny "WebFetch" WebFetch "$PRL/.work" '{"url":"https://example.com"}'
+ldeny "WebSearch" WebSearch "$PRL/.work" '{"query":"x"}'
+ldeny "Task (a subagent)" Task "$PRL/.work" '{"prompt":"x"}'
+mkdir -p "$WORK/sl-learner"; ln -s "$WORK/outside" "$WORK/sl-learner/proposals"
+out=$(printf '%s' "$(guard_json Write "$WORK" "$(fp_json "$WORK/sl-learner/proposals/x.md")")" | CHING_LEARNER=1 AGENT_HOME="$WORK/sl-learner" "$BIN/guard.sh" 2>&1)
+if is_deny "$out"; then pass "learner deny: a symlinked proposals root"; else fail "learner deny: a symlinked proposals root" "$out"; fi
+why=$(printf '%s' "$(guard_json Skill "$PRL/.work" '{"skill":"x"}')" | CHING_LEARNER=1 "$BIN/guard.sh" | jq -r .hookSpecificOutput.permissionDecisionReason)
+assert_contains "learner deny: the reason names learner mode" "$why" "learner mode (CHING_LEARNER=1)"
+# without CHING_LEARNER=1 nothing changes (D24 push gate default stays off; tools the guard does not rule stay allowed)
+tallow "normal session: Skill" Skill "$R" '{"skill":"commit"}'
+tallow "normal session: an MCP tool" mcp__plugin_claude-mem_mcp-search__search "$R" '{}'
+tallow "normal session: Write outside proposals/" Write "$R" "$(fp_json "$R/notes.md")"
+gallow "normal session: Bash ls" "$R" 'ls'
+out=$(printf '%s' "$(guard_json Skill "$R" '{"skill":"x"}')" | CHING_LEARNER=0 "$BIN/guard.sh" 2>&1)
+assert_eq "CHING_LEARNER=0 is not learner mode" "" "$out"
 exit 0

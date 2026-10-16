@@ -24,6 +24,11 @@
 # The Monitor tool (it runs a shell command) goes through the Bash rules. A missing dependency, a failing
 # splitter, a deny that cannot be printed, or a command that takes more than 8 s to check all fail closed.
 # Every deny is also logged as a `deny` event, after the decision has been printed.
+# Learner mode (Phase 6 spec 5.6): with CHING_LEARNER=1 in the environment (only the org.ching.learn job and its
+# `claude -p` calls set it) the learner may read, and may write with Edit/Write only under $AGENT_HOME/proposals/.
+# Every other tool is denied: Bash and Monitor outright (a superset of "no redirects outside proposals": a command
+# string cannot show every write), Skill, MCP, WebFetch, WebSearch and anything else. Without CHING_LEARNER=1
+# nothing changes. `ching-proposals approve` is denied in every session: approving is for the person at a terminal.
 # Env: GUARD_PROTECTED_BRANCHES (default "main master" plus the remote default branch);
 #      GUARD_TIME_LIMIT (seconds; can only lower the 8 s ceiling, for the tests)
 # Config: push_gate=on|off in $AGENT_HOME/config (default ~/.agent/config), read through lib.sh push_gate_on. The file
@@ -627,6 +632,22 @@ check_git() { # $1 = index of git token
   [ "$sub" != push ] || check_push "$j" "$gdir"
 }
 
+# ---------- learner proposals: approving is for the human (Phase 6 spec 6.4) ----------
+check_proposals_approve() { # TOKS is the segment: ching-proposals followed (after any options) by `approve`
+  local k=0 j
+  while [ "$k" -lt "$NT" ]; do
+    base_of "${TOKS[$k]}"
+    if [ "$BASE" = ching-proposals ]; then
+      j=$((k + 1))
+      while [ "$j" -lt "$NT" ]; do case "${TOKS[$j]}" in -*) j=$((j + 1)) ;; *) break ;; esac; done
+      if [ "$j" -lt "$NT" ] && [ "${TOKS[$j]}" = approve ]; then
+        emit_deny "approving a learner proposal is for the person at a terminal. Tell the user to run: ching-proposals approve <id>"
+      fi
+    fi
+    k=$((k + 1))
+  done
+}
+
 # ---------- rules 4, 6, 7 and extras ----------
 graphql_mutation() { # `gh api graphql` whose query text (anywhere in the command: the segment splitter cuts at the
   # parentheses of a query) is a mutation that closes, merges, deletes, publishes or writes refs/commits
@@ -873,6 +894,9 @@ check_misc() { # one segment, tokens in TOKS
   esac
   if has_token release-gate.sh && { seg_matches '--approve'; }; then emit_deny "release approval is for the human. Tell the user the gate passed and wait."; fi
   if has_token migrate-gate.sh && { seg_matches '--confirm*'; }; then emit_deny "confirming a destructive migration is for the human. Stop and ask the user."; fi
+  # only a segment that says "approve", or could spell it through quotes or backslashes, can hold it (a cheap filter:
+  # the token walk over every segment of a 900-line command costs seconds)
+  case "$SEG_RAW" in *approve*|*\"*|*\'*|*\\*) check_proposals_approve ;; esac
   tamper_bash
   check_secret_dump
 }
@@ -1352,6 +1376,27 @@ check_send_mcp() { # rule 10 (D18): drafts only
   esac
   allow
 }
+
+# ---------- learner mode (CHING_LEARNER=1, Phase 6 spec 5.6) ----------
+check_learner() { # returns to let the normal rules run on what the learner may do; denies the rest
+  local p abs lit root l r
+  lit="${AGENT_HOME:-$HOME/.agent}/proposals"
+  case "$TOOL" in
+    Read|Grep|Glob|LS) return 0 ;;
+    Edit|Write|MultiEdit|NotebookEdit)
+      p=$(tool_path)
+      root=$(resolve_path "$lit" "$CWD_PHYS")
+      abs=""; [ -z "$p" ] || abs=$(resolve_path "$p" "$CWD_PHYS")
+      l=$(printf '%s' "$abs" | LC_ALL=C tr 'A-Z' 'a-z'); r=$(printf '%s' "$root" | LC_ALL=C tr 'A-Z' 'a-z')
+      # resolve_path follows the folders that exist, so a link inside proposals/ that leads out resolves outside
+      if [ -n "$abs" ] && [ ! -L "$lit" ] && [ ! -L "$abs" ]; then
+        case "$l" in "$r"/*) return 0 ;; esac
+      fi
+      emit_deny "learner mode (CHING_LEARNER=1): the learner writes only under $lit/, and ${abs:-this write} is not there." ;;
+    *) emit_deny "learner mode (CHING_LEARNER=1): the learner may not use ${TOOL:-this tool}. It reads files and writes under $lit/ only: no shell, skills, MCP or network tools." ;;
+  esac
+}
+if [ "${CHING_LEARNER:-}" = 1 ]; then check_learner; fi
 
 case "$TOOL" in
   Bash|Monitor) check_bash ;;   # Monitor runs a shell command too ({command, description, timeout_ms})
