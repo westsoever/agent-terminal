@@ -155,3 +155,334 @@ config_get() {
 push_gate_on() {
   case "$(config_get push_gate off | tr '[:upper:]' '[:lower:]')" in on) return 0 ;; *) return 1 ;; esac
 }
+
+# ---------- Phase 6 learner contracts (spec 4.1-4.4; interfaces in docs/learn-contracts.md) ----------
+# The learner reads transcripts and events and writes only under $AGENT_HOME/proposals. These are the shared
+# pieces every learner component codes against: one exclusion filter, one redaction, one proposal writer.
+# where this file lives (learn-filter.jq and learn-redact.pl sit beside it); no subshell when sourced by absolute path,
+# which every hook does
+case "${BASH_SOURCE[0]}" in */*) LIB_DIR=${BASH_SOURCE[0]%/*} ;; *) LIB_DIR=. ;; esac
+case "$LIB_DIR" in /*) ;; *) LIB_DIR=$(cd "$LIB_DIR" && pwd) ;; esac
+PROPOSAL_KINDS="rule skill blindspot prune lesson"
+PROPOSAL_COMPONENTS="corrections skills report blindspot lessons"
+
+# learn_setting NAME: a LEARN_* setting. The environment wins, then `NAME=value` in $AGENT_HOME/config, then the
+# built-in default (D26 and spec 5.6). Fails for a name that is not LEARN_*.
+learn_setting() {
+  case "$1" in LEARN_[A-Z]*) ;; *) return 1 ;; esac
+  case "$1" in *[!A-Z0-9_]*) return 1 ;; esac
+  local def=""
+  case "$1" in
+    LEARN_MODEL_CLASSIFY) def=haiku ;;
+    LEARN_MODEL_DRAFT) def=sonnet ;;
+    LEARN_TOKEN_CAP) def=200000 ;;
+    LEARN_SKILL_MAX) def=3 ;;
+    LEARN_MAX_SNIPPETS) def=200 ;;
+    LEARN_CALL_TIMEOUT) def=300 ;;
+  esac
+  if [ -n "${!1:-}" ]; then printf '%s' "${!1}"; else config_get "$1" "$def"; fi
+}
+
+learn_work_dir() { printf '%s' "$AGENT_HOME/proposals/.work"; }   # the learner's cwd; never counted
+
+# learn_redact [--jsonl]: stdin -> stdout with credentials replaced by [REDACTED] (bin/learn-redact.pl).
+learn_redact() { perl "$LIB_DIR/learn-redact.pl" "$@"; }
+
+# learn_skip_project DIR: true when a ~/.claude/projects/<dir> is skipped unread (observer runs, sandboxes, the
+# learner's own .work). DIR may be a path or a bare name; only its last component is judged.
+learn_skip_project() {
+  local d=${1%/}
+  [ "$(jq -nr --arg d "${d##*/}" --arg w "$(learn_work_dir)" -L "$LIB_DIR" \
+      'include "learn-filter"; $d | learn_project_excluded($w)' 2>/dev/null)" = true ]
+}
+
+# learn_filter MODE FILE...: print the lines that count, compact JSON, one per line, in file order.
+#   prompts  counted human prompts (learn_human_prompt)        - transcripts
+#   lines    user/assistant lines of countable sessions        - transcripts (tool calls for the miner)
+#   events   countable events.jsonl lines (learn_event_ok)      - events files
+# Transcript files in a skipped project directory are not read. Malformed lines are skipped; a missing file is
+# skipped. Exit 0, or 2 for an unknown MODE. The defs live in bin/learn-filter.jq.
+learn_filter() {
+  local mode=$1 sel f dirs lf_files=() lf_keep=()
+  shift
+  # shellcheck disable=SC2016 # $work is a jq variable, not a shell one
+  case "$mode" in
+    prompts) sel='learn_human_prompt($work)' ;;
+    lines) sel='learn_session_ok($work)' ;;
+    events) sel='learn_event_ok($work)' ;;
+    *) echo "learn_filter: unknown mode '$mode' (prompts|lines|events)" >&2; return 2 ;;
+  esac
+  for f in "$@"; do [ -f "$f" ] && lf_files+=("$f"); done
+  [ "${#lf_files[@]}" -gt 0 ] || return 0
+  if [ "$mode" != events ]; then
+    # one jq call judges every project directory; files under a skipped one drop out
+    dirs=$(for f in "${lf_files[@]}"; do d=$(dirname "$f"); printf '%s\n' "${d##*/}"; done | sort -u \
+      | jq -Rr --arg w "$(learn_work_dir)" -L "$LIB_DIR" 'include "learn-filter"; select(learn_project_excluded($w))')
+    if [ -n "$dirs" ]; then
+      local d
+      for f in "${lf_files[@]}"; do
+        d=$(dirname "$f"); d=${d##*/}
+        printf '%s\n' "$dirs" | grep -qxF -- "$d" || lf_keep+=("$f")
+      done
+      [ "${#lf_keep[@]}" -gt 0 ] || return 0
+      lf_files=("${lf_keep[@]}")
+    fi
+  fi
+  # perl ends every file with a newline, so the last line of one file never runs into the next
+  perl -ne 'print; print "\n" unless /\n\z/' "${lf_files[@]}" \
+    | jq -R -c --arg work "$(learn_work_dir)" -L "$LIB_DIR" "include \"learn-filter\"; fromjson? // empty | select($sel)"
+}
+
+# proposal_fingerprint TEXT: sha1 of the normalised pattern (lower case, blanks squeezed and trimmed). Every
+# component fingerprints its normalised pattern (rule) or token sequence (skill, joined with " > ") with this.
+proposal_fingerprint() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//' | shasum | cut -c1-40
+}
+
+# proposal_slug TEXT: a file-name slug: lower case, runs of other characters -> "-", at most 50 characters.
+proposal_slug() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-//' | cut -c1-50 | sed 's/-*$//'
+}
+
+# proposal_get FILE KEY: value of a header line (the lines before the first blank line).
+proposal_get() {
+  [ -f "$1" ] || return 0
+  awk -v k="$2" '$0 == "" { exit } index($0, k ": ") == 1 { print substr($0, length(k) + 3); exit }' "$1"
+}
+
+# proposal_section FILE NAME: the body of "## NAME", without the blank lines around it.
+proposal_section() {
+  [ -f "$1" ] || return 0
+  awk -v h="## $2" '
+    $0 == h { on = 1; next }
+    on && index($0, "## ") == 1 { exit }
+    on { if ($0 == "" && !seen) next; seen = 1; buf = buf $0 "\n"; if ($0 != "") { out = out buf; buf = "" } }
+    END { printf "%s", out }' "$1"
+}
+
+# proposal_patch FILE: the raw unified diff of a rule proposal (the ```diff fence removed).
+proposal_patch() {
+  proposal_section "$1" patch | sed '1{/^```diff$/d;}' | sed '${/^```$/d;}'
+}
+
+# proposals_root: make $AGENT_HOME/proposals (mode 0700, tightened when it exists) and print its canonical path.
+# Refuses (exit 3) when it is a symlink: a planted link would send the learner's writes elsewhere.
+proposals_root() {
+  local home root
+  ( umask 077; mkdir -p "$AGENT_HOME" ) 2>/dev/null
+  home=$(cd "$AGENT_HOME" 2>/dev/null && pwd -P) || { echo "proposals: cannot reach AGENT_HOME $AGENT_HOME" >&2; return 3; }
+  root=$home/proposals
+  if [ -L "$root" ]; then echo "proposals: $root is a symlink; refusing to write through it" >&2; return 3; fi
+  ( umask 077; mkdir -p "$root" ) 2>/dev/null
+  if [ ! -d "$root" ] || [ -L "$root" ] || ! chmod 700 "$root" 2>/dev/null; then
+    echo "proposals: cannot use $root" >&2; return 3
+  fi
+  printf '%s' "$root"
+}
+
+# proposal_safe_path PATH: print the absolute path PATH names inside the proposals root, or fail (exit 3).
+# PATH is relative to the root, or absolute and inside it (spelled through $AGENT_HOME or canonically). Refused:
+# empty, a "." or ".." component, anything outside the root, the root itself, a symlink anywhere below the root,
+# an existing directory at PATH. Missing parent directories are made with mode 0700. Every learner write under
+# proposals/ (.work extracts, the weekly report) goes through this; proposal files go through proposal_write.
+proposal_safe_path() {
+  local p=$1 root lit rel cur part base
+  root=$(proposals_root) || return 3
+  case "$p" in ""|*$'\n'*) echo "proposals: empty or multi-line path refused" >&2; return 3 ;; esac
+  case "/$p/" in */../*|*/./*) echo "proposals: '.' or '..' in a path is refused: $p" >&2; return 3 ;; esac
+  lit=${AGENT_HOME%/}/proposals
+  case "$p" in
+    "$root"/*) rel=${p#"$root"/} ;;
+    "$lit"/*) rel=${p#"$lit"/} ;;
+    /*) echo "proposals: $p is outside $root" >&2; return 3 ;;
+    *) rel=$p ;;
+  esac
+  rel=$(printf '%s' "$rel" | tr -s /); rel=${rel#/}; rel=${rel%/}
+  [ -n "$rel" ] || { echo "proposals: the root itself is not a file" >&2; return 3; }
+  base=${rel##*/}
+  cur=$root
+  while [ "$rel" != "$base" ]; do
+    part=${rel%%/*}; rel=${rel#*/}
+    cur=$cur/$part
+    if [ -L "$cur" ]; then echo "proposals: $cur is a symlink; refused" >&2; return 3; fi
+    if [ ! -e "$cur" ]; then ( umask 077; mkdir "$cur" ) || return 3
+    elif [ ! -d "$cur" ]; then echo "proposals: $cur is not a directory" >&2; return 3; fi
+  done
+  cur=$cur/$base
+  if [ -L "$cur" ] || [ -d "$cur" ]; then echo "proposals: $cur is a symlink or a directory; refused" >&2; return 3; fi
+  printf '%s' "$cur"
+}
+
+# proposal_status_of_fp ROOT FP: how an existing proposal with fingerprint FP stands, as "<state> <file>":
+# open (a file at the top of ROOT; an expired snooze there counts as open), approved / rejected / snoozed (a
+# decided file in ROOT/archive, or a future snooze anywhere). Prints nothing when no file has FP.
+proposal_status_of_fp() {
+  local root=$1 fp=$2 f st today open=""
+  today=$(date +%Y-%m-%d)
+  for f in "$root"/*.md "$root"/archive/*.md; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    [ "$(proposal_get "$f" fingerprint)" = "$fp" ] || continue
+    st=$(proposal_get "$f" status)
+    case "$st" in
+      approved|rejected) [ "${f%/*}" = "$root/archive" ] && { printf '%s %s' "$st" "$f"; return 0; } ;;
+      snoozed:*) if [[ "${st#snoozed:}" > "$today" ]]; then printf 'snoozed %s' "$f"; return 0; fi ;;
+    esac
+    [ "${f%/*}" = "$root" ] && [ -z "$open" ] && open=$f
+  done
+  [ -z "$open" ] || printf 'open %s' "$open"
+}
+
+# _proposal_text JSON KEY: a free-text field. A "## " line inside it would end its section early: demoted to "### ".
+# (?m) makes ^ match at every line start in jq regexes.
+_proposal_text() { printf '%s' "$1" | jq -r --arg k "$2" '.[$k] // "" | gsub("(?m)^## "; "### ")'; }
+
+# proposal_write PATH < JSON: the ONLY writer of proposal files (spec 4.2). PATH is "<kind>-<slug>.md" at the top
+# of $AGENT_HOME/proposals (relative, or absolute inside it). JSON on stdin:
+#   {component, fingerprint (40 hex, from proposal_fingerprint), sessions, days, target, proposal,
+#    evidence: [{sid, day: "YYYY-MM-DD", cwd, quote}], patch (rule only, required), why_not_covered
+#    (required for rule and skill), kind (optional; must match PATH)}
+# Every string is redacted (learn_redact) before it is written; quotes are then cut to 300 characters.
+# Prints one line and exits 0:  written <file> | refreshed <file> | skipped rejected|approved|snoozed <fp>
+#   refreshed: an open proposal already has this fingerprint (under any slug); its sessions, days and evidence
+#   are replaced, everything else (id, created, proposal, patch, why) is kept, and PATH is not used.
+#   skipped: the fingerprint is in rejected.txt (first field of a line), or an archived proposal with it was
+#   approved or rejected, or is snoozed until a later date.
+# Fails: 2 bad input, 3 unsafe path, 4 PATH already holds a different fingerprint, 1 write error.
+proposal_write() {
+  local abs root base id kind slug json err fp st prev cur sessions days evidence tmp
+  root=$(proposals_root) || return 3
+  abs=$(proposal_safe_path "${1:-}") || return 3
+  base=${abs##*/}
+  if [ "$abs" != "$root/$base" ]; then echo "proposal_write: proposals sit at the top of $root: ${1:-}" >&2; return 3; fi
+  id=${base%.md}
+  [ "$id.md" = "$base" ] || { echo "proposal_write: the file name must end in .md: $base" >&2; return 2; }
+  kind=${id%%-*}; slug=${id#*-}
+  case " $PROPOSAL_KINDS " in *" $kind "*) ;; *) echo "proposal_write: unknown kind '$kind' ($PROPOSAL_KINDS)" >&2; return 2 ;; esac
+  if [ "$slug" = "$id" ] || ! [[ "$slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || [ "${#id}" -gt 80 ]; then
+    echo "proposal_write: '$id' is not <kind>-<slug> (lower-case letters, digits, single dashes, at most 80 characters)" >&2; return 2
+  fi
+  json=$(jq -c . 2>/dev/null) || { echo "proposal_write: stdin is not JSON" >&2; return 2; }
+  err=$(printf '%s' "$json" | jq -r --arg kind "$kind" --arg comps "$PROPOSAL_COMPONENTS" '
+    def str($k): (.[$k] | type) == "string" and (.[$k] | test("\\S"));
+    def nat($k): (.[$k] | type) == "number" and .[$k] >= 0 and .[$k] == (.[$k] | floor);
+    if type != "object" then "not a JSON object"
+    elif has("kind") and .kind != $kind then "kind \(.kind) does not match the file name (\($kind))"
+    elif (.fingerprint | type) != "string" or (.fingerprint | test("^[0-9a-f]{40}$") | not) then "fingerprint must be 40 lower-case hex (proposal_fingerprint)"
+    elif (.component | type) != "string" or (.component as $c | $comps | split(" ") | any(. == $c) | not) then "component must be one of: \($comps)"
+    elif (nat("sessions") and nat("days")) | not then "sessions and days must be whole numbers"
+    elif str("target") | not then "target is required"
+    elif (.target | test("\n")) then "target must be one line"
+    elif str("proposal") | not then "proposal text is required"
+    elif (.evidence | type) != "array" then "evidence must be an array"
+    elif any(.evidence[]; (type != "object") or ((.sid | type) != "string") or (.sid == "") or ((.day | type) != "string") or (.day | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$") | not)) then "every evidence item needs sid and day (YYYY-MM-DD)"
+    elif $kind == "rule" and (str("patch") | not) then "a rule needs a patch (unified diff)"
+    elif has("patch") and (.patch | type) == "string" and (.patch | split("\n") | index(["```"]) != null) then "a patch line cannot be a bare ``` fence"
+    elif ($kind == "rule" or $kind == "skill") and (str("why_not_covered") | not) then "why_not_covered is required for \($kind)"
+    else "" end' 2>/dev/null) || err="unreadable input"
+  [ -z "$err" ] || { echo "proposal_write: $err" >&2; return 2; }
+  json=$(printf '%s\n' "$json" | learn_redact --jsonl) || return 1
+  fp=$(printf '%s' "$json" | jq -r .fingerprint)
+
+  if [ -f "$root/rejected.txt" ] && awk -v f="$fp" '$1 == f { found = 1 } END { exit !found }' "$root/rejected.txt"; then
+    echo "skipped rejected $fp"; return 0
+  fi
+  st=$(proposal_status_of_fp "$root" "$fp")
+  case "$st" in
+    approved*|rejected*|snoozed*) echo "skipped ${st%% *} $fp"; return 0 ;;
+  esac
+  sessions=$(printf '%s' "$json" | jq -r .sessions)
+  days=$(printf '%s' "$json" | jq -r .days)
+  evidence=$(printf '%s' "$json" | jq -r '
+    if (.evidence | length) == 0 then "- (none)" else
+    .evidence[] | "- \(.sid[0:8]) \(.day) \((.cwd // "-") | gsub("[\\r\\n\\t]+"; " ") | if . == "" then "-" else . end) \"\((.quote // "") | gsub("[\\r\\n\\t]+"; " ") | .[0:300])\""
+    end')
+
+  if [ "${st%% *}" = open ]; then
+    prev=${st#open }; abs=$prev
+    cur=$(
+      printf 'id: %s\nkind: %s\nstatus: open\ncreated: %s\ncomponent: %s\nfingerprint: %s\nsessions: %s\ndays: %s\ntarget: %s\n' \
+        "$(proposal_get "$prev" id)" "$(proposal_get "$prev" kind)" "$(proposal_get "$prev" created)" \
+        "$(proposal_get "$prev" component)" "$fp" "$sessions" "$days" "$(proposal_get "$prev" target)"
+      printf '\n## proposal\n%s\n\n## evidence\n%s\n' "$(proposal_section "$prev" proposal)" "$evidence"
+      if grep -qx '## patch' "$prev"; then printf '\n## patch\n%s\n' "$(proposal_section "$prev" patch)"; fi
+      printf '\n## why this is not already covered\n%s\n' "$(proposal_section "$prev" 'why this is not already covered')"
+    )
+    st=refreshed
+  else
+    if [ -e "$abs" ]; then echo "proposal_write: $abs already holds another fingerprint; pick another slug" >&2; return 4; fi
+    cur=$(
+      printf 'id: %s\nkind: %s\nstatus: open\ncreated: %s\ncomponent: %s\nfingerprint: %s\nsessions: %s\ndays: %s\ntarget: %s\n' \
+        "$id" "$kind" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(printf '%s' "$json" | jq -r .component)" "$fp" "$sessions" "$days" \
+        "$(printf '%s' "$json" | jq -r .target)"
+      printf '\n## proposal\n%s\n\n## evidence\n%s\n' "$(_proposal_text "$json" proposal)" "$evidence"
+      # shellcheck disable=SC2016 # a markdown fence, not a command substitution
+      if [ "$kind" = rule ]; then printf '\n## patch\n```diff\n%s\n```\n' "$(printf '%s' "$json" | jq -r .patch)"; fi
+      printf '\n## why this is not already covered\n%s\n' "$(_proposal_text "$json" why_not_covered | sed '1s/^$/not applicable/')"
+    )
+    st=written
+  fi
+  # write beside the target and rename over it: a reader never sees half a file, and a rename replaces a link
+  # itself rather than writing through it (links were refused above anyway)
+  tmp="$root/.${abs##*/}.tmp.$$"
+  if ! ( umask 077; set -C; printf '%s\n' "$cur" >"$tmp" ) 2>/dev/null || ! chmod 600 "$tmp" || ! mv -f "$tmp" "$abs"; then
+    rm -f "$tmp"; echo "proposal_write: cannot write $abs" >&2; return 1
+  fi
+  echo "$st $abs"
+}
+
+# _learn_limited SECS CMD...: run CMD in a process group of its own; after SECS the whole group gets TERM, then
+# KILL, and the exit code is 142. A trimmed copy of test-escalate.sh run_limited (that one also handles the
+# runner itself being signalled); a hung `claude` must not hold the nightly job, nor its children the pipe.
+_learn_limited() {
+  perl -e '
+    use POSIX ":sys_wait_h";
+    my $t = shift @ARGV;
+    my $pid = fork;
+    defined $pid or exit 1;
+    if (!$pid) { setpgrp(0, 0); exec { $ARGV[0] } @ARGV; POSIX::_exit(127); }
+    $SIG{ALRM} = sub { kill "TERM", -$pid; select undef, undef, undef, 0.5; kill "KILL", -$pid; waitpid($pid, 0); exit 142 };
+    alarm $t if $t > 0;
+    waitpid($pid, 0);
+    exit($? & 127 ? 128 + ($? & 127) : $? >> 8);
+  ' "$@"
+}
+
+# learn_model_call MODEL < PROMPT: the learner's one way to call a model (spec 5.6). Runs
+#   "${CHING_CLAUDE_BIN:-claude}" -p --model MODEL --tools "" --output-format json
+# with the prompt on stdin, in $(learn_work_dir), with CHING_LEARNER=1 (guard learner mode) and
+# CLAUDE_MEM_INTERNAL=1 (claude-mem does not observe the run, D27), cut after LEARN_CALL_TIMEOUT seconds. Prints
+# the model's answer: the one JSON document in the envelope's .result, compact, a ```json fence removed.
+# Every token the envelope reports (input, output, cache read, cache creation) is added to
+# .work/tokens-<local YYYY-MM-DD>; once that total reaches LEARN_TOKEN_CAP no call starts. Each call adds one
+# line to .work/learn.log (claude's stderr goes there too).
+# Exit: 0 ok | 1 the call failed, timed out, or gave no success envelope | 2 the answer is not one JSON document |
+#       3 .work cannot be used | 5 capped, no call made | 64 no MODEL.
+learn_model_call() {
+  local model=${1:-} tokf logf work cap lim used out rc tok res
+  [ -n "$model" ] || { echo "learn_model_call: no model given" >&2; return 64; }
+  tokf=$(proposal_safe_path ".work/tokens-$(date +%Y-%m-%d)") || return 3
+  logf=$(proposal_safe_path .work/learn.log) || return 3
+  work=${tokf%/*}
+  cap=$(learn_setting LEARN_TOKEN_CAP); case "$cap" in ''|*[!0-9]*) cap=200000 ;; esac
+  lim=$(learn_setting LEARN_CALL_TIMEOUT); case "$lim" in ''|*[!0-9]*) lim=300 ;; esac
+  used=$(cat "$tokf" 2>/dev/null || true); case "$used" in ''|*[!0-9]*) used=0 ;; esac
+  if [ "$used" -ge "$cap" ]; then
+    { (umask 077; printf '%s model=%s rc=capped tokens=0 day_total=%s cap=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$model" "$used" "$cap" >>"$logf"); } 2>/dev/null
+    return 5
+  fi
+  out=$(cd "$work" && CHING_LEARNER=1 CLAUDE_MEM_INTERNAL=1 _learn_limited "$lim" \
+        "${CHING_CLAUDE_BIN:-claude}" -p --model "$model" --tools "" --output-format json 2>>"$logf"); rc=$?
+  tok=$(printf '%s' "$out" | jq -r '[.usage.input_tokens, .usage.output_tokens, .usage.cache_read_input_tokens,
+        .usage.cache_creation_input_tokens] | map(. // 0) | add' 2>/dev/null) || tok=0
+  case "$tok" in ''|*[!0-9]*) tok=0 ;; esac
+  { (umask 077; printf '%s\n' $((used + tok)) >"$tokf"
+     printf '%s model=%s rc=%s tokens=%s day_total=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$model" "$rc" "$tok" $((used + tok)) >>"$logf"); } 2>/dev/null
+  if [ "$rc" -ne 0 ] || [ "$(printf '%s' "$out" | jq -r '.is_error' 2>/dev/null)" != false ]; then
+    echo "learn_model_call: the call failed (exit $rc)" >&2; return 1
+  fi
+  res=$(printf '%s' "$out" | jq -r '.result // empty' 2>/dev/null \
+        | sed -e '1{/^[[:space:]]*```[A-Za-z]*[[:space:]]*$/d;}' | sed -e '${/^[[:space:]]*```[[:space:]]*$/d;}')
+  res=$(printf '%s' "$res" | jq -s -c 'if length == 1 then .[0] else error("not one document") end' 2>/dev/null) || res=""
+  [ -n "$res" ] || { echo "learn_model_call: the answer is not one JSON document" >&2; return 2; }
+  printf '%s\n' "$res"
+}

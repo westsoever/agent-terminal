@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# claude-stub - stands in for `claude -p ... --output-format json` in the learner tests (spec 5.6, 8). Point
+# CHING_CLAUDE_BIN at this file. It never calls a model. It reads the prompt on stdin and prints the JSON
+# envelope claude prints, with a canned model answer (a JSON document, as a string) in .result.
+#
+# Which answer:
+#   CLAUDE_STUB_RESPONSE=<file>   that file, whatever the prompt says
+#   otherwise the prompt's first line of the form "ching-learn-task: <name>" picks $CLAUDE_STUB_DIR/<name>.json
+#   (default dir: stub/ next to this file). No such line, or no such file: exit 2 with a message on stderr.
+# Other knobs:
+#   CLAUDE_STUB_EXIT=<n>          exit n with an error envelope (is_error true), as a failed or capped call
+#   CLAUDE_STUB_TOKENS=<n>        usage.input_tokens (default 1200; output_tokens is always 300)
+#   CLAUDE_STUB_LOG=<file>        append "ARGS: <args>", "PWD: <cwd>", "ENV: CHING_LEARNER=.. CLAUDE_MEM_INTERNAL=.."
+#                                 and the prompt, so a test can check the flags, the working dir and the input
+#   CLAUDE_STUB_SLEEP=<secs>      sleep first (a slow or hung call, for timeout tests)
+set -euo pipefail
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+prompt=$(cat || true)
+if [ -n "${CLAUDE_STUB_LOG:-}" ]; then
+  { printf 'ARGS: %s\n' "$*"; printf 'PWD: %s\n' "$(pwd -P)"
+    printf 'ENV: CHING_LEARNER=%s CLAUDE_MEM_INTERNAL=%s\n' "${CHING_LEARNER:-}" "${CLAUDE_MEM_INTERNAL:-}"
+    printf '%s\n' "$prompt"; printf -- '--- end of call\n'; } >>"$CLAUDE_STUB_LOG"
+fi
+in=${CLAUDE_STUB_TOKENS:-1200}
+[ -z "${CLAUDE_STUB_SLEEP:-}" ] || sleep "$CLAUDE_STUB_SLEEP"
+envelope() { # is_error result-text
+  jq -nc --argjson err "$1" --arg r "$2" --argjson in "$in" '{
+    type: "result", subtype: (if $err then "error_during_execution" else "success" end), is_error: $err,
+    duration_ms: 1000, duration_api_ms: 900, num_turns: 1, result: $r,
+    session_id: "00000000-0000-4000-8000-0000000000st", total_cost_usd: 0.001,
+    usage: {input_tokens: $in, output_tokens: 300, cache_read_input_tokens: 0, cache_creation_input_tokens: 0}}'
+}
+if [ -n "${CLAUDE_STUB_EXIT:-}" ] && [ "$CLAUDE_STUB_EXIT" != 0 ]; then
+  envelope true "stub: simulated failure"
+  exit "$CLAUDE_STUB_EXIT"
+fi
+if [ -n "${CLAUDE_STUB_RESPONSE:-}" ]; then
+  file=$CLAUDE_STUB_RESPONSE
+else
+  task=$(printf '%s\n' "$prompt" | sed -n 's/^ching-learn-task:[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p' | head -1)
+  [ -n "$task" ] || { echo "claude-stub: no 'ching-learn-task: <name>' line in the prompt" >&2; exit 2; }
+  file=${CLAUDE_STUB_DIR:-$HERE/stub}/$task.json
+fi
+[ -f "$file" ] || { echo "claude-stub: no canned answer at $file" >&2; exit 2; }
+envelope false "$(cat "$file")"
