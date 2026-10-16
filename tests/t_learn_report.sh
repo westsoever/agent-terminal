@@ -123,6 +123,8 @@ cp "$R" "$WORK/r1"
 "$REP" >/dev/null
 assert_contains "rerun: the proposal is refreshed" "$(cat "$R")" "| 3 | 3 | refreshed blindspot-the-safari-check-in.md |"
 assert_eq "rerun: still one proposal" "1" "$(find "$ROOT" -maxdepth 1 -name 'blindspot-*.md' | grep -c .)"
+assert_eq "rerun: learn_run counts no new proposal" "0" \
+  "$(jq -r 'select(.kind == "learn_run" and .data.component == "report") | .data.proposals' "$LOG" | tail -1)"
 assert_eq "rerun: deterministic apart from the status" "$(grep -v '^generated:' "$WORK/r1" | sed 's/ written blindspot/ refreshed blindspot/')" \
   "$(grep -v '^generated:' "$R")"
 proposal_fingerprint "the safari check in" >"$ROOT/rejected.txt"; rm -f "$BS"
@@ -156,17 +158,74 @@ ev_at 2026-10-14T13:01:00Z $A2 $BLOG tests '{"outcome":"pass","secs":2}'
 rep=$(cat "$R")
 assert_contains "week on week: shown when both weeks have data" "$rep" "| measure | 2026-W41 | 2026-W42 | change |"
 assert_contains "week on week: denies 1 then 3" "$rep" "| denies | 1 | 3 | +2 |"
-assert_contains "week on week: sessions 0 then 7" "$rep" "| sessions | 0 | 7 | +7 |"
+assert_contains "week on week: W41 has no prompts, so no change for sessions" "$rep" "| sessions | - | 7 | - |"
+assert_contains "week on week: nor for prompts" "$rep" "| prompts | - | 18 | - |"
+assert_not_contains "week on week: no change against a week without prompts" "$rep" "| +7 |"
+# prompts in W40 and W41 but no events in W40: the W41 report shows no change for the event measures
+printf '%s\n' '{"sid":"w41","ts":"2026-10-07T10:00:00.000Z","cwd":"/Users/fixture/code/shop","text":"x","prev_assistant_tail":"","after_interrupt":false}' \
+  '{"sid":"w40","ts":"2026-09-30T10:00:00.000Z","cwd":"/Users/fixture/code/shop","text":"y","prev_assistant_tail":"","after_interrupt":false}' >>"$WD/prompts.jsonl"
+"$REP" >/dev/null
+assert_contains "week on week: W41 now has prompts, sessions 1 then 7" "$(cat "$R")" "| sessions | 1 | 7 | +6 |"
+"$REP" --week 2026-W41 >/dev/null
+r41=$(cat "$ROOT/report-2026-W41.md")
+assert_contains "week on week: sessions 1 then 1" "$r41" "| sessions | 1 | 1 | 0 |"
+assert_contains "week on week: W40 has no events, so no change for denies" "$r41" "| denies | - | 1 | - |"
+assert_contains "week on week: nor for notifications" "$r41" "| notifications delivered | - | 0 | - |"
+assert_not_contains "week on week: no +1 against a week without events" "$r41" "| +1 |"
 assert_contains "task type: bugfix, a fail then green 10 minutes later" "$rep" "| bugfix | 1 | 2 | 2 | 1 | 0 | 10 |"
 assert_contains "task type: docs, green first time" "$rep" "| docs | 1 | 0 | 1 | 0 | 1 | - |"
+
+# feedback (spec 6.5): decisions per component from proposal events and archive/, and a component with only
+# rejections for 4 weeks flagged. W42 is 10-12..18; its W-3 is W39 (09-21..27).
+R42() { cat "$R"; }
+assert_contains "feedback: none decided yet" "$(R42)" "No proposal decided yet"
+mkdir -p "$ROOT/archive"
+arch() { # file id component status [touch stamp]
+  printf 'id: %s\nkind: %s\nstatus: %s\ncreated: 2026-09-01T00:00:00Z\ncomponent: %s\n\n## proposal\nx\n' "$2" "${2%%-*}" "$4" "$3" >"$ROOT/archive/$1"
+  [ -z "${5:-}" ] || touch -t "$5" "$ROOT/archive/$1"
+}
+decision() { ev_at "$1" "" /Users/fixture proposal "$(jq -nc --arg i "$2" --arg a "$3" '{id:$i, action:$a}')"; }
+arch rule-a.md rule-a corrections approved
+arch rule-b.md rule-b corrections rejected
+arch rule-c.md rule-c corrections snoozed:2026-11-01 202610141200   # no event: counted from archive/, on its mtime
+arch skill-x.md skill-x skills rejected
+arch skill-y.md skill-y skills rejected
+arch skill-z.md skill-z skills rejected
+arch blindspot-q.md blindspot-q blindspot rejected
+decision 2026-10-13T10:00:00Z rule-a approved
+decision 2026-10-07T10:00:00Z rule-b rejected
+decision 2026-09-23T10:00:00Z skill-x rejected
+decision 2026-10-01T10:00:00Z skill-y rejected
+decision 2026-10-14T10:00:00Z skill-z rejected
+decision 2026-10-15T10:00:00Z blindspot-q rejected
+decision 2026-10-20T10:00:00Z skill-w approved   # W43: after the week, not counted (no archive file: kind skill -> skills)
+"$X"; "$REP" >/dev/null
+fb=$(sed -n '/^## Feedback on proposals/,/^## Blind spots/p' "$R")
+assert_contains "feedback: header row" "$fb" "| component | approved | rejected | snoozed | approved in all | rejected in all | snoozed in all |"
+assert_contains "feedback: corrections (archive-only snooze counted)" "$fb" "| corrections | 1 | 0 | 1 | 1 | 1 | 1 |"
+assert_contains "feedback: skills (the W43 approval is after the week)" "$fb" "| skills | 0 | 1 | 0 | 0 | 3 | 0 |"
+assert_contains "feedback: blindspot" "$fb" "| blindspot | 0 | 1 | 0 | 0 | 1 | 0 |"
+assert_contains "feedback: skills only rejected since W39: flagged" "$fb" "skills: only rejections since 2026-09-23"
+assert_contains "feedback: the flag says how to turn it off" "$fb" "LEARN_DISABLE=skills"
+assert_not_contains "feedback: blindspot only rejected for one week: not flagged" "$fb" "blindspot: only rejections"
+assert_not_contains "feedback: corrections had an approval: not flagged" "$fb" "corrections: only rejections"
+"$REP" --week 2026-W43 >/dev/null
+fb43=$(sed -n '/^## Feedback on proposals/,/^## Blind spots/p' "$ROOT/report-2026-W43.md")
+assert_contains "feedback: W43 counts the approval" "$fb43" "| skills | 1 | 0 | 0 | 1 | 3 | 0 |"
+assert_not_contains "feedback: an approval ends the streak" "$fb43" "skills: only rejections"
+# blindspot rejections since W39: the flag names the report step, which writes blindspot proposals
+arch blindspot-p.md blindspot-p blindspot rejected
+decision 2026-09-22T10:00:00Z blindspot-p rejected
+"$X"; "$REP" >/dev/null
+assert_contains "feedback: blindspot flagged with the report step's name" "$(R42)" "LEARN_DISABLE=report"
 
 # usage
 assert_eq "bad --week: exit 64" "64" "$("$REP" --week 2026-42 >/dev/null 2>&1; echo $?)"
 assert_eq "impossible --week: exit 64" "64" "$("$REP" --week 2026-W60 >/dev/null 2>&1; echo $?)"
 assert_eq "unknown argument: exit 64" "64" "$("$REP" --bogus >/dev/null 2>&1; echo $?)"
-"$REP" --week 2026-W40 >/dev/null
-r40=$(cat "$ROOT/report-2026-W40.md")
-assert_contains "an empty week: says so" "$r40" "No counted prompts this week."
+"$REP" --week 2026-W39 >/dev/null
+r39=$(cat "$ROOT/report-2026-W39.md")
+assert_contains "an empty week: says so" "$r39" "No counted prompts this week."
 assert_eq "an empty week: learn_run nothing-new" "nothing-new" \
   "$(jq -r 'select(.kind == "learn_run" and .data.component == "report") | .data.outcome' "$LOG" | tail -1)"
 out=$(bash -c 'set -euo pipefail; "$1" --week 2026-W42' _ "$REP" 2>&1); rc=$?

@@ -12,12 +12,16 @@
 #      the human prompt that preceded the run (toolseq prompts[{i,ts}] joined to prompts.jsonl on sid and ts).
 #   2. Candidates whose fingerprint was rejected, approved or is snoozed are not sent again. The best ones (at most
 #      40, each with at most 3 prompts, at most LEARN_MAX_SNIPPETS prompts in all; hitting that cap is the outcome
-#      "truncated") go to ONE learn_model_call with LEARN_MODEL_DRAFT (prompt: templates/learn-prompts/skills.md).
+#      "truncated") go to ONE learn_model_call with LEARN_MODEL_DRAFT (prompt: templates/learn-prompts/skills.md),
+#      each with an id (c1, c2, ... in rank order) and redacted (learn_redact --jsonl) like the rest of the prompt.
 #      The model keeps the nameable, repeatable intents no installed skill covers and drafts a SKILL.md
-#      description. Kept answers are matched back to the candidates sent (anything else is ignored), taken in rank
-#      order, and written until LEARN_SKILL_MAX proposals were written or refreshed.
+#      description. Kept answers are matched back to the candidates sent, on the id, else on the sequence as sent
+#      (redacted) or as mined; anything else is ignored. They are taken in rank order and written until
+#      LEARN_SKILL_MAX proposals were written or refreshed. A leading "description:" key, and front matter around
+#      the drafted description, are taken off before the text goes into ## proposal.
 # No model call when there is no candidate, or when the input is the same as the last successful run's.
-# One learn_run event per run: {component:"skills", scanned, candidates, proposals, outcome}.
+# One learn_run event per run: {component:"skills", scanned, candidates, proposals, outcome}; proposals counts new
+# files only (a refreshed open proposal is not counted), as corrections does.
 # --dry-run prints every ranked candidate as one JSON line {sequence, sessions, days, length, score, folders,
 #   prompts, evidence} and stops: no model call, no proposal, no event.
 # Exit: 0 ok, nothing-new, truncated, capped or disabled (LEARN_SKILL_MAX=0) | 1 error (logged) | 64 usage.
@@ -29,6 +33,7 @@ set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
+umask 077   # everything under .work (learn.log included) is private, also when run by hand
 TEMPLATE="$SELF_DIR/../templates/learn-prompts/skills.md"
 SHORTLIST=40   # candidates sent to the model, at most
 EVIDENCE=5     # evidence lines per proposal (most recent sessions first), at most
@@ -157,7 +162,7 @@ while IFS=$'\t' read -r nq seq c; do
   [ "$nq" -gt 0 ] || nq=1
   if [ $((SENT + nq)) -gt "$SNIP" ]; then TRUNC=1; break; fi
   SENT=$((SENT + nq)); NSHORT=$((NSHORT + 1))
-  SHORT+=$(printf '%s' "$c" | jq -c --arg fp "$fp" '. + {fp: $fp}')$'\n'
+  SHORT+=$(printf '%s' "$c" | jq -c --arg fp "$fp" --arg id "c$NSHORT" '. + {fp: $fp, id: $id}')$'\n'
 done < <(printf '%s' "$RES" | jq -r '.candidates[] | "\(.prompts | length)\t\(.sequence | join(" > "))\t\(tojson)"')
 if [ "$NSHORT" -eq 0 ]; then
   if [ "$TRUNC" -eq 1 ]; then finish truncated; else finish nothing-new; fi
@@ -166,12 +171,14 @@ fi
 # ---------- the model pass ----------
 [ -f "$TEMPLATE" ] || { log "no prompt template at $TEMPLATE"; finish error 1; }
 MODEL=$(learn_setting LEARN_MODEL_DRAFT)
+# the candidates as the model sees them: redacted per line, so an answer can be matched on what was sent
+SENT_LINES=$(printf '%s' "$SHORT" | jq -c '{id, sequence, sessions, days, length, folders, prompts}' | learn_redact --jsonl)
 PROMPT=$(
   sed "s/{{MAX}}/$MAX/g" "$TEMPLATE"
   printf '\n## installed_skills\n\n'
   printf '%s' "$INSTALLED" | jq -c '.[]'
   printf '\n## candidates\n\n'
-  printf '%s' "$SHORT" | jq -c '{sequence, sessions, days, length, folders, prompts}'
+  printf '%s\n' "$SENT_LINES"
 )
 PROMPT=$(printf '%s\n' "$PROMPT" | learn_redact)
 SHA_FILE=$(proposal_safe_path .work/skills-input.sha) || finish error 1
@@ -189,25 +196,53 @@ if ! printf '%s' "$ANS" | jq -e '(.skills | type) == "array"' >/dev/null 2>&1; t
   log "the answer has no skills array"; finish error 1
 fi
 
-# kept answers matched back to the candidates sent, in rank order; a sequence that was not sent is ignored
-KEPT=$(printf '%s' "$SHORT" | jq -c --argjson a "$ANS" '
-  ($a.skills | map(select(type == "object" and .keep == true and (.sequence | type) == "array")
-    | {key: (.sequence | map(tostring) | join("\u0001")), value: .}) | from_entries) as $k
-  | (.sequence | join("\u0001")) as $key | select($k[$key]) | . + {draft: $k[$key]}')
+# kept answers matched back to the candidates sent, in rank order: on the id, else on the sequence as sent
+# (redacted) or as mined. An id or a sequence that was not sent is ignored.
+RED=$(printf '%s\n' "$SENT_LINES" | jq -s -c 'map(select(type == "object") | {key: (.id | tostring), value: (.sequence | map(tostring) | join("\u0001"))}) | from_entries')
+KEPT=$(printf '%s' "$SHORT" | jq -c --argjson a "$ANS" --argjson red "$RED" '
+  ($a.skills | map(select(type == "object" and .keep == true))) as $ks
+  | ($ks | map(select((.id | type) == "string") | {key: .id, value: .}) | from_entries) as $byid
+  | ($ks | map(select((.sequence | type) == "array") | {key: (.sequence | map(tostring) | join("\u0001")), value: .}) | from_entries) as $byseq
+  | (.sequence | join("\u0001")) as $raw
+  | ($byid[.id] // $byseq[$raw] // $byseq[$red[.id] // $raw]) as $d
+  | select($d) | . + {draft: $d}')
+
+# clean_draft: stdin drafted text -> the description only. Front matter (--- ... ---) gives its description value
+# (a quoted, | or > value unwrapped), followed by any body; a leading "description:" key is dropped.
+clean_draft() {
+  perl -0777 -ne '
+    s/\A\s+//; s/\s+\z//;
+    if (/\A---[ \t]*\n(.*?)\n---[ \t]*(?:\n(.*))?\z/s) {
+      my ($fm, $body, $d) = ($1, defined $2 ? $2 : "", "");
+      if ($fm =~ /^description:[ \t]*(.*)$/m) {
+        $d = $1; $d =~ s/[ \t]+\z//;
+        if ($d =~ /\A([|>])[-+]?\z/) {
+          my $j = $1 eq ">" ? " " : "\n";
+          my ($blk) = $fm =~ /^description:[^\n]*\n((?:[ \t]+[^\n]*(?:\n|\z))*)/m;
+          $d = join $j, map { s/\A\s+//; s/\s+\z//; $_ } grep { /\S/ } split /\n/, (defined $blk ? $blk : "");
+        } elsif ($d =~ /\A"(.*)"\z/ || $d =~ /\A\x27(.*)\x27\z/) { $d = $1; }
+      }
+      $body =~ s/\A\s+//; $body =~ s/\s+\z//;
+      $_ = join "\n\n", grep { length } ($d, $body);
+    } else {
+      s/\Adescription:[ \t]*//i;
+    }
+    print;'
+}
 
 is_installed() { [ -n "$1" ] && printf '%s' "$NAMESET" | jq -e --arg n "$1" '.[$n] // false' >/dev/null; }
-WERR=0
+WERR=0; DONE=0   # DONE: written or refreshed, what LEARN_SKILL_MAX caps; PROPS: written only
 while IFS= read -r line; do
   [ -n "$line" ] || continue
-  [ "$PROPS" -lt "$MAX" ] || break
+  [ "$DONE" -lt "$MAX" ] || break
   slug=$(proposal_slug "$(printf '%s' "$line" | jq -r '.draft.slug // .draft.name // "" | tostring')")
   [ -n "$slug" ] || slug=$(proposal_slug "$(printf '%s' "$line" | jq -r '.sequence | join(" ")')")
   name=$(proposal_slug "$(printf '%s' "$line" | jq -r '.draft.name // .draft.slug // "" | tostring')")
   [ -n "$name" ] || name=$slug
   if is_installed "$slug" || is_installed "$name"; then log "dropped $name: an installed skill has that name"; continue; fi
-  json=$(printf '%s' "$line" | jq -c --arg name "$name" '
-    (.draft.proposal // "" | tostring) as $p
-    | {component: "skills", fingerprint: .fp, sessions, days, target: $name,
+  draft=$(printf '%s' "$line" | jq -r '.draft.proposal // "" | tostring' | clean_draft)
+  json=$(printf '%s' "$line" | jq -c --arg name "$name" --arg p "$draft" '
+    {component: "skills", fingerprint: .fp, sessions, days, target: $name,
        proposal: (if ($p | test("\\S")) then $p + "\n\nSteps seen: \(.sequence | join(" > ")) (\(.sessions) sessions on \(.days) days)." else "" end),
        evidence, why_not_covered: (.draft.why_not_covered // "" | tostring)}')
   prc=0
@@ -217,7 +252,8 @@ while IFS= read -r line; do
     [ "$prc" -eq 4 ] || break
   done
   case "$prc:$out" in
-    0:written*|0:refreshed*) PROPS=$((PROPS + 1)) ;;
+    0:written*) PROPS=$((PROPS + 1)); DONE=$((DONE + 1)) ;;
+    0:refreshed*) DONE=$((DONE + 1)) ;;
     0:skipped*) ;;
     *) log "proposal_write skill-$slug failed (exit $prc)"; WERR=1 ;;
   esac

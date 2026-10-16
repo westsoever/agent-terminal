@@ -68,7 +68,10 @@ assert_eq "proposal: component skills" "skills" "$(proposal_get "$P" component)"
 assert_eq "proposal: fingerprint of the token sequence" "$(proposal_fingerprint "$GOLDEN_SEQ")" "$(proposal_get "$P" fingerprint)"
 assert_eq "proposal: sessions and days" "3 2" "$(proposal_get "$P" sessions) $(proposal_get "$P" days)"
 assert_eq "proposal: target is the proposed skill name" "sync-test-push" "$(proposal_get "$P" target)"
-assert_contains "proposal: the draft SKILL.md description" "$(proposal_section "$P" proposal)" "description: Bring the branch up to date"
+assert_eq "proposal: the draft SKILL.md description, without its description: key" "Bring the branch up to date" \
+  "$(proposal_section "$P" proposal | head -1 | cut -c1-27)"
+assert_not_contains "proposal: no description: key anywhere" "$(proposal_section "$P" proposal)" "description:"
+assert_contains "run: each candidate carries an id" "$log" '"id":"c1"' 
 assert_contains "proposal: names the steps seen" "$(proposal_section "$P" proposal)" "$GOLDEN_SEQ"
 ev_lines=$(proposal_section "$P" evidence)
 assert_eq "proposal: one evidence line per session" "3" "$(printf '%s\n' "$ev_lines" | grep -c '^- ')"
@@ -89,7 +92,7 @@ rc=$(run_miner)
 assert_eq "new data: a second model call" "2" "$(calls)"
 assert_eq "new data: still one file" "skill-sync-test-push.md " "$(skill_files)"
 assert_eq "new data: counts refreshed" "4 3" "$(proposal_get "$P" sessions) $(proposal_get "$P" days)"
-assert_eq "new data: refreshed proposal counts" "1" "$(last_run | jq -r .proposals)"
+assert_eq "new data: a refreshed proposal is not counted as new" "0" "$(last_run | jq -r .proposals)"
 
 # ---------- no candidates: no model call ----------
 setup none "" ""
@@ -214,6 +217,47 @@ printf '{"component":"skills","fingerprint":"%s","sessions":3,"days":2,"target":
   "$(proposal_fingerprint other)" | proposal_write skill-sync-test-push.md >/dev/null
 run_miner >/dev/null
 assert_eq "collide: the next free slug is used" "skill-sync-test-push-2.md skill-sync-test-push.md " "$(skill_files)"
+
+# a drafted SKILL.md with front matter: only the description is kept
+setup frontmatter "$FX/work/toolseq.jsonl" "$FX/work/prompts.jsonl"
+jq '.skills[0].proposal = "---\nname: sync-test-push\ndescription: \"Sync, test and push. Use when shipping.\"\n---\n"' "$FX/stub/skills.json" >"$WORK/fm.json"
+CLAUDE_STUB_RESPONSE="$WORK/fm.json" run_miner >/dev/null
+P="$AGENT_HOME/proposals/skill-sync-test-push.md"
+assert_eq "front matter: the description only" "Sync, test and push. Use when shipping." "$(proposal_section "$P" proposal | head -1)"
+assert_not_contains "front matter: no --- or name:" "$(proposal_section "$P" proposal)" "name:"
+setup fmblock "$FX/work/toolseq.jsonl" "$FX/work/prompts.jsonl"
+jq '.skills[0].proposal = "---\nname: sync-test-push\ndescription: >\n  Sync, test\n  and push.\n---\n\nUse when shipping."' "$FX/stub/skills.json" >"$WORK/fmb.json"
+CLAUDE_STUB_RESPONSE="$WORK/fmb.json" run_miner >/dev/null
+P="$AGENT_HOME/proposals/skill-sync-test-push.md"
+assert_eq "front matter: a folded description, then the body" "Sync, test and push.|Use when shipping." \
+  "$(proposal_section "$P" proposal | grep . | head -2 | paste -sd '|' -)"
+
+# ---------- a candidate with a redactable token: the model sees it redacted, and its answer still matches ----------
+SECRET="sk-""$(printf 'a%.0s' $(seq 1 24))"
+setup redact "" ""
+for s in 1 2 3; do seqline "r$s" "2026-10-0$s" "deploy $SECRET" "bun test" "git push"; done >"$AGENT_HOME/proposals/.work/toolseq.jsonl"
+jq -n '{skills: [{sequence: ["deploy [REDACTED]", "bun test", "git push"], keep: true, slug: "deploy-test-push", name: "deploy-test-push",
+  proposal: "Deploy, test and push. Use when shipping.", why_not_covered: "none covers it"}]}' >"$WORK/redacted.json"
+CLAUDE_STUB_RESPONSE="$WORK/redacted.json" run_miner >/dev/null
+assert_not_contains "redact: the model never sees the token" "$(cat "$CLAUDE_STUB_LOG")" "$SECRET"
+assert_eq "redact: the answer, on the redacted sequence, is matched" "skill-deploy-test-push.md " "$(skill_files)"
+assert_eq "redact: the fingerprint is still the raw sequence's" "$(proposal_fingerprint "deploy $SECRET > bun test > git push")" \
+  "$(proposal_get "$AGENT_HOME/proposals/skill-deploy-test-push.md" fingerprint)"
+assert_not_contains "redact: the proposal file holds no token" "$(cat "$AGENT_HOME/proposals/skill-deploy-test-push.md")" "$SECRET"
+setup byid "" ""
+for s in 1 2 3; do seqline "r$s" "2026-10-0$s" "deploy $SECRET" "bun test" "git push"; done >"$AGENT_HOME/proposals/.work/toolseq.jsonl"
+jq -n '{skills: [{id: "c1", sequence: ["deploy", "(the model shortened it)"], keep: true, slug: "deploy-by-id", name: "deploy-by-id",
+  proposal: "Deploy. Use when shipping.", why_not_covered: "none"}, {id: "c9", sequence: ["x", "y", "z"], keep: true, slug: "no-such", name: "no-such",
+  proposal: "p", why_not_covered: "w"}]}' >"$WORK/byid.json"
+CLAUDE_STUB_RESPONSE="$WORK/byid.json" run_miner >/dev/null
+assert_eq "id: an answer is matched on its id; an id that was not sent is ignored" "skill-deploy-by-id.md " "$(skill_files)"
+
+# ---------- files under .work are private whatever the caller's umask ----------
+setup perms "$FX/work/toolseq.jsonl" "$FX/work/prompts.jsonl"
+(umask 022; CLAUDE_STUB_EXIT=1 "$MINER" >/dev/null 2>&1)
+assert_file "perms: learn.log written" "$AGENT_HOME/proposals/.work/learn.log"
+assert_eq "perms: every .work file the miner wrote is 0600" "" \
+  "$(find "$AGENT_HOME/proposals/.work" -type f ! -perm 600 ! -name prompts.jsonl ! -name toolseq.jsonl)"
 
 # ---------- decided fingerprints are not sent again ----------
 setup rejected "$FX/work/toolseq.jsonl" "$FX/work/prompts.jsonl"

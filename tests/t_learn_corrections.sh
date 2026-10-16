@@ -95,6 +95,16 @@ assert_contains "golden: prompts after an interrupt go too" "$cp_" "also add the
 assert_not_contains "golden: stage-1 misses do not" "$cp_" "add a dark mode toggle"
 assert_contains "golden: labelling policy in the prompt (product feedback)" "$cp_" "feedback on the product being built"
 assert_contains "golden: labelling policy (previous session context)" "$cp_" "previous session's context"
+policy=$(printf '%s\n' "$cp_" | sed -n '/^=== LABELLING POLICY: begin/,/^=== LABELLING POLICY: end/p')
+assert_contains "golden: the policy sits in one marked block" "$policy" "When unsure, say \"not\"."
+assert_contains "golden: the policy block holds both lists" "$policy" 'Label "not" for everything else'
+ex=$(printf '%s\n' "$cp_" | sed -n '/^Examples (invented/,/^Known patterns/p')
+assert_eq "golden: 6 invented examples, each with a label" "6 6" \
+  "$(printf '%s\n' "$ex" | grep -c '^  snippet: {"id":"ex[0-9]"') $(printf '%s\n' "$ex" | grep -c '^  answer: {"id":"ex[0-9]"')"
+assert_eq "golden: every example snippet and answer is valid JSON" "12" \
+  "$(printf '%s\n' "$ex" | sed -nE 's/^  (snippet|answer): //p' | jq -c . 2>/dev/null | grep -c .)"
+assert_eq "golden: examples label 3 corrections and 3 not" "3 3" \
+  "$(printf '%s\n' "$ex" | grep -c '"label":"correction"') $(printf '%s\n' "$ex" | grep -c '"label":"not"')"
 assert_not_contains "golden: no unfilled placeholder" "$cp_" "{{"
 dp=$(call_prompt corrections-draft)
 assert_contains "golden: draft sees the global rules" "$dp" "Write dates as YYYY-MM-DD."
@@ -104,6 +114,8 @@ assert_not_contains "golden: the one-day pnpm cluster is not drafted" "$dp" "pnp
 assert_eq "golden: every prompt is in the label cache" "17" "$(grep -c . "$P/.work/corrections-labels.jsonl")"
 assert_eq "golden: cache files are private" "600" "$(stat -f %Lp "$P/.work/corrections-labels.jsonl" 2>/dev/null || stat -c %a "$P/.work/corrections-labels.jsonl")"
 assert_contains "golden: covered is logged" "$(cat "$P/.work/learn.log")" "covered: write dates as YYYY-MM-DD"
+assert_eq "golden: learn_run names the component and the .work cwd" "learn-corrections $AGENT_HOME/proposals/.work" \
+  "$(grep '"kind":"learn_run"' "$AGENT_HOME/events.jsonl" | tail -n 1 | jq -r '"\(.name) \(.cwd)"')"
 
 # ---------- a second run: nothing new, no model call, still one file ----------
 "$LC"
@@ -169,6 +181,45 @@ assert_eq "truncated: the rest is not cached" "11" "$(grep -c . "$P/.work/correc
 LEARN_MAX_SNIPPETS=4 "$LC"
 assert_eq "truncated: the next run sends the next 4" "4" "$(run_field candidates)"
 assert_eq "truncated: scanned counts what was not cached" "6" "$(run_field scanned)"
+
+# hits go oldest first, whatever the file order (the newest line first here)
+fresh oldest
+tail -r "$FX/work/prompts.jsonl" >"$P/.work/prompts.jsonl"
+LEARN_MAX_SNIPPETS=1 "$LC"
+assert_contains "oldest first: the oldest hit is the one sent" "$(call_prompt corrections-classify)" \
+  '"id":"a1000000-0000-4000-8000-00000000a001@2026-10-12T12:03:40.000Z"'
+assert_eq "oldest first: one sent" "1" "$(run_field candidates)"
+
+# the daily budget (learn_budget_left and learn_estimate_tokens, lib.sh): the call's fixed cost (template estimate
+# plus a 500-token margin) comes off first, then about 450 tokens per snippet; no room for one snippet: capped, no call
+budget_run() { # NAME TOKENS_USED: a run with LEARN_TOKEN_CAP=200000 and that much already used today
+  fresh "$1"
+  printf '%s\n' "$2" >"$P/.work/tokens-$(date +%Y-%m-%d)"
+  LEARN_TOKEN_CAP=200000 "$LC"
+}
+TPL_EST=$(bash -c '. "$1/lib.sh"; learn_estimate_tokens <"$1/../templates/learn-prompts/corrections.md"' _ "$BIN")
+budget_run budget $(( 200000 - (TPL_EST + 500 + 6 * 450 + 100) ))   # room for 6 snippets
+assert_eq "budget: the batch shrinks to what fits" "6" "$(run_field candidates)"
+assert_eq "budget: the rest waits (truncated)" "truncated" "$(run_field outcome)"
+assert_contains "budget: logged" "$(cat "$P/.work/learn.log")" "classify batch cut to 6"
+budget_run budgetnone 199900   # 100 left: not even the fixed cost
+assert_eq "budget: no room for one snippet: capped, nothing sent" "0 capped" "$(run_field candidates) $(run_field outcome)"
+assert_eq "budget: no model call when capped" "" "$(call_prompt corrections-classify 2>/dev/null || true)"
+budget_run budgetplenty 0
+assert_eq "budget: plenty left changes nothing" "10 ok" "$(run_field candidates) $(run_field outcome)"
+fresh budgetjunk
+bash -c 'learn_budget_left() { echo "n/a"; }; export -f learn_budget_left; "$1"' _ "$LC"
+assert_eq "budget: an unreadable answer changes nothing" "10 ok" "$(run_field candidates) $(run_field outcome)"
+
+# files under .work are private whatever the caller's umask
+fresh perms
+(umask 022; printf '%s\n' '{"id":"x1","text":"stop that"}' | "$LC" --classify >/dev/null 2>&1)
+assert_file "perms: --classify keeps its prompt" "$P/.work/corrections-classify.prompt"
+assert_eq "perms: --classify writes every .work file 0600" "" "$(find "$P/.work" -type f ! -perm 600 ! -name prompts.jsonl)"
+fresh perms-eval
+(umask 022; CLAUDE_STUB_RESPONSE="$CFX/eval-classify.json" "$BIN/learn-eval.sh" --labels "$CFX/labels.jsonl" --stage2 >/dev/null 2>&1)
+assert_file "perms: learn-eval --stage2 logs" "$P/.work/learn.log"
+assert_eq "perms: learn-eval writes every .work file 0600" "" "$(find "$P/.work" -type f ! -perm 600 ! -name prompts.jsonl)"
 
 # ---------- a draft patch that does not apply is dropped ----------
 fresh badpatch

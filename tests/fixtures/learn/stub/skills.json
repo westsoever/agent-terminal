@@ -1,6 +1,7 @@
 {
   "skills": [
     {
+      "id": "c1",
       "sequence": ["git fetch", "git rebase", "bun test", "git push"],
       "keep": true,
       "slug": "sync-test-push",
