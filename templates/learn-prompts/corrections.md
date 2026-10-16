@@ -2,7 +2,8 @@
      "<!-- template: NAME -->" line and running to the next one. The script fills each line that is exactly
      {{NAME}} with data, and sends everything from the "ching-learn-task:" line on.
      The labelling policy is the block between "=== LABELLING POLICY: begin" and "=== LABELLING POLICY: end"
-     below. It is pending the owner's spot-check: change it there, nothing else needs to change. If a policy line
+     below. Updated 2026-10-17 from the owner's spot-check (merge rule = correction; re-confirming = correction;
+     product feedback stays "not"). Change it there, nothing else needs to change. If a policy line
      changes, check the invented examples after the block still agree with it. -->
 
 <!-- template: corrections-classify -->
@@ -26,15 +27,22 @@ Label "correction" when the owner:
 - stops or reverses something the assistant did ("no, don't bump the version", "stop using npm here");
 - repeats a standing instruction or habit the assistant should already know ("I told you, YYYY-MM-DD dates");
 - tells the assistant to do a step itself instead of handing it back ("you have the token, run it yourself",
-  "why do I have to do this for you", "you should be able to apply the migration", "don't ask, just merge").
+  "why do I have to do this for you", "you should be able to apply the migration", "don't ask, just merge");
+- has to repeat or re-confirm something it already asked for, because the assistant asked permission again or
+  held back instead of acting ("then let's merge it" after the assistant asked "want me to merge?" a second time);
+- gives a merge or push instruction that carries the standing rule about keeping work ("merge, but keep
+  everything intact", "push without deleting any progress", "don't overwrite the recent changes"). This is a
+  correction even when it is stated up front: the owner repeats it because assistants keep breaking it;
+- stops an approach the assistant kept pushing although it was failing, or points out that what is being built
+  drifted from what was asked ("let's stop here, it's just not working" after repeated failed attempts).
 
 Label "not" for everything else, including:
 - a new request, a question, an answer to the assistant's question, or a plain next step;
 - feedback on the product being built, not on how the assistant works ("too much text on this page",
   "that number looks wrong", "the button is still broken");
-- a condition stated up front with a new task ("merge it without losing anything"). It is a correction only
-  when it repeats a standing rule the assistant broke or ignored before, as the previous assistant message or
-  the wording ("again", "as always", "like I said") shows;
+- a condition stated up front with a new task that is NOT about keeping work during a merge or push ("use the
+  staging database for this"). It is a correction only when it repeats a standing rule the assistant broke or
+  ignored before, as the previous assistant message or the wording ("again", "as always", "like I said") shows;
 - pointing the assistant at a previous session's context ("in the last session we built X, continue"). It is a
   correction only when the assistant acted without knowing that context and the owner is fixing the result.
 
