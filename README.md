@@ -157,6 +157,45 @@ bash tests/live-smoke.sh           # daytime only: section 4 makes sound, 0-2 ca
 
 shellcheck runs inside the suite (`t_lint`). If it isn't on your PATH, the suite looks for it in `/tmp/sc-venv`.
 
+## The learning loop (Phase 6): how Ching learns and improves
+
+Being built (D26). The idea: Ching watches how you work with Claude across every session on this Mac, and over time makes Claude work more the way you want, without you repeating yourself. It **learns from what's already on disk** (your chats in `~/.claude/projects`, Ching's own event log `~/.agent/events.jsonl`, and session checkpoints) and **only ever proposes**. Nothing changes until you approve it.
+
+**What it learns and what it gives you:**
+
+| It notices | It proposes | How often |
+|---|---|---|
+| Corrections you keep repeating ("do it yourself", "don't lose work when merging"), seen in 3+ sessions on 2+ days | A **new rule**, as a ready-made patch: for `~/.agents/CLAUDE.md` when it shows up in several places, or for one repo's `AGENTS.md` when it only happens there | nightly, 05:30 |
+| Workflows you repeat by hand (the same chain of steps in several sessions) | A **new skill** idea with a draft description; approving it gives you the prompt to build it with skill-creator. At most 3 a week | weekly, Monday 05:30 |
+| Your working patterns: sessions and prompts per folder, the hours and weekdays you work, stop retries, stalls, context handoffs, blocked commands, notifications | A **weekly report**, `~/.agent/proposals/report-YYYY-Www.md` | weekly |
+| Things sessions keep listing as "not examined" when they finish | A **blind spot**: a review step to add so it stops being skipped (once enough checkpoints exist) | weekly |
+
+**How you use it:** `dash.sh --inbox` shows open proposals in a PROPOSALS lane, and `/dash` can say "N proposals waiting". `ching-proposals list` / `show <id>` / `diff <id>` let you read them. `approve <id>` applies a rule after a y/N, and works only when you type it yourself in a terminal. `reject <id>` makes sure it's never proposed again. `snooze <id> <days>` hides it for a while. The weekly report shows which kinds of proposal you approve and which you reject, so a part that only produces noise can be switched off (`LEARN_DISABLE`).
+
+**What it will not do:**
+- It never edits rules, skills, settings, hooks or the guard by itself.
+- It never sends anything off the Mac: the model call is a local `claude -p` on your subscription, with no tools and a daily token cap.
+- It never notifies you about proposals.
+- It never reads sandbox or test sessions.
+
+The guard has a learner mode that blocks any write outside `~/.agent/proposals/`. Deleting `~/.agent/proposals/` wipes everything it has learned.
+
+**Not yet:** lessons injected at session start (stage 6b) stay unbuilt until the weekly report shows that rules alone aren't enough. It stays out of claude-mem, and in the long run Ching's own memory is meant to replace claude-mem (D27).
+
+### The label spot-check (you, about 10 minutes, once)
+
+The learner has to tell a **correction** from an ordinary prompt:
+
+- **correction:** you're unhappy with *how Claude worked* and steer it, e.g. "why do I have to do this manually, just apply it" or "don't lose anyone's work when you merge";
+- **not:** a new request, a question, an answer, or feedback on *the thing being built*, e.g. "this number looks wrong" or "add a button".
+
+An agent sorted 263 of your past prompts into those two piles. Your check of about 20 of them becomes the answer key the detector is tested against (`bin/learn-eval.sh`), and your answers to three policy questions go into the labelling rules in `templates/learn-prompts/corrections.md`.
+
+- **Where:** `~/.agent/proposals/.eval/spot-check.md`. It sits next to `labels.jsonl` (all 263 items) and a `README.md` with the full explanation. These files stay on this Mac and never go into a repo, because they're your own words.
+- **Each item:** ask yourself "when I wrote this, was I correcting how Claude worked?" Write `ok` if the label matches your gut, otherwise `correction` or `not`, plus a few words if the pattern is described wrongly. Gut calls are fine; there are no wrong answers.
+- **Policy questions A-C** cover whole groups of prompts: is product feedback a correction (currently no); is an up-front "keep everything intact" a correction when it repeats a standing rule (currently yes); is pointing Claude at a previous session's work a correction (currently no).
+- **How to hand it back:** reply in a Claude session in one line (`A no, B yes, C no. 3 not, 6 correction, others ok`), or fill in the "owner:" lines in the file and say "spot-check done".
+
 ## Status and what's left
 
 On 2026-10-16:
@@ -173,7 +212,7 @@ On 2026-10-16:
   - run the spoken dispatcher test (4.3), which also measures 0.6;
   - run the two-voices test (0.7).
 - **Pilot (2.3–2.6):** a few days of normal use, then review `bin/metrics.sh` together and tune the notification budget, stall threshold and context levels.
-- **Phase 6, the learning loop:** spec drafted in `docs/superpowers/specs/2026-10-16-phase6-learning-loop-design.md`, with 10 questions for you. Building waits for pilot data (D16).
+- **Phase 6, the learning loop:** stage 6a is being built now (D26; spec in `docs/superpowers/specs/2026-10-16-phase6-learning-loop-design.md`, questions answered). Waiting on you: the label spot-check above.
 - **Known gaps:**
   - the guard doesn't see an alias written straight into a git config file, or `git $var`;
   - `reset`/`rebase`/`--amend` on `main` aren't blocked, only force-pushing the result is;
