@@ -2,6 +2,14 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D25 (2026-10-16): Voice pass line 8 s; no `/voice` fallback
+
+**Decision (user):**
+- The 0.6 speed pass line is **8 seconds** from the end of the sentence to the first spoken word, picked before any dispatcher measurement.
+- Claude Code's `/voice` is **not** used as a fallback. The user dictates with Wispr Flow, their own tool outside Ching.
+
+**Consequences:** `docs/voice.md` keeps the `/voice` notes for reference only, marked unused. D3's "native `/voice` stays as a fallback" no longer holds. Ching does not install, configure or depend on Wispr Flow. Like `/voice`, Wispr Flow transcribes off the machine, so D5 (local audio) covers only Ching's own voice path: VoiceMode, `/dash` and the dispatcher.
+
 ## D24 (2026-10-16): Guard on, push rule off
 
 **Decision (user):** The guard is reinstalled with every protection except the push-to-main release token. On 2026-10-10 the user had removed `guard.sh` from `~/.claude/settings.json` entirely, because rule 3 (a push to main needs a release token, plus `--approve` in `confirm` mode) blocked the automatic commits, pushes and merges they want. That removal also switched off every other protection for six days.

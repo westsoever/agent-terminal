@@ -27,7 +27,7 @@ Success is measured in the pilot (section 7), not by whether the scripts exist.
 |---|----------|--------|
 | D1 | Keep `bypassPermissions` as the default and add **hard guardrails** (deny hooks) instead of switching to stricter modes. | You, in chat |
 | D2 | Voice is **at the Mac first**. Phone comes later. | You, in chat |
-| D3 | VoiceMode (`mbailey/voicemode`) is the voice engine. Native `/voice` stays as a fallback. | You pointed me to it; my recommendation |
+| D3 | VoiceMode (`mbailey/voicemode`) is the voice engine. Native `/voice` stays as a fallback *(dropped 2026-10-16 by D25: the user dictates with Wispr Flow)*. | You pointed me to it; my recommendation |
 | D4 | Voice runs on **one dispatcher session only**. Worker sessions stay silent. | My recommendation, pending your OK |
 | D5 | Speech-to-text and text-to-speech run **locally** (Whisper.cpp + Kokoro). No audio leaves the machine. | My recommendation, pending your OK |
 | D6 | ~~Pilot repo is miso.~~ **Superseded (v3):** machine-wide is the default. The pilot is a couple of real sessions in different folders (a repo, a worktree, a non-repo folder). Per-repo `.agent/GOAL.md` is an optional override; the release and migrate gates are opted into per repo, miso-workspace last. | User, v3 scope change |
@@ -205,7 +205,7 @@ Work in `/tmp/agent-sandbox` (a fresh git repo). Back up `~/.claude/settings.jso
 - [x] **0.3** Test `Notification` matchers `agent_needs_input` and `agent_completed` in a normal foreground session.
 - [x] **0.4** *(You do one step)* Start one Desktop Code-tab session and one VS Code session in the sandbox. A logging `SessionStart` hook records whether it fired in each.
 - [x] **0.5** *(You do one step)* With two sessions running, send a `SendMessage` from one to the other while the target is (a) busy and (b) idle. Record whether the idle one wakes and acts.
-- [ ] **0.6** Install VoiceMode with local Whisper + Kokoro (pin the version, install `ffmpeg portaudio` via brew, `uv` if missing). Measure time from end-of-speech to first spoken word. Confirm macOS mic permission for the app you run it in.
+- [ ] **0.6** *(pass line picked 2026-10-16: 8 s, D25; measured during 4.3)* Install VoiceMode with local Whisper + Kokoro (pin the version, install `ffmpeg portaudio` via brew, `uv` if missing). Measure time from end-of-speech to first spoken word. Confirm macOS mic permission for the app you run it in.
 - [ ] **0.7** Start two sessions that both call `converse`. Confirm the second waits instead of talking over the first.
 - [x] **0.8** Browser verification harness: in the sandbox, serve a tiny page, have a session open it with Chrome DevTools MCP, exercise it, read console/network, take a screenshot, and write an evidence file. Confirms the "see it working" step in 5.2 before it is relied on.
 - [x] **0.9** Release token mechanics: in the sandbox with a local bare remote standing in for `origin`, confirm `guard.sh` denies a push to `main` with no token, allows it with a token for `HEAD`, and denies it again after a new commit.
@@ -270,7 +270,7 @@ Built per D10: the shared contracts land first, then parallel implementers on di
 
 - [x] **3.1** Add `mcp__voicemode__converse` and the plugin's tool name to the permission allowlist.
 - [x] **3.2** Make `dash.sh --speak` available as a command the dispatcher (and you) can run.
-- [x] **3.3** Document the `/voice` push-to-talk fallback for dictating into the focused worker.
+- [x] **3.3** Document the `/voice` push-to-talk fallback for dictating into the focused worker. *(2026-10-16, D25: not used; the user dictates with Wispr Flow.)*
 
 **Checkpoint 3:** you try it for a day; tell me what feels slow or wrong.
 

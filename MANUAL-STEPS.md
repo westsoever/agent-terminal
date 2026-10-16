@@ -156,6 +156,8 @@ Three steps only you can do (0.6, 0.7, 4.3) and one new two-minute check (V1). T
 
 ### - [ ] 0.6 First, pick the speed pass line (1 minute, before you measure anything)
 
+**Picked 2026-10-16: 8 s (D25).** The measurement itself is still open; it happens during 4.3.
+
 The 2026-10-05 measurement was 15 to 40 seconds from the end of your sentence to the first spoken word (`PHASE0-RESULTS.md`, 0.6). The voice pipeline itself was about 5 seconds (Whisper 2.9 s, Kokoro first audio 2.0 s); the rest was the model turn in a big session. The dispatcher is a small Haiku session with no plugins, which should shrink that part. These are estimates, not measurements of the dispatcher:
 
 | Pass line | What it means |

@@ -5,9 +5,9 @@ Level A is two small things that need no dispatcher session. Level B (talk to on
 | You want to | Use | Audio goes through |
 |---|---|---|
 | Hear what every session is doing | `/dash` (says `dash.sh --speak` aloud) | VoiceMode: local Whisper and Kokoro. Nothing leaves the machine. |
-| Dictate a message into the session you are looking at | `/voice`, Claude Code's own push-to-talk | **Anthropic's servers** (the audio is streamed there for transcription). Not local. |
+| Dictate a message into the session you are looking at | Wispr Flow, your own dictation app (not part of Ching) | Wispr Flow's service. Not local, and outside Ching. |
 
-The second row differs from decision D5 (audio stays on the machine). It is the fallback, not the default. For a spoken conversation with the sessions, use the dispatcher (level B), which stays local.
+Claude Code's `/voice` is **not used** (D25): you dictate with Wispr Flow. The notes on `/voice` further down are kept for reference only. D5 (audio stays on the machine) covers Ching's own voice path. For a spoken conversation with the sessions, use the dispatcher (level B), which stays local.
 
 ## What `install.sh` sets up
 
@@ -38,7 +38,9 @@ If you hear nothing:
 2. `voicemode conch status`: is another session holding the voice channel?
 3. Use `/dash --text` to confirm the command itself works.
 
-## Dictate into the focused session: `/voice` (fallback)
+## Dictate into the focused session: `/voice` (reference only, not used; D25)
+
+You dictate with Wispr Flow instead. Nothing in Ching calls `/voice`.
 
 Use this when you want to speak a message to the session you are looking at, with no dispatcher. It is speech-to-text only: no spoken replies, and it cannot be triggered from a hook or a command. (Facts below are from Claude Code's voice dictation docs, `code.claude.com/docs/en/voice-dictation`, read 2026-10-16.)
 

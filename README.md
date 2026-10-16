@@ -123,7 +123,7 @@ To check the guard is live, ask a session to force-push in a throwaway repo unde
 
 Status: **built and gate-tested, never heard.** No audio has been played yet. Your first run is in `MANUAL-STEPS.md` under "2026-10-16".
 
-- **Level A:** `/dash` says the status aloud through VoiceMode, using local Whisper and Kokoro, so no audio leaves the Mac. `docs/voice.md` covers Claude Code's built-in `/voice` dictation as a fallback. That one sends audio to Anthropic, which goes against D5, so whether to use it is your call.
+- **Level A:** `/dash` says the status aloud through VoiceMode, using local Whisper and Kokoro, so no audio leaves the Mac. Dictation into a session is done with Wispr Flow, your own app outside Ching; Claude Code's `/voice` is not used (D25).
 - **Level B, the dispatcher:** start it with `~/.claude/ching/dispatcher/launch.sh`. It's a slim Haiku session that only:
   - reads status (`dash.sh`) and session `STATE.md`/`NEXT.md`;
   - lists sessions and relays messages to them;
@@ -168,7 +168,7 @@ On 2026-10-16:
 `PLAN.md` §6 has the boxes. The open work:
 
 - **Needs you, in one sitting.** `MANUAL-STEPS.md`, "2026-10-16", about 45 minutes:
-  - pick the voice speed pass line;
+  - the speed pass line is picked: 8 s (D25);
   - hear `/dash`;
   - run the spoken dispatcher test (4.3), which also measures 0.6;
   - run the two-voices test (0.7).

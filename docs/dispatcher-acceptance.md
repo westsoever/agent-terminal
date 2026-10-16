@@ -9,7 +9,7 @@ The dispatcher is one slim session that talks. It can run `dash.sh`, read a sess
 1. `ching-b` is merged into `~/bbq/ching` main and `~/.claude/ching` points at it (it does: `~/.claude/ching` is a link to `~/bbq/ching`). Check: `ls ~/.claude/ching/dispatcher/tool-gate.sh`.
 2. `~/.claude/ching/install.sh --install-dispatcher` has been run (it shows what it writes and asks first). Check: `ls ~/.agent/dispatcher/.claude/settings.json`. This does not touch `~/.claude/settings.json`.
 3. Voice services are up: `voicemode whisper service status` and `voicemode kokoro status` both say running. macOS microphone access is allowed for the terminal app you start it in.
-4. You picked the speed pass line in `MANUAL-STEPS.md`, step 0.6. Write it here before you begin: **pass line: ____ seconds** from the end of your sentence to the first spoken word.
+4. You picked the speed pass line in `MANUAL-STEPS.md`, step 0.6. Write it here before you begin: **pass line: 8 seconds** (picked 2026-10-16, D25) from the end of your sentence to the first spoken word.
 5. Have a stopwatch (a phone) and a second terminal for the checks below.
 
 Start it:
