@@ -28,7 +28,8 @@
 # `claude -p` calls set it) the learner may read, and may write with Edit/Write only under $AGENT_HOME/proposals/.
 # Every other tool is denied: Bash and Monitor outright (a superset of "no redirects outside proposals": a command
 # string cannot show every write), Skill, MCP, WebFetch, WebSearch and anything else. Without CHING_LEARNER=1
-# nothing changes. `ching-proposals approve` is denied in every session: approving is for the person at a terminal.
+# nothing changes. Approving a learner proposal is for the person at a terminal: in every session ching-proposals may
+# only be called directly as list, show, diff, reject, snooze or help (an allowlist; see check_proposals_call).
 # Env: GUARD_PROTECTED_BRANCHES (default "main master" plus the remote default branch);
 #      GUARD_TIME_LIMIT (seconds; can only lower the 8 s ceiling, for the tests)
 # Config: push_gate=on|off in $AGENT_HOME/config (default ~/.agent/config), read through lib.sh push_gate_on. The file
@@ -633,19 +634,42 @@ check_git() { # $1 = index of git token
 }
 
 # ---------- learner proposals: approving is for the human (Phase 6 spec 6.4) ----------
-check_proposals_approve() { # TOKS is the segment: ching-proposals followed (after any options) by `approve`
-  local k=0 j
-  while [ "$k" -lt "$NT" ]; do
-    base_of "${TOKS[$k]}"
-    if [ "$BASE" = ching-proposals ]; then
-      j=$((k + 1))
-      while [ "$j" -lt "$NT" ]; do case "${TOKS[$j]}" in -*) j=$((j + 1)) ;; *) break ;; esac; done
-      if [ "$j" -lt "$NT" ] && [ "${TOKS[$j]}" = approve ]; then
-        emit_deny "approving a learner proposal is for the person at a terminal. Tell the user to run: ching-proposals approve <id>"
-      fi
-    fi
-    k=$((k + 1))
-  done
+# The main defence is in ching-proposals itself (it refuses approve under a session: the session variables, a claude
+# process up the parent chain, a code typed back on /dev/tty). This is the cheap extra layer, and it is an allowlist,
+# because string matching can never list every spelling of `approve`. A segment that names ching-proposals passes only
+#  - as a direct call: ching-proposals (any path, any case, after NAME=value words only, no wrapper) whose first word
+#    after its options is literally one of PROPOSALS_SUBS. `appr${x}ove`, `$a`, `$(echo approve)` and backticks (the
+#    splitter leaves `ching-proposals` with nothing after it) are not on the list, nor is approve;
+#  - as data for a command that only reads or records text (PROPOSALS_READERS; git not with -c, which can set a pager
+#    or an alias to run), or bash/sh/zsh -n (a syntax check).
+# Everything else is denied: xargs, script, env, perl, python, find -exec, cp, echo, a glob that expands to the name.
+# A wrapper script file never shows the name to the guard: that case is left to the CLI's own checks.
+PROPOSALS_SUBS=" list show diff reject snooze help -h --help "
+PROPOSALS_READERS=" grep egrep fgrep rg cat less more head tail wc ls stat file nl bat shellcheck diff cmp sed git gh "
+deny_proposals() {
+  emit_deny "approving a learner proposal is for the person at a terminal. A session may only call ching-proposals directly as list, show, diff, reject or snooze. Tell the user to run: ching-proposals approve <id>"
+}
+check_proposals_call() { # TOKS is the segment
+  local k=0 j b sub
+  while [ "$k" -lt "$NT" ] && [[ "${TOKS[$k]}" == [A-Za-z_]*=* ]]; do k=$((k + 1)); done
+  [ "$k" -lt "$NT" ] || return 0
+  base_of "${TOKS[$k]}"; b=$BASE
+  case "$b" in *[[:upper:]]*) b=$(printf '%s' "$b" | LC_ALL=C tr 'A-Z' 'a-z') ;; esac   # macOS: CHING-PROPOSALS runs it too
+  # shellcheck disable=SC2053 # $b is a glob on purpose: would the shell expand this command word to ching-proposals?
+  if [[ "$b" == *[\*\?\[]* ]] && [[ ching-proposals == $b ]]; then b=ching-proposals; fi
+  if [ "$b" = ching-proposals ]; then
+    j=$((k + 1))
+    while [ "$j" -lt "$NT" ]; do case "${TOKS[$j]}" in -h|--help) break ;; -*) j=$((j + 1)) ;; *) break ;; esac; done
+    sub=${TOKS[$j]:-}
+    if [ -n "$sub" ]; then case "$PROPOSALS_SUBS" in *" $sub "*) return 0 ;; esac; fi
+    deny_proposals
+  fi
+  case " ${TOKS[*]} " in *[Cc][Hh][Ii][Nn][Gg]-[Pp][Rr][Oo][Pp][Oo][Ss][Aa][Ll][Ss]*) ;; *) return 0 ;; esac
+  case "$PROPOSALS_READERS" in
+    *" $b "*) if [ "$b" = git ] && { seg_matches '-c' || seg_matches '--config-env*'; }; then deny_proposals; fi; return 0 ;;
+  esac
+  case "$b" in bash|sh|zsh) if seg_matches '-n'; then return 0; fi ;; esac
+  deny_proposals
 }
 
 # ---------- rules 4, 6, 7 and extras ----------
@@ -894,9 +918,7 @@ check_misc() { # one segment, tokens in TOKS
   esac
   if has_token release-gate.sh && { seg_matches '--approve'; }; then emit_deny "release approval is for the human. Tell the user the gate passed and wait."; fi
   if has_token migrate-gate.sh && { seg_matches '--confirm*'; }; then emit_deny "confirming a destructive migration is for the human. Stop and ask the user."; fi
-  # only a segment that says "approve", or could spell it through quotes or backslashes, can hold it (a cheap filter:
-  # the token walk over every segment of a 900-line command costs seconds)
-  case "$SEG_RAW" in *approve*|*\"*|*\'*|*\\*) check_proposals_approve ;; esac
+  check_proposals_call
   tamper_bash
   check_secret_dump
 }

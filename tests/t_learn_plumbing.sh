@@ -219,6 +219,49 @@ assert_eq "cli: ... no event" "$n_before" "$(wc -l <"$EVF" 2>/dev/null | tr -d '
 out=$(echo y | "$CP" approve skill-sync-rebase 2>&1 | cat); rc=$?
 assert_contains "cli: approve with stdin piped and stdout piped is refused too" "$out" "person at a terminal"
 
+# ---- approve is for a person, never a Claude Code session (spec 6.4) ----
+# The suite may itself run inside a session, so the person's path (PERSON) clears every session variable the CLI checks
+# and ends its parent walk at this test (CHING_TEST=1 + CHING_TEST_ANCESTRY_STOP, honoured only in /tmp/ching-tests.*).
+SESSION_VARS=$(sed -n 's/^SESSION_VARS="\(.*\)"$/\1/p' "$CP")
+[ -n "$SESSION_VARS" ] || { fail "session: no SESSION_VARS line in the CLI"; SESSION_VARS=CLAUDECODE; }
+assert_contains "session: the checked variables include CLAUDECODE" " $SESSION_VARS " " CLAUDECODE "
+assert_contains "session: ... and CLAUDE_CODE_ENTRYPOINT" " $SESSION_VARS " " CLAUDE_CODE_ENTRYPOINT "
+UNSET=(); for v in $SESSION_VARS; do UNSET+=(-u "$v"); done
+PERSON=(env "${UNSET[@]}" CHING_TEST=1 "CHING_TEST_ANCESTRY_STOP=$$")
+# two stand-ins for a claude process up the chain: a binary named claude (the native install; it stays the parent
+# because its -c holds two commands) and a script named claude run by an interpreter (as `node .../bin/claude`)
+mkdir -p "$WORK/fake-native" "$WORK/fake-node"
+ln -s /bin/bash "$WORK/fake-native/claude"
+printf '#!/bin/bash\n/bin/bash -c "$1"\nexit $?\n' >"$WORK/fake-node/claude"; chmod +x "$WORK/fake-node/claude"
+nev() { if [ -f "$EVF" ]; then wc -l <"$EVF" | tr -d ' '; else echo 0; fi; }
+not_approved() { # label: the rule proposal is still open, its target untouched, no new event
+  assert_file "$1: the proposal stays open" "$P/rule-no-version-bump.md"
+  assert_eq "$1: the target is untouched" "$ORIG_RULES" "$(cat "$HOME/.agents/CLAUDE.md")"
+  assert_eq "$1: no event" "$n_before" "$(nev)"
+}
+n_before=$(nev)
+for v in $SESSION_VARS; do
+  out=$("${PERSON[@]}" "$v=1" "$CP" approve rule-no-version-bump </dev/null 2>&1); rc=$?
+  assert_eq "session: $v alone refuses approve (exit 1)" "1" "$rc"
+  assert_contains "session: ... and names it" "$out" "not a Claude Code session ($v is set)"
+done
+out=$("${PERSON[@]}" "$WORK/fake-native/claude" -c "$(printf '%q' "$CP") approve rule-no-version-bump; exit \$?" </dev/null 2>&1); rc=$?
+assert_eq "session: every variable unset, but a binary named claude up the chain: exits 1" "1" "$rc"
+assert_contains "session: ... the parent walk names it" "$out" "it runs under claude, process"
+out=$("${PERSON[@]}" "$WORK/fake-node/claude" "$(printf '%q' "$CP") approve rule-no-version-bump" </dev/null 2>&1); rc=$?
+assert_eq "session: every variable unset, but an interpreter running .../claude up the chain: exits 1" "1" "$rc"
+assert_contains "session: ... the parent walk names it" "$out" "it runs under claude, process"
+mkdir -p "$WORK/badps"; printf '#!/bin/sh\nexit 1\n' >"$WORK/badps/ps"; chmod +x "$WORK/badps/ps"
+out=$(PATH="$WORK/badps:$PATH" "${PERSON[@]}" "$CP" approve rule-no-version-bump </dev/null 2>&1); rc=$?
+assert_eq "session: a process table that cannot be read refuses (fails closed)" "1" "$rc"
+assert_contains "session: ... and says why" "$out" "cannot read the process table"
+out=$(env "${UNSET[@]}" CHING_TEST=1 "CHING_TEST_ANCESTRY_STOP=$$" HOME=/var/empty "$CP" approve rule-no-version-bump </dev/null 2>&1); rc=$?
+assert_eq "test seam: CHING_TEST with HOME outside the /tmp/ching-tests sandbox exits 3" "3" "$rc"
+assert_contains "test seam: ... and says so" "$out" "honoured only inside the test sandbox"
+out=$(env "${UNSET[@]}" CHING_TEST=1 "CHING_TEST_ANCESTRY_STOP=$$" AGENT_HOME="$WORK/../../.." "$CP" approve rule-no-version-bump </dev/null 2>&1); rc=$?
+assert_eq "test seam: CHING_TEST with an AGENT_HOME that climbs out of the sandbox exits 3" "3" "$rc"
+not_approved "session checks"
+
 # reject: fingerprint and reason in rejected.txt, file archived, event, never proposed again
 out=$("$CP" reject lesson-short-commits "not my style" 2>&1); rc=$?
 assert_eq "cli: reject exits 0" "0" "$rc"
@@ -255,52 +298,97 @@ assert_eq "cli: deciding the same id twice keeps both archived copies" "2" "$(ls
 
 # approve at a terminal: script(1) gives the CLI a pty (macOS; skipped where it is missing)
 if [ "$(uname)" = Darwin ] && printf '' | script -q /dev/null true >/dev/null 2>&1; then
-  tty_cp() { # answer cmd args...: run ching-proposals under a pty, answer its prompt once it shows (or right away)
+  tty_run() { # answer cmd...: run cmd under a pty and, once the CLI asks for the code or refuses, type the answer.
+    # CODE types the code the CLI showed, as a person reading the screen does; anything else is typed blind.
     local ans=$1 i=0; shift
     : >"$WORK/tty.out"
-    { while [ "$i" -lt 50 ] && ! grep -q '\[y/N\]\|Approved\|approved' "$WORK/tty.out"; do sleep 0.2; i=$((i + 1)); done
-      printf '%s\n' "$ans"; sleep 0.5; } \
-      | script -q /dev/null "$CP" "$@" >"$WORK/tty.out" 2>&1
+    { while [ "$i" -lt 50 ] && ! grep -q 'to confirm\|ching-proposals:' "$WORK/tty.out"; do sleep 0.2; i=$((i + 1)); done
+      if [ "$ans" = CODE ]; then ans=$(sed -n 's/.*Type \([a-z0-9]\{4\}\) to confirm.*/\1/p' "$WORK/tty.out" | tail -1); fi
+      printf '%s\n' "$ans"; sleep 0.4; } \
+      | script -q /dev/null "$@" >"$WORK/tty.out" 2>&1
     return "${PIPESTATUS[1]}"   # the CLI's status: the answering side may die of SIGPIPE when nothing reads it
   }
+  tty_cp() { local ans=$1; shift; tty_run "$ans" "${PERSON[@]}" "$CP" "$@"; }
+
+  # the verifier's bypasses (spec 6.4 defect, stage 6a): each runs under a pty with a blind y typed once the CLI
+  # speaks, three ways: as a session (CLAUDECODE set), as a session that unset every variable (a claude process up the
+  # chain), and with no session visible at all (only the code stands). None may approve.
+  printf '%q approve rule-no-version-bump\n' "$CP" >"$WORK/wrap.sh"
+  q=$(printf '%q' "$CP")
+  ATTACKS=(
+    "fake pty (script -q /dev/null), blind y :: $q approve rule-no-version-bump"
+    "echo approve | xargs ching-proposals :: echo approve rule-no-version-bump | xargs $q"
+    "a=approve; ching-proposals \$a :: a=approve; $q \$a rule-no-version-bump"
+    "\$(echo approve) :: $q \$(echo approve) rule-no-version-bump"
+    "backticks :: $q \`echo approve\` rule-no-version-bump"
+    "appr\${x}ove :: x=; $q appr\${x}ove rule-no-version-bump"
+    "perl exec :: perl -e 'exec @ARGV' $q approve rule-no-version-bump"
+    "a wrapper script file :: bash $(printf '%q' "$WORK/wrap.sh")"
+  )
+  cp "$P/rule-no-version-bump.md" "$WORK/rule-saved.md"
+  reset_rule() { # before each attempt: the rule open again and its target as it was, so each attempt stands alone
+    cp "$WORK/rule-saved.md" "$P/rule-no-version-bump.md"; rm -f "$P/archive/rule-no-version-bump".*
+    printf "%s\n" "$ORIG_RULES" >"$HOME/.agents/CLAUDE.md"; n_before=$(nev)
+  }
+  for a in "${ATTACKS[@]}"; do
+    name=${a%% :: *}; cmd=${a#* :: }
+    reset_rule; tty_run y env "${UNSET[@]}" CLAUDECODE=1 CHING_TEST=1 "CHING_TEST_ANCESTRY_STOP=$$" bash -c "$cmd; exit \$?"
+    not_approved "bypass $name, as a session"
+    assert_contains "bypass $name, as a session: refused as a session" "$(cat "$WORK/tty.out")" "not a Claude Code session (CLAUDECODE is set)"
+    reset_rule; tty_run y "${PERSON[@]}" "$WORK/fake-native/claude" -c "$cmd; exit \$?"
+    not_approved "bypass $name, variables unset under claude"
+    assert_contains "bypass $name, variables unset under claude: the parent walk refuses it" "$(cat "$WORK/tty.out")" "it runs under claude"
+    reset_rule; tty_run y "${PERSON[@]}" bash -c "$cmd; exit \$?"
+    not_approved "bypass $name, no session visible (the code)"
+  done
+  # the person's path: the change is shown, then a code is asked for; a wrong answer changes nothing
   tty_cp n approve rule-no-version-bump; rc=$?
   assert_eq "tty: rule approve, answer n: exits 1" "1" "$rc"
   assert_contains "tty: rule approve shows the change before asking" "$(cat "$WORK/tty.out")" "+Never bump the version number"
+  assert_contains "tty: ... then asks for a code typed back" "$(cat "$WORK/tty.out")" "to confirm (anything else cancels)"
+  assert_contains "tty: ... and a wrong answer changes nothing" "$(cat "$WORK/tty.out")" "not applied; nothing changed"
   assert_eq "tty: answer n: target untouched" "$ORIG_RULES" "$(cat "$HOME/.agents/CLAUDE.md")"
   assert_file "tty: answer n: proposal still open" "$P/rule-no-version-bump.md"
   # the target is reached through a symlink, as ~/.claude/CLAUDE.md links to ~/.agents/CLAUDE.md
   mkdir -p "$WORK/real-agents"; mv "$HOME/.agents/CLAUDE.md" "$WORK/real-agents/CLAUDE.md"; ln -s "$WORK/real-agents/CLAUDE.md" "$HOME/.agents/CLAUDE.md"
   chmod 640 "$WORK/real-agents/CLAUDE.md"
-  tty_cp y approve rule-no-version-bump; rc=$?
-  assert_eq "tty: rule approve, answer y: exits 0" "0" "$rc"
-  assert_contains "tty: answer y: the rule is in the target" "$(cat "$WORK/real-agents/CLAUDE.md")" "## Versions"
-  assert_ok "tty: answer y: the link stays a link" test -L "$HOME/.agents/CLAUDE.md"
-  assert_eq "tty: answer y: the target keeps its mode" "640" "$(stat -f %Lp "$WORK/real-agents/CLAUDE.md")"
-  assert_eq "tty: answer y: the old version is kept in archive/" "$ORIG_RULES" "$(cat "$P/archive/rule-no-version-bump.target-before")"
-  assert_eq "tty: answer y: archived as approved" "approved" "$(proposal_get "$P/archive/rule-no-version-bump.md" status)"
-  assert_eq "tty: answer y: proposal event" '{"id":"rule-no-version-bump","action":"approved"}' "$(jq -c 'select(.kind == "proposal") | .data' "$EVF" | tail -1)"
+  tty_cp CODE approve rule-no-version-bump; rc=$?
+  assert_eq "tty: rule approve, the person types the code: exits 0" "0" "$rc"
+  assert_contains "tty: the code: the rule is in the target" "$(cat "$WORK/real-agents/CLAUDE.md")" "## Versions"
+  assert_ok "tty: the code: the link stays a link" test -L "$HOME/.agents/CLAUDE.md"
+  assert_eq "tty: the code: the target keeps its mode" "640" "$(stat -f %Lp "$WORK/real-agents/CLAUDE.md")"
+  assert_eq "tty: the code: the old version is kept in archive/" "$ORIG_RULES" "$(cat "$P/archive/rule-no-version-bump.target-before")"
+  assert_eq "tty: the code: archived as approved" "approved" "$(proposal_get "$P/archive/rule-no-version-bump.md" status)"
+  assert_eq "tty: the code: proposal event" '{"id":"rule-no-version-bump","action":"approved"}' "$(jq -c 'select(.kind == "proposal") | .data' "$EVF" | tail -1)"
   # a patch that no longer applies (the rule is already there) is refused before the question
   mkrule no-version-bump-again "$(proposal_fingerprint other)" 2
-  tty_cp y approve rule-no-version-bump-again; rc=$?
+  tty_cp CODE approve rule-no-version-bump-again; rc=$?
   assert_eq "tty: a patch that no longer applies: exits 1" "1" "$rc"
   assert_contains "tty: ... and says so" "$(cat "$WORK/tty.out")" "does not apply"
+  assert_not_contains "tty: ... before any question" "$(cat "$WORK/tty.out")" "to confirm"
   assert_file "tty: ... the proposal stays open" "$P/rule-no-version-bump-again.md"
   "$CP" reject rule-no-version-bump-again >/dev/null
   # a patch that touches two files is refused
   two=$'--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -1 +1 @@\n-# Owner rules (fixture)\n+# Owner rules\n--- a/other.md\n+++ b/other.md\n@@ -1 +1 @@\n-x\n+y'
   mkrule two-files "$(proposal_fingerprint two)" 2 "$two"
   assert_contains "cli: a patch for two files is refused (diff)" "$("$CP" diff rule-two-files 2>&1)" "exactly one file"
-  # skill: nothing in ~/.claude/skills, the skill-creator prompt is printed
+  # skill: asks for the code too; a blind answer leaves it open
   tty_cp "" approve skill-sync-rebase; rc=$?
-  assert_eq "tty: skill approve exits 0" "0" "$rc"
+  assert_eq "tty: skill approve, empty answer: exits 1" "1" "$rc"
+  assert_file "tty: ... the skill proposal stays open" "$P/skill-sync-rebase.md"
+  tty_cp CODE approve skill-sync-rebase; rc=$?
+  assert_eq "tty: skill approve with the code exits 0" "0" "$rc"
   assert_contains "tty: skill approve prints the skill-creator prompt" "$(cat "$WORK/tty.out")" 'Use the skill-creator skill to create a new skill named "sync-rebase-test"'
   assert_no_file "tty: skill approve writes nothing into ~/.claude/skills" "$HOME/.claude/skills"
   assert_no_file "tty: ... nor into CLAUDE_DIR/skills" "$CLAUDE_DIR/skills"
   assert_eq "tty: skill archived as approved" "approved" "$(proposal_get "$P/archive/skill-sync-rebase.md" status)"
-  # lesson: appended to the profile
+  # lesson: appended to the profile (the code is accepted in capitals too)
   mkother lesson plain-words "plain words" 2 "Use plain words."
-  tty_cp "" approve lesson-plain-words; rc=$?
-  assert_eq "tty: lesson approve exits 0" "0" "$rc"
+  : >"$WORK/tty.out"
+  { i=0; while [ "$i" -lt 50 ] && ! grep -q 'to confirm' "$WORK/tty.out"; do sleep 0.2; i=$((i + 1)); done
+    printf "%s\n" "$(sed -n "s/.*Type \\([a-z0-9]\\{4\\}\\) to confirm.*/\\1/p" "$WORK/tty.out" | tail -1 | tr a-z A-Z)"; sleep 0.4; } \
+    | script -q /dev/null "${PERSON[@]}" "$CP" approve lesson-plain-words >"$WORK/tty.out" 2>&1; rc=${PIPESTATUS[1]}
+  assert_eq "tty: lesson approve (code typed in capitals) exits 0" "0" "$rc"
   assert_eq "tty: lesson approve appends to profile/lessons.jsonl" "lesson-plain-words Use plain words." \
     "$(jq -r '"\(.id) \(.text)"' "$AGENT_HOME/profile/lessons.jsonl")"
 else
