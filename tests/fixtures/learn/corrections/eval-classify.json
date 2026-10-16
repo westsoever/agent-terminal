@@ -1,0 +1,8 @@
+{"labels":[
+  {"id":"e01","label":"correction","pattern":"do not push to main; open a pull request"},
+  {"id":"e02","label":"not"},
+  {"id":"e03","label":"correction","pattern":"write tests first"},
+  {"id":"e05","label":"correction","pattern":"add headers"},
+  {"id":"e06","label":"not"},
+  {"id":"e07","label":"correction","pattern":"ask before deleting branches"}
+]}

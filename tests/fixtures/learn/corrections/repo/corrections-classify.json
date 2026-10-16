@@ -1,0 +1,5 @@
+{"labels":[
+  {"id":"d1000000-0000-4000-8000-00000000d001@2026-10-12T12:00:00.000Z","label":"correction","pattern":"run database migrations yourself; do not hand them to the owner"},
+  {"id":"d2000000-0000-4000-8000-00000000d002@2026-10-12T14:00:00.000Z","label":"correction","pattern":"run database migrations yourself; do not hand them to the owner"},
+  {"id":"d3000000-0000-4000-8000-00000000d003@2026-10-13T12:00:00.000Z","label":"correction","pattern":"run database migrations yourself; do not hand them to the owner"}
+]}
