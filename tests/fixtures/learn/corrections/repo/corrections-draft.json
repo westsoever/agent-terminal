@@ -1,0 +1,7 @@
+{"rules":[
+  {"pattern":"run database migrations yourself; do not hand them to the owner","covered":false,"slug":"run-migrations-yourself",
+   "target":"AGENTS.md",
+   "proposal":"Add a rule that sessions in this repo run database migrations themselves. The owner corrected this in three sessions on two days.",
+   "patch":"--- a/AGENTS.md\n+++ b/AGENTS.md\n@@ -2,3 +2,5 @@\n \n ## Rules\n Keep commits small.\n+\n+Run database migrations yourself; do not ask the owner to run them.\n",
+   "why_not_covered":"Checked the repo AGENTS.md (one rule, about commit size) and the global rules file (dates only)."}
+]}
