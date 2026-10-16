@@ -615,4 +615,12 @@ assert_no_file "sid '..': no retries file in AGENT_HOME" "$AGENT_HOME/retries"
 assert_eq "unsafe sids map to their own sid-<hash> dirs" "3" "$(ls "$AGENT_HOME/sessions" | grep -c '^sid-')"
 out=$(stop "$SR" "../escape-a")
 assert_contains "the same unsafe sid keeps its own counter" "$(printf '%s' "$out" | jq -r .reason)" "attempt 2 of 3"
+# ---------- the learner's own model calls (CHING_LEARNER=1): no check, no gate, no notification ----------
+LRS=$(mk_repo learnstop); write_goal "$LRS" "false"
+out=$(printf '%s' "$(hook_json Stop "$LRS" s-learner)" | CHING_LEARNER=1 "$BIN/stop-check.sh" 2>&1); rc=$?
+assert_eq "learner: exit 0" "0" "$rc"
+assert_eq "learner: never blocks (a failing test_command is not run)" "" "$out"
+assert_no_file "learner: no session dir" "$AGENT_HOME/sessions/s-learner"
+assert_eq "learner: no notify.log line" "0" "$(grep -c 'learnstop' "$AGENT_HOME/notify.log" 2>/dev/null || true)"
+assert_eq "learner: no events" "0" "$(grep -c '"s-learner"' "$AGENT_HOME/events.jsonl" 2>/dev/null || true)"
 exit 0

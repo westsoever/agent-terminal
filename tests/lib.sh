@@ -24,6 +24,7 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export CHING_TEST_MODELS=""   # tests never call a real model; t_escalate.sh sets its own fake
 unset TMPDIR CHING_ALLOW_PUSH CHING_STOP_CHECK_RUNNING CHING_ESCALATING   # recursion markers inherited from a live stop-check.sh run
 unset CLAUDE_CODE_ENTRYPOINT CHING_NO_CHECKPOINT   # the session running the tests must not switch the checkpoint gate off
+unset CHING_LEARNER   # learner mode makes the session hooks exit at once and the guard deny; a test sets it where it means it
 mkdir -p "$AGENT_HOME" "$CLAUDE_DIR"
 
 # install.sh calls $LAUNCHCTL: a test must never reach the real launchd

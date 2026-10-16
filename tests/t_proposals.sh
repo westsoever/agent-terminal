@@ -314,6 +314,31 @@ bad "sessions not an integer" rule-b8.md "$(jq -c '.sessions = "3"' <<<"$JX")"
 bad "evidence day not YYYY-MM-DD" rule-b9.md "$(jq -c '.evidence[0].day = "12/10/2026"' <<<"$JX")"
 bad "empty proposal text" rule-b10.md "$(jq -c '.proposal = ""' <<<"$JX")"
 bad "skill without why_not_covered" skill-b11.md "$(jq -c 'del(.why_not_covered) | del(.patch) | .component = "skills"' <<<"$JX")"
+# a rule's patch must be unified-diff syntax: a "## " line would end the ## patch section early, prose is no patch
+bad "patch with a '## ' line" rule-b12.md "$(jq -c '.patch = "--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -1 +1,2 @@\n # Rules\n## why this is not already covered\n+- x"' <<<"$JX")"
+bad "patch that is prose" rule-b13.md "$(jq -c '.patch = "Add a line saying never bump the version."' <<<"$JX")"
+bad "patch with no hunk" rule-b14.md "$(jq -c '.patch = "--- a/CLAUDE.md\n+++ b/CLAUDE.md"' <<<"$JX")"
+bad "patch with no file header" rule-b15.md "$(jq -c '.patch = "@@ -1 +1,2 @@\n # Rules\n+- x"' <<<"$JX")"
+err=$(jq -c '.patch = "Add a line."' <<<"$JX" | proposal_write rule-b16.md 2>&1 >/dev/null)
+assert_contains "bad patch: the message says unified diff" "$err" "unified diff"
+# what a real diff may hold: git headers, a blank context line, '\ No newline', '+## ' (a heading the patch adds)
+okpatch=$'diff --git a/CLAUDE.md b/CLAUDE.md\nindex 1111111..2222222 100644\n--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -1,2 +1,4 @@\n # Rules\n\n+## Versions\n+Never bump it.\n\\ No newline at end of file'
+out=$(jq -c --arg p "$okpatch" '.patch = $p | .fingerprint = "'"$(proposal_fingerprint okpatch)"'"' <<<"$JX" | proposal_write rule-okpatch.md 2>&1); rc=$?
+assert_eq "patch: git headers, blank context, \\ No newline and +## are accepted" "0" "$rc"
+assert_eq "patch: ... and come back unchanged" "$okpatch" "$(proposal_patch "$P/rule-okpatch.md")"
+assert_eq "patch: ... a +## line ends no section" "## proposal|## evidence|## patch|## why this is not already covered|" "$(grep '^## ' "$P/rule-okpatch.md" | tr '\n' '|')"
+# control characters (a newline in a sid, an escape in a cwd, a CR in the target) never reach a header or evidence line
+cj=$(jq -c --arg fp "$(proposal_fingerprint ctrl)" '.fingerprint = $fp | .target = "~/.agents/CLA\rUDE\u001b[31m.md"
+  | .evidence = [{sid: "c1\n## patch\nc2000000", day: "2026-10-12", cwd: "/tmp/a\u001b[2Jb", quote: "say\u0007 hi\u001b[0m"}]' <<<"$JX")
+out=$(printf '%s' "$cj" | proposal_write rule-ctrl.md 2>&1); rc=$?
+assert_eq "control chars: written" "0" "$rc"
+FC="$P/rule-ctrl.md"
+assert_eq "control chars: no control character left in the file (tabs and newlines aside)" "0" "$(LC_ALL=C tr -d '\n\t' <"$FC" | LC_ALL=C tr -cd '\000-\037\177' | wc -c | tr -d ' ')"
+assert_eq "control chars: the sid's newline does not start a section" "## proposal|## evidence|## patch|## why this is not already covered|" "$(grep '^## ' "$FC" | tr '\n' '|')"
+assert_eq "control chars: one evidence line" "1" "$(proposal_section "$FC" evidence | grep -c .)"
+assert_contains "control chars: the evidence line keeps its shape" "$(proposal_section "$FC" evidence)" '- c1##patc 2026-10-12 /tmp/a [2Jb "say  hi [0m"'
+# shellcheck disable=SC2088 # a literal ~ is what the header holds
+assert_eq "control chars: target cleaned" "~/.agents/CLA UDE [31m.md" "$(proposal_get "$FC" target)"
 # a skill proposal has no patch section
 out=$(jq -c 'del(.patch) | .component = "skills" | .target = "sync-and-ship"' <<<"$JX" | proposal_write skill-sync-and-ship.md)
 assert_eq "skill: written" "written $(cd "$P" && pwd -P)/skill-sync-and-ship.md" "$out"
@@ -382,6 +407,68 @@ out=$(printf 'ching-learn-task: skills\n' | LEARN_TOKEN_CAP=1000 learn_model_cal
 assert_eq "model call: daily token cap reached exits 5" "5" "$rc"
 assert_eq "model call: capped means no call at all" "$n" "$(ncalls)"
 assert_fails "model call: a model name is required" learn_model_call ""
+# ---------- learn_model_call: isolation from the owner's settings, hooks and plugins (stage 6a fix F1) ----------
+# a wrapper records the argv one per line, so an empty argument and the --settings JSON can be checked exactly
+cat >"$WORK/argv-stub" <<EOS
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >"$WORK/argv.txt"
+exec "$STUB" "\$@"
+EOS
+chmod +x "$WORK/argv-stub"
+rm -f "$TOKF"
+printf 'ching-learn-task: skills\n' | CHING_CLAUDE_BIN="$WORK/argv-stub" learn_model_call haiku >/dev/null
+argv=$(cat "$WORK/argv.txt")
+assert_contains "isolation: --no-session-persistence" "$argv" "--no-session-persistence"
+assert_contains "isolation: --setting-sources \"\" (no user, project or local settings: no user hooks, no plugins)" "$argv" $'--setting-sources\n\n--settings'
+assert_contains "isolation: --strict-mcp-config" "$argv" "--strict-mcp-config"
+assert_contains "isolation: --disable-slash-commands" "$argv" "--disable-slash-commands"
+settings=$(sed -n '/^--settings$/{n;p;}' "$WORK/argv.txt")
+assert_eq "isolation: --settings is JSON" "object" "$(jq -r type <<<"$settings")"
+assert_eq "isolation: --settings defines only a PreToolUse hook" "PreToolUse" "$(jq -r '.hooks | keys | join(",")' <<<"$settings")"
+assert_eq "isolation: ... for every tool, running guard.sh beside lib.sh (learner mode stays the second layer)" \
+  "*|$(printf '%q' "$BIN/guard.sh")" "$(jq -r '.hooks.PreToolUse[0] | "\(.matcher)|\(.hooks[0].command)"' <<<"$settings")"
+assert_eq "isolation: auto-memory off (no ~/.claude/projects/<.work>/memory)" "false" "$(jq -r .autoMemoryEnabled <<<"$settings")"
+# a guard path with a space still runs as one command
+lib_sp="$WORK/lib with space"; mkdir -p "$lib_sp"; cp "$BIN"/*.sh "$BIN"/*.pl "$BIN"/*.jq "$lib_sp/" 2>/dev/null
+cmd=$( (. "$lib_sp/lib.sh"; printf 'ching-learn-task: skills\n' | CHING_CLAUDE_BIN="$WORK/argv-stub" learn_model_call haiku >/dev/null; \
+  sed -n '/^--settings$/{n;p;}' "$WORK/argv.txt" | jq -r '.hooks.PreToolUse[0].hooks[0].command') )
+assert_eq "isolation: the guard path is shell-quoted" "$lib_sp/guard.sh" "$(eval "printf '%s' $cmd")"
+
+# ---------- learn_model_call: the cap is checked against an estimate of the call, under a lock (stage 6a fix F1) ----------
+rm -f "$TOKF"
+assert_eq "budget: learn_budget_left is the cap when nothing is spent" "200000" "$(learn_budget_left)"
+printf '150000\n' >"$TOKF"
+assert_eq "budget: learn_budget_left is what is left today" "50000" "$(learn_budget_left)"
+printf '250000\n' >"$TOKF"
+assert_eq "budget: learn_budget_left is never negative" "0" "$(learn_budget_left)"
+assert_eq "budget: ... and reads LEARN_TOKEN_CAP" "0" "$(LEARN_TOKEN_CAP=1000 learn_budget_left)"
+assert_eq "estimate: 0 bytes is the per-call overhead (default 4000)" "4000" "$(printf '' | learn_estimate_tokens)"
+assert_eq "estimate: bytes / 3.5 rounded up, plus the overhead" "4003" "$(printf 'abcdefgh' | learn_estimate_tokens)"
+assert_eq "estimate: LEARN_CALL_OVERHEAD" "13" "$(printf 'abcdefgh' | LEARN_CALL_OVERHEAD=10 learn_estimate_tokens)"
+# a call whose estimate does not fit what is left is refused before it starts (the cap was soft: 219k against 200k)
+printf '190000\n' >"$TOKF"; n=$(ncalls)
+big=$(head -c 70000 /dev/zero | tr '\0' 'x')   # about 20k tokens
+out=$(printf 'ching-learn-task: skills\n%s\n' "$big" | learn_model_call haiku 2>/dev/null); rc=$?
+assert_eq "budget: a call that would pass the cap exits 5" "5" "$rc"
+assert_eq "budget: ... and no call is made" "$n" "$(ncalls)"
+assert_eq "budget: ... and nothing is added to the day" "190000" "$(cat "$TOKF")"
+assert_contains "budget: ... logged with the estimate" "$(tail -1 "$P/.work/learn.log")" "rc=capped tokens=0 estimate=24"
+out=$(printf 'ching-learn-task: skills\nsmall\n' | learn_model_call haiku 2>/dev/null); rc=$?
+assert_eq "budget: a small call that fits still runs" "0" "$rc"
+assert_eq "budget: ... and the day total is the real usage, not the estimate" "191500" "$(cat "$TOKF")"
+# the read-modify-write of tokens-<day> is locked: parallel calls lose no tokens
+rm -f "$TOKF"
+for _ in 1 2 3 4 5 6 7 8; do (printf 'ching-learn-task: skills\n' | learn_model_call haiku >/dev/null 2>&1) & done; wait
+assert_eq "budget: 8 parallel calls count 8 x 1500 tokens" "12000" "$(cat "$TOKF")"
+# parallel calls cannot all pass one check: each reserves its estimate before it starts
+printf '0\n' >"$TOKF"; : >"$WORK/call.log"
+for _ in 1 2 3 4 5 6; do (printf 'ching-learn-task: skills\n' | CLAUDE_STUB_SLEEP=3 LEARN_TOKEN_CAP=12000 learn_model_call haiku >/dev/null 2>&1) & done; wait
+assert_eq "budget: 6 parallel calls against room for 2 estimates: only 2 run" "2" "$(ncalls)"
+assert_eq "budget: ... and the day holds their real usage" "3000" "$(cat "$TOKF")"
+# a failed call gives its reservation back (only what the envelope reports is counted)
+printf '0\n' >"$TOKF"
+printf 'ching-learn-task: skills\n' | CLAUDE_STUB_EXIT=1 learn_model_call haiku >/dev/null 2>&1
+assert_eq "budget: a failed call counts what it reported" "1500" "$(cat "$TOKF")"
 unset CHING_CLAUDE_BIN CLAUDE_STUB_LOG
 
 # the canned labels speak about the golden prompts (id = <sid>@<ts>)

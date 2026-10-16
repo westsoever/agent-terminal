@@ -30,6 +30,8 @@
 # turn, passes on the first stop (nothing says the block was not rewritten).
 #      CHING_TEST_MODELS CHING_TEST_CALL_TIMEOUT CHING_TEST_MAX_TURNS (see test-escalate.sh)
 set -euo pipefail
+# A learner model call (learn_model_call sets CHING_LEARNER=1) is no session: no check, no gate, no notification.
+[ "${CHING_LEARNER:-}" != 1 ] || exit 0
 START=$(date +%s)
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh

@@ -6,6 +6,8 @@
 #   touch   UserPromptSubmit hook: mark the session "working".
 #   end      SessionEnd hook: mark the session "ended".
 set -euo pipefail
+# A learner model call (learn_model_call sets CHING_LEARNER=1) is no session: no registry entry, no event, no context.
+[ "${CHING_LEARNER:-}" != 1 ] || exit 0
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
