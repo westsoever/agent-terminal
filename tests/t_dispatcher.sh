@@ -78,6 +78,17 @@ allow_b "dash.sh --next via the absolute installed path" "$DASH_ABS --next"
 allow_b "dash.sh --hours 6 --all" '~/.claude/kaching/bin/dash.sh --hours 6 --all'
 allow_b "dash.sh with no flag (the table)" '~/.claude/kaching/bin/dash.sh'
 allow_b "dash.sh via the kit's own bin dir" "$KIT/bin/dash.sh --speak"
+allow_b "dash.sh --route (the routing list)" '~/.claude/kaching/bin/dash.sh --route'
+allow_b "dash.sh --route via the absolute installed path" "$DASH_ABS --route"
+deny_b "dash.sh --route piped anywhere" '~/.claude/kaching/bin/dash.sh --route | cat'
+deny_b "dash.sh --route with a redirect" '~/.claude/kaching/bin/dash.sh --route > /tmp/out'
+deny_b "dash.sh --route with another flag" '~/.claude/kaching/bin/dash.sh --route --all'
+deny_b "dash.sh --route after another flag" '~/.claude/kaching/bin/dash.sh --speak --route'
+deny_b "dash.sh --route twice" '~/.claude/kaching/bin/dash.sh --route --route'
+assert_contains "the unknown-flag deny names --route among the allowed flags" \
+  "$(gate_out Bash "$(bash_in '~/.claude/kaching/bin/dash.sh --evil')")" "--route"
+deny_b "dash.sh --route with an unknown flag after it" '~/.claude/kaching/bin/dash.sh --route --evil'
+deny_b "dash.sh --route piped" '~/.claude/kaching/bin/dash.sh --route | head'
 deny_b "an ordinary command" 'ls -la'
 deny_b "rm -rf" 'rm -rf /tmp/x'
 deny_b "reading .env through cat" 'cat ~/.miso/.env.local'
@@ -177,6 +188,43 @@ assert_eq "every deny decision exits 0 (the JSON carries it)" "0" "$(gate_rc Edi
 out=$(gate_out Edit '{"file_path":"/tmp/x"}')
 assert_contains "a deny reason names the dispatcher" "$out" "dispatcher"
 assert_contains "a deny is logged as a deny event" "$(cat "$AGENT_HOME/events.jsonl" 2>/dev/null)" '"kind":"deny"'
+
+# ---------------- the gate in eval mode (dispatcher/eval.sh) ----------------
+EVX="$WORK/evalfx"; mkdir -p "$EVX/repos/miso/.agent" "$EVX/bin"
+printf '# State\n' >"$EVX/repos/miso/.agent/STATE.md"
+printf '#!/usr/bin/env bash\necho "stub $*"\n' >"$EVX/bin/dash.sh"; printf '#!/usr/bin/env bash\necho "relay $*"\n' >"$EVX/bin/relay-log.sh"
+chmod +x "$EVX/bin/dash.sh" "$EVX/bin/relay-log.sh"
+geval() { # tool tool_input_json [extra env...]
+  local t=$1 i=$2; shift 2
+  jq -n --arg t "$t" --argjson i "$i" '{hook_event_name:"PreToolUse",tool_name:$t,tool_input:$i}' |
+    env DISPATCHER_GATE_EVAL=1 DISPATCHER_GATE_EVAL_LOG="$WORK/eval-gate.jsonl" DISPATCHER_GATE_EVAL_DASH="$EVX/bin/dash.sh" \
+        DISPATCHER_GATE_EVAL_RELAY="$EVX/bin/relay-log.sh" DISPATCHER_GATE_EVAL_FIXTURE="$EVX" "$@" "$GATE" 2>&1
+}
+: >"$WORK/eval-gate.jsonl"
+out=$(geval SendMessage '{"to":"miso-Sessions","message":"run the tests again"}')
+assert_eq "eval gate: SendMessage is denied with the eval reason, nothing is sent" "deny|EVAL: recorded, not sent" "$(jq -r '.hookSpecificOutput | .permissionDecision + "|" + .permissionDecisionReason' <<<"$out")"
+assert_eq "eval gate: ...and its target and text are logged" '{"kind":"sendmessage","to":"miso-Sessions","message":"run the tests again"}' "$(grep '"sendmessage"' "$WORK/eval-gate.jsonl")"
+out=$(geval ListAgents '{}'); assert_ok "eval gate: ListAgents is denied (no live sessions offline)" is_deny "$out"
+out=$(geval Bash "$(bash_in '~/.claude/kaching/bin/dash.sh --route')")
+assert_eq "eval gate: dash.sh --route is allowed..." "allow" "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out")"
+assert_eq "eval gate: ...but runs the fixture stub with the same flags" "$EVX/bin/dash.sh --route" "$(jq -r '.hookSpecificOutput.updatedInput.command' <<<"$out")"
+assert_eq "eval gate: ...and the stub's command runs" "stub --route" "$(bash -c "$(jq -r '.hookSpecificOutput.updatedInput.command' <<<"$out")")"
+out=$(geval Bash "$(bash_in '~/.claude/kaching/bin/dash.sh')")
+assert_eq "eval gate: dash.sh with no flag runs the stub too" "$EVX/bin/dash.sh" "$(jq -r '.hookSpecificOutput.updatedInput.command' <<<"$out")"
+out=$(geval Bash "$(bash_in "~/.claude/kaching/dispatcher/relay-log.sh $EVX/repos/miso/.agent no 'run the tests again'")")
+assert_eq "eval gate: relay-log.sh runs the fixture stub, nothing is written" "$EVX/bin/relay-log.sh $EVX/repos/miso/.agent no 'run the tests again'" "$(jq -r '.hookSpecificOutput.updatedInput.command' <<<"$out")"
+out=$(geval Bash "$(bash_in '~/.claude/kaching/bin/dash.sh --route; ls')"); assert_ok "eval gate: the grammar still holds (a ; is denied)" is_deny "$out"
+out=$(geval Bash "$(bash_in '~/.claude/kaching/bin/dash.sh --route | cat')"); assert_ok "eval gate: ...and a pipe" is_deny "$out"
+out=$(geval Bash "$(bash_in 'ls')"); assert_ok "eval gate: ...and any other command" is_deny "$out"
+out=$(geval Bash "$(bash_in '~/.claude/kaching/bin/dash.sh --route')" DISPATCHER_GATE_EVAL_DASH=/no/such/stub)
+assert_ok "eval gate: no fixture stub: denied rather than running the real dash.sh" is_deny "$out"
+out=$(geval Read "$(read_in "$EVX/repos/miso/.agent/STATE.md")"); assert_eq "eval gate: a fixture STATE.md can be read" "" "$out"
+out=$(geval Read "$(read_in "$PROJ/.agent/STATE.md")"); assert_ok "eval gate: a real STATE.md outside the fixture is denied" is_deny "$out"
+assert_contains "eval gate: ...as a file that does not exist" "$out" "that file does not exist"
+out=$(geval Edit '{"file_path":"/tmp/x"}'); assert_ok "eval gate: every other tool is still denied" is_deny "$out"
+out=$(geval mcp__voicemode__converse '{"message":"hi"}'); assert_eq "eval gate: converse is untouched" "" "$out"
+assert_ok "eval gate: every decision line in the log is JSON" jq -e . "$WORK/eval-gate.jsonl"
+out=$(jq -nc '{tool_name:"SendMessage",tool_input:{to:"x",message:"y"}}' | env DISPATCHER_GATE_EVAL=yes "$GATE"); assert_eq "eval gate: only DISPATCHER_GATE_EVAL=1 turns eval mode on" "" "$out"
 
 # ---------------- relay-log.sh ----------------
 mkdir -p "$WORK/r1/.agent"
@@ -333,6 +381,8 @@ assert_eq "special characters: the hook path survives rendering" "$XH/claude/kac
 cat >"$WORK/fake-claude" <<'EOS'
 #!/usr/bin/env bash
 { echo "PWD=$PWD"; printf 'ARG=%s\n' "$@"; } >"$(dirname "$0")/claude.args"
+{ echo "EVAL=${DISPATCHER_GATE_EVAL:-unset} EVAL_DASH=${DISPATCHER_GATE_EVAL_DASH:-unset}"
+  echo "AUTO_BG=${CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS:-unset} NO_TASK_BG=${CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND:-unset}"; } >"$(dirname "$0")/claude.env"
 EOS
 chmod +x "$WORK/fake-claude"
 la() { grep -c "^ARG=$1\$" "$WORK/claude.args" || true; }
@@ -362,6 +412,13 @@ assert_contains "launch: DISPATCHER_MODEL overrides the model" "$ARGS" "ARG=--mo
 ARG=sonnet"
 assert_contains "launch: extra arguments are passed through" "$ARGS" "ARG=--resume
 ARG=abc"
+CLAUDE_BIN="$WORK/fake-claude" DISPATCHER_GATE_EVAL=1 DISPATCHER_GATE_EVAL_DASH=/tmp/x DISPATCHER_NAME=dispatcher-eval "$LAUNCH" >/dev/null 2>&1
+assert_eq "launch: eval mode never comes in from the caller's environment" "EVAL=unset EVAL_DASH=unset" "$(sed -n 1p "$WORK/claude.env")"
+assert_eq "launch: MCP auto-backgrounding is off, so a 120 s listen stays in the foreground" "AUTO_BG=0 NO_TASK_BG=1" "$(sed -n 2p "$WORK/claude.env")"
+assert_contains "launch: DISPATCHER_NAME renames the session (eval.sh)" "$(cat "$WORK/claude.args")" "ARG=--name
+ARG=dispatcher-eval"
+CLAUDE_BIN="$WORK/fake-claude" CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=900000 "$LAUNCH" >/dev/null 2>&1
+assert_eq "launch: ...an auto-background limit the caller set is kept" "AUTO_BG=900000 NO_TASK_BG=1" "$(sed -n 2p "$WORK/claude.env")"
 assert_eq "launch: no flag that widens the tool set is ever passed" "0" "$(printf '%s\n' "$ARGS" | grep -c -e '--allowedTools' -e '--dangerously' -e '--add-dir' -e '--plugin-dir' || true)"
 # the launcher refuses to start a session whose gate is missing or does not deny
 cp "$DD/.claude/settings.json" "$WORK/settings.good"
@@ -384,6 +441,52 @@ cp "$WORK/settings.good" "$DD/.claude/settings.json"
 n=$(wc -l <"$AGENT_HOME/events.jsonl")
 CLAUDE_BIN="$WORK/fake-claude" "$LAUNCH" >/dev/null 2>&1
 assert_eq "launch: the start-up canary does not write a deny event" "$n" "$(wc -l <"$AGENT_HOME/events.jsonl")"
+# ---------------- eval.sh, offline: a fake claude plays one turn through the eval copy's real hook ----------------
+EV="$DISP/eval.sh"
+cat >"$WORK/eval-fake" <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+prompt=${!#}
+HOOK=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' .claude/settings.json)
+emit() { jq -nc "$@"; }
+call() { # name input: the hook decides; an allowed Bash runs the command the hook gave back
+  local out
+  emit --arg n "$1" --argjson i "$2" '{type:"assistant",message:{content:[{type:"tool_use",name:$n,input:$i}]}}'
+  out=$(jq -nc --arg n "$1" --argjson i "$2" '{hook_event_name:"PreToolUse",tool_name:$n,tool_input:$i}' | "$HOOK")
+  if [ "$1" = Bash ] && [ "$(printf '%s' "${out:-null}" | jq -r '.hookSpecificOutput.permissionDecision // ""')" = allow ]; then
+    bash -c "$(jq -r '.hookSpecificOutput.updatedInput.command' <<<"$out")" >>"$PWD/fake-ran.txt"
+  fi
+}
+emit '{type:"system",subtype:"init",model:"fake-model"}'
+call Bash '{"command":"~/.claude/kaching/bin/dash.sh --route"}'
+case "$prompt" in
+  "Tell miso"*) call SendMessage "$(jq -nc --arg t "${FAKE_TO:-miso-Sessions}" '{to:$t,message:"run the tests again"}')"; r="Told miso: run the tests again." ;;
+  *) r="Which session?" ;;
+esac
+emit --arg r "$r" '{type:"result",result:$r,duration_ms:5}'
+EOS
+chmod +x "$WORK/eval-fake"
+EO="$WORK/eval-out"
+out=$(DISPATCHER_EVAL_OUT="$EO" CLAUDE_BIN="$WORK/eval-fake" "$EV" --model fake --case 3 2>&1); rc=$?
+assert_eq "eval.sh: a right relay passes (exit 0)" "0" "$rc"
+assert_contains "eval.sh: prints the summary table" "$out" "| 3 | Tell miso to run the tests again | PASS |"
+REP=$(ls "$EO"/fake-*.md 2>/dev/null | head -1)
+assert_file "eval.sh: writes the report as <model>-<time>.md" "$REP"
+assert_contains "eval.sh: the report lists the tool calls" "$(cat "$REP")" 'SendMessage {"to":"miso-Sessions"'
+assert_contains "eval.sh: ...the SendMessage the gate recorded instead of sending" "$(cat "$REP")" 'sendmessage: {"to":"miso-Sessions","message":"run the tests again"}'
+assert_contains "eval.sh: ...the model the session reported" "$(cat "$REP")" "fake-model"
+assert_contains "eval.sh: the eval copy's dash.sh is the fixture's route table" "$(cat "$(find "$EO" -name fake-ran.txt | head -1)")" "miso-Sessions"
+assert_contains "eval.sh: ...and the stub recorded the call" "$(cat "$(find "$EO" -name dash-calls.log | head -1)")" "--route"
+assert_eq "eval.sh: the eval copy has no MCP server (no microphone)" '{}' "$(jq -c '.mcpServers' "$(find "$EO" -path '*dispatcher-home/mcp.json' | head -1)")"
+rm -rf "$EO"
+out=$(DISPATCHER_EVAL_OUT="$EO" CLAUDE_BIN="$WORK/eval-fake" FAKE_TO=PicoNew "$EV" --model fake --case 3 2>&1); rc=$?
+assert_eq "eval.sh: a relay to the wrong session fails (exit 1)" "1" "$rc"
+assert_contains "eval.sh: ...naming the check" "$(cat "$EO"/fake-*.md)" "FAIL: SendMessage to miso's message_to"
+out=$(DISPATCHER_EVAL_OUT="$EO" CLAUDE_BIN="$WORK/eval-fake" "$EV" --model fake --case 4 2>&1); rc=$?
+assert_eq "eval.sh: an unnamed instruction that only asks fails case 4 (exit 1)" "1" "$rc"
+out=$("$EV" --case 3 2>&1); assert_eq "eval.sh: --model is required (usage, 64)" "64" "$?"
+out=$("$EV" --model haiku --case 7 2>&1); assert_eq "eval.sh: an unknown case is a usage error" "64" "$?"
+
 rm -rf "$WORK/not-installed"
 out=$(AGENT_HOME="$WORK/not-installed" CLAUDE_BIN="$WORK/fake-claude" "$LAUNCH" 2>&1); rc=$?
 assert_eq "launch: not installed exits 1" "1" "$rc"
@@ -403,6 +506,19 @@ assert_contains "4.1: the one write is relay-log.sh" "$pb" "relay-log.sh"
 assert_not_contains "4.1: no longer claims a file edit of its own" "$pb" "That file edit is the only write you do"
 assert_not_contains "4.1: no longer offers to write into NEXT.md (it cannot)" "$pb" "put the instruction in X's NEXT.md"
 assert_contains "4.1: a denial is reported, not worked around" "$pb" "do not try another way"
+# dispatcher v2: always listening, routing from dash.sh --route, no --inbox for one session
+assert_contains "v2: routes from dash.sh --route" "$pb" "dash.sh --route"
+assert_contains "v2: the route table's columns are spelled out" "$pb" "name  message_to  status  state  state_dir  notes  focus  branch"
+assert_contains "v2: SendMessage goes to message_to exactly" "$pb" "SendMessage \`to\` is that row's message_to, exactly"
+assert_contains "v2: an unnamed instruction goes to the focused tab" "$pb" "focus = focused"
+assert_contains "v2: never --inbox for one session" "$pb" "Never run \`--inbox\` for a question about one session"
+assert_contains "v2: notes = no is said, not guessed" "$pb" "notes = no"
+assert_contains "v2: wakes on the shortcut" "$pb" "[shortcut] listen"
+assert_contains "v2: every turn ends with a long listen" "$pb" "listen_duration_max: 120"
+assert_contains "v2: an empty listen is answered by a silent listen" "$pb" "skip_tts: true"
+assert_contains "v2: stops after 5 empty listens" "$pb" "After 5 empty listens"
+assert_contains "v2: the tell-me-to mishear is asked about" "$pb" "Tell me to"
+assert_not_contains "v2: no more guessed STATE.md paths" "$pb" "repo sessions use"
 # ---------------- 4.3: the spoken acceptance script, and the owner-only steps ----------------
 AC="$KIT/docs/dispatcher-acceptance.md"
 assert_file "4.3: docs/dispatcher-acceptance.md exists" "$AC"

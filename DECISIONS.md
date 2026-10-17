@@ -2,13 +2,17 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
-## D40 (2026-10-17): kaching splits waiting agents into INPUT and WAITING, and shows what each one asks
+## D41 (2026-10-17): kaching splits waiting agents into INPUT and WAITING, and shows what each one asks
 
 **Decision (user):** waiting, working and idle are sorted right, but inside waiting the owner can't tell who needs an answer from who just finished. The queue now has four sections: INPUT (asked you something, or blocked), WAITING (done), WORKING, IDLE. Each INPUT agent shows what it asks on a line under its name.
 
 **Why:** a turn counted as "needs input" only when its last line ended in "?". Agents that asked in an earlier line, or asked without a question mark ("tell me and I'll check", "I left the live check to you", "let me know if you want X"), showed as done and sat among the finished reports.
 
 **Built:** `bin/ask-check.sh` reads the last 6 lines of the turn, leaving out code blocks and headings. A real question there (not a "?" inside code or a link), or a request for the owner to do or decide something, makes the turn input. The matching sentence is the ask. `stop-check.sh` uses it for the state, the notification text and the new meta `ask=`. A heuristic, so some misses remain; a Haiku pass was left out because it would use the learner's daily token cap on every stop. INPUT also holds agents whose screen shows a menu right now (agent.terminal's `Asking` flag: a permission prompt, an AskUserQuestion, a plan approval), even while Claude Code calls them busy. The two complement each other: the screen catches menus, ask-check catches questions written as text. Group() is unchanged; INPUT is a display and sort split of the waiting group.
+
+## D40 (2026-10-17): Dispatcher v2: always listening, a voice shortcut, one routing list
+
+**Decision (user):** after the first spoken run of 4.3 failed on setup (the dispatcher could not match folder names to message names, guessed STATE.md paths, used `--inbox` for a one-session question, and ended its turn after each answer), the owner asked for: (1) an always-listening dispatcher that is woken by a shortcut in KachingBar, Right Control + Left Option, and hands what was said to the session named or to the open one; (2) the joined session list in Kaching; (3) clear rules; (4) a Haiku vs Sonnet comparison. Built as: `dash.sh --route` (one TSV line per live session: name, message_to, status, state, state_dir, notes, focus, branch; the gate allows it alone). VoiceShortcut.swift: a tap of both keys with no other key in between, so D39's Ctrl+Option+N/T/K never trigger it (Hotkeys.swift cancels the chord). It records the front Terminal tab in `~/.agent/dispatcher/focus`, then starts the dispatcher, types `[shortcut] listen` into it, or only cues when it is busy. It needs Accessibility, which must be re-granted after each rebuild (ad-hoc signature). dispatcher/AGENTS.md: numbered rules; every turn ends with a listen; silent re-listens; stops after 5 empty listens (about 10 min) or "stop"; an unnamed instruction goes to the focused tab. launch.sh turns off MCP auto-backgrounding (the first run lost a 120 s listen to it). dispatcher/eval.sh runs offline cases against fixtures on either model (both 6/6 on 2026-10-17: Haiku 4.6 to 9.1 s per turn, Sonnet 5.0 to 7.4 s). The spoken run on both models is still open (MANUAL-STEPS 4.3).
 
 ## D39 (2026-10-17): Global hotkeys from the menu bar dot instead of Raycast
 
