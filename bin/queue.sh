@@ -49,9 +49,10 @@ TILE=1
 case "$(config_get queue_tile on | tr '[:upper:]' '[:lower:]')" in off|0|no|false) TILE=0 ;; esac
 
 QDIR="$AGENT_HOME/queue"
-WAITING="$QDIR/waiting"   # one file per waiting tab: <tty>, holding "<epoch> <name>"
+WAITING="$QDIR/waiting"   # one file per waiting tab: <tty>, holding "epoch session_id kind name" (name may hold spaces)
 PARKED="$QDIR/parked"     # one file per moved window: <window id>, holding its old frame and when: "x y w h epoch"
-mkdir -p "$WAITING" "$PARKED"
+TABS="$QDIR/tabs"         # one file per Terminal session: <session id>, holding "tty window_id tab_index name"
+mkdir -p "$WAITING" "$PARKED" "$TABS"
 
 term() {
   if [ -n "${QUEUE_TERM:-}" ]; then $QUEUE_TERM "$@"; else osascript -l JavaScript "$SELF_DIR/queue-term.js" "$@"; fi
@@ -138,18 +139,10 @@ main_display() { # "x y w h fx fy" of the main display: visible frame, then its 
   printf '%s\n' "$s" | awk 'NF >= 4 { print $1, $2, $3, $4, ($6 == "" ? $1 : $6), ($7 == "" ? $2 : $7); exit }'
 }
 
-do_park() { # tty name
-  local tty=$1 win id x y w h mx my mw mh fx fy n nx ny frame px py pw ph
-  [ -f "$WAITING/$tty" ] || printf '%s %s\n' "$(date +%s)" "${2:-?}" >"$WAITING/$tty"
-  lock || return 0
-  load_windows
-  win=$(window_of "$tty"); [ -n "$win" ] || return 0
-  read -r id x y w h _ <<<"$win" || true
-  [ ! -f "$PARKED/$id" ] || return 0
+park_target() { # window line -> "x y w h" on the main display: the park frame, or its size cascaded
+  local x y w h mx my mw mh fx fy n nx ny frame px py pw ph
+  read -r _ x y w h _ <<<"$1" || true
   read -r mx my mw mh fx fy <<<"$(main_display)" || true
-  [ -n "${mh:-}" ] || return 0
-  # already on the main display (its centre is there): one of yours, leave it
-  if [ $((x + w / 2)) -ge "$mx" ] && [ $((x + w / 2)) -lt $((mx + mw)) ] && [ $((y + h / 2)) -ge "$my" ] && [ $((y + h / 2)) -lt $((my + mh)) ]; then return 0; fi
   # the park frame: x,y from the display's own top-left corner (what the screenshot crosshair shows), w,h;
   # every parked window gets the same frame, a stack that `next` goes through. off: keep the window's size
   # and cascade it 32 px per window already parked.
@@ -167,46 +160,130 @@ do_park() { # tty name
   [ "$h" -le "$mh" ] || h=$mh
   [ $((nx + w)) -le $((mx + mw)) ] || nx=$((mx + mw - w))
   [ $((ny + h)) -le $((my + mh)) ] || ny=$((my + mh - h))
-  printf '%s %s\n' "$(printf '%s' "$win" | awk '{ print $2, $3, $4, $5 }')" "$(date +%s)" >"$PARKED/$id"
-  relocate "$id" "$nx" "$ny" "$w" "$h"
-  flush >/dev/null
-  ev queue_park "$(jq -nc --arg t "$tty" '{tty:$t}')"
+  printf '%s %s %s %s\n' "$nx" "$ny" "$w" "$h"
 }
 
-do_back() { # tty move(1|0)
-  local tty=$1 win id
-  rm -f "$WAITING/$tty"
-  lock || return 0
-  load_windows
-  win=$(window_of "$tty"); [ -n "$win" ] || return 0
-  id=${win%% *}
-  [ -f "$PARKED/$id" ] || return 0
-  ! others_waiting "$win" "$tty" || return 0
-  local old
-  old=$(cut -d' ' -f1-4 "$PARKED/$id")
-  rm -f "$PARKED/$id"
-  # shellcheck disable=SC2086
-  if [ "$2" = 1 ]; then relocate "$id" $old; flush >/dev/null; fi
-  ev queue_back "$(jq -nc --arg t "$tty" --arg m "$2" '{tty:$t,moved:($m == "1")}')"
+yours() { # window line -> true when it sits on the main display and is not parked: your own, never moved
+  local id x y w h mx my mw mh
+  read -r id x y w h _ <<<"$1" || true
+  [ ! -f "$PARKED/$id" ] || return 1
+  read -r mx my mw mh _ <<<"$(main_display)" || true
+  [ -n "${mh:-}" ] || return 1
+  [ $((x + w / 2)) -ge "$mx" ] && [ $((x + w / 2)) -lt $((mx + mw)) ] && [ $((y + h / 2)) -ge "$my" ] && [ $((y + h / 2)) -lt $((my + mh)) ]
 }
 
-# Waiting tabs whose window is parked, oldest first: "tty id name". Drops tabs whose window is gone and
-# parked records whose window is gone.
-pending() {
-  local f tty win id
-  load_windows
+prune() { # drop waiting tabs and parked windows that no longer exist
+  local f
   for f in "$PARKED"/*; do
     [ -f "$f" ] || continue
     printf '%s\n' "$WINDOWS" | awk -v i="${f##*/}" '$1 == i { f = 1 } END { exit !f }' || rm -f "$f"
   done
   for f in "$WAITING"/*; do
     [ -f "$f" ] || continue
+    [ -n "$(window_of "${f##*/}")" ] || rm -f "$f"
+  done
+}
+
+waiting_windows() { # ids of the windows with a waiting tab, oldest wait first, each once; never one of yours
+  local g win seen=" "
+  for g in "$WAITING"/*; do [ -f "$g" ] || continue; printf '%s %s\n' "$(cut -d' ' -f1 "$g")" "${g##*/}"; done | sort -n |
+  while read -r _ tty; do
+    win=$(window_of "$tty")
+    [ -n "$win" ] || continue
+    case "$seen" in *" ${win%% *} "*) continue ;; esac
+    ! yours "$win" || continue
+    seen="$seen${win%% *} "
+    printf '%s\n' "${win%% *}"
+  done
+}
+
+# kaching, the agent terminal, is open: $AGENT_HOME/terminal/open holds pid= (alive) and tty= (the agent selected)
+open_get() { sed -n "s/^$1=//p" "$AGENT_HOME/terminal/open" 2>/dev/null | head -n 1; }
+single_mode() {
+  local pid
+  pid=$(open_get pid)
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null
+}
+
+# reconcile: move windows so the main display holds what it should now, then flush (the grid comes along).
+#   normal: every window with a waiting tab.
+#   single (kaching open): one window: the agent kaching has selected (SHOW_TTY, else tty= in its open file)
+#           when that tab exists, else the oldest waiting one. The others wait in their cells.
+# A window that is wanted and not parked is parked; a parked window that is not wanted goes back to its cell.
+SHOW_TTY=""
+reconcile() {
+  local want="" sel win f id target
+  [ -n "$(main_display)" ] || return 0
+  prune
+  if single_mode; then
+    sel=${SHOW_TTY:-$(open_get tty)}
+    if [ -n "$sel" ]; then win=$(window_of "$sel"); if [ -n "$win" ] && ! yours "$win"; then want=${win%% *}; fi; fi
+    [ -n "$want" ] || want=$(waiting_windows | head -n 1)
+  else
+    want=$(waiting_windows)
+    if [ -n "$SHOW_TTY" ]; then win=$(window_of "$SHOW_TTY"); if [ -n "$win" ] && ! yours "$win"; then want="$want ${win%% *}"; fi; fi
+  fi
+  want=" $(printf '%s' "$want" | tr '\n' ' ') "
+  for f in "$PARKED"/*; do
+    [ -f "$f" ] || continue
+    id=${f##*/}
+    case "$want" in *" $id "*) continue ;; esac
+    # shellcheck disable=SC2046
+    relocate "$id" $(cut -d' ' -f1-4 "$f")
+    rm -f "$f"
+    ev queue_back "$(jq -nc --arg w "$id" '{window:$w}')"
+  done
+  for id in $want; do
+    [ ! -f "$PARKED/$id" ] || continue
+    win=$(printf '%s\n' "$WINDOWS" | awk -v i="$id" '$1 == i { print; exit }')
+    [ -n "$win" ] || continue
+    target=$(park_target "$win")   # before the record: the cascade counts the windows already parked
+    printf '%s %s\n' "$(printf '%s' "$win" | awk '{ print $2, $3, $4, $5 }')" "$(date +%s)" >"$PARKED/$id"
+    # shellcheck disable=SC2086
+    relocate "$id" $target
+    ev queue_park "$(jq -nc --arg w "$id" '{window:$w}')"
+  done
+  flush >/dev/null
+}
+
+# register TTY: tabs/<session id> = "tty window_id tab_index name" for every Terminal session (kaching reads it).
+register() {
+  [ -n "${QUEUE_SID:-}" ] || return 0
+  local win idx tmp
+  win=$(window_of "$1"); [ -n "$win" ] || return 0
+  idx=$(printf '%s' "$win" | awk -v t="$1" '{ n = split($6, a, ","); for (i = 1; i <= n; i++) if (a[i] == t) print i }')
+  mkdir -p "$TABS"
+  tmp="$TABS/.$QUEUE_SID.$$"
+  printf '%s %s %s %s\n' "$1" "${win%% *}" "${idx:-1}" "${QUEUE_NAME:-?}" >"$tmp" && mv -f "$tmp" "$TABS/$QUEUE_SID"
+}
+
+mark_waiting() { # tty: waiting/<tty> = "epoch session_id kind name"; a tab already waiting keeps its epoch
+  local since
+  since=$(cut -d' ' -f1 "$WAITING/$1" 2>/dev/null || true)
+  case "$since" in ''|*[!0-9]*) since=$(date +%s) ;; esac
+  printf '%s %s %s %s\n' "$since" "${QUEUE_SID:--}" "${QUEUE_KIND:-done}" "${QUEUE_NAME:-?}" >"$WAITING/$1"
+}
+
+tty_of_sid() { # session id -> its tty (tabs map, else a waiting record that names it)
+  local f
+  case "$1" in ''|.*|*[!A-Za-z0-9._-]*) return 0 ;; esac
+  if [ -f "$TABS/$1" ]; then cut -d' ' -f1 "$TABS/$1"; return 0; fi
+  for f in "$WAITING"/*; do [ -f "$f" ] || continue; [ "$(cut -d' ' -f2 "$f")" != "$1" ] || { printf '%s' "${f##*/}"; return 0; }; done
+}
+
+# Waiting tabs whose window is parked, oldest first: "tty id name".
+pending() {
+  local f tty win id
+  load_windows
+  prune
+  for f in "$WAITING"/*; do
+    [ -f "$f" ] || continue
     tty=${f##*/}
     win=$(window_of "$tty")
-    if [ -z "$win" ]; then rm -f "$f"; continue; fi
     id=${win%% *}
-    [ -f "$PARKED/$id" ] || continue
-    printf '%s %s %s\n' "$(cut -d' ' -f1 "$f")" "$tty" "$id $(cut -d' ' -f2- "$f")"
+    [ -n "$id" ] && [ -f "$PARKED/$id" ] || continue
+    printf '%s %s %s %s\n' "$(cut -d' ' -f1 "$f")" "$tty" "$id" "$(cut -d' ' -f4- "$f")"
   done | sort -n | cut -d' ' -f2-
 }
 
@@ -215,15 +292,46 @@ case "$CMD" in
     TTY=$(session_tty)
     [ -n "$TTY" ] || exit 0
     # the session's name for the HUD (the callers pass theirs; stdin is never read)
-    [ -n "$NAME_ARG" ] || NAME_ARG=$(basename "$PWD")
+    [ -n "$NAME_ARG" ] || NAME_ARG=${QUEUE_NAME:-$(basename "$PWD")}
+    QUEUE_NAME=$NAME_ARG
+    case "${QUEUE_SID:-}" in .*|*[!A-Za-z0-9._-]*) QUEUE_SID="" ;; esac
     case "$CMD" in
-      park)   job() { do_park "$TTY" "$NAME_ARG"; } ;;
-      retile) [ "$TILE" = 1 ] || exit 0; job() { lock || return 0; load_windows; flush >/dev/null; } ;;
-      back)   job() { do_back "$TTY" 1; } ;;
-      forget) job() { do_back "$TTY" 0; } ;;
+      park)   job() { mark_waiting "$TTY"; lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
+      back)   job() { rm -f "$WAITING/$TTY"; lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
+      retile) job() { lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
+      forget) job() { # the session ended: its tab leaves the queue; a parked window with nothing else waiting
+                      # stays where it is (it is yours now)
+                local win
+                rm -f "$WAITING/$TTY"; [ -z "${QUEUE_SID:-}" ] || rm -f "$TABS/$QUEUE_SID"
+                lock || return 0; load_windows
+                win=$(window_of "$TTY")
+                if [ -n "$win" ] && ! others_waiting "$win" "$TTY"; then rm -f "$PARKED/${win%% *}"; fi
+                reconcile; } ;;
     esac
     if [ "${QUEUE_SYNC:-}" = 1 ]; then job; else (job) </dev/null >/dev/null 2>&1 & fi
     exit 0 ;;
+  show|dismiss)
+    # show [SESSION_ID]: put that agent's window on the main display now (kaching calls it when its selection
+    #   changes; with no id it just re-reads the selection). dismiss SESSION_ID: take the agent out of the queue
+    #   without an answer; its window goes back and, with kaching open, the next one comes.
+    SID_ARG=$NAME_ARG
+    tty=""
+    if [ -n "$SID_ARG" ]; then
+      tty=$(tty_of_sid "$SID_ARG")
+      if [ -z "$tty" ]; then echo "Unknown session: $SID_ARG"; exit 0; fi
+    elif [ "$CMD" = dismiss ]; then echo "usage: queue.sh dismiss SESSION_ID" >&2; exit 2; fi
+    lock || { echo "Queue busy, try again"; exit 0; }
+    load_windows
+    if [ "$CMD" = dismiss ]; then
+      name=$(cut -d' ' -f4- "$WAITING/$tty" 2>/dev/null || true)
+      rm -f "$WAITING/$tty"
+      reconcile
+      echo "Dismissed ${name:-$SID_ARG}"
+    else
+      SHOW_TTY=$tty
+      reconcile
+      echo "Shown"
+    fi ;;
   next)
     lock || { echo "Queue busy, try again"; exit 0; }
     list=$(pending)
@@ -243,7 +351,7 @@ case "$CMD" in
     if [ "$n" = 1 ]; then echo "Tiled: 1 window moved"; else echo "Tiled: $n windows moved"; fi ;;
   status)
     list=$(pending)
-    if [ -z "$list" ]; then echo "nothing waiting"; else printf '%s\n' "$list" | awk '{ printf "%s  %s  (window %s)\n", $3, $1, $2 }'; fi ;;
-  *) echo "usage: queue.sh park|back|forget [NAME] | retile | tile | next | status" >&2; exit 2 ;;
+    if [ -z "$list" ]; then echo "nothing waiting"; else printf '%s\n' "$list" | awk '{ n = $3; for (i = 4; i <= NF; i++) n = n " " $i; printf "%s  %s  (window %s)\n", n, $1, $2 }'; fi ;;
+  *) echo "usage: queue.sh park|back|forget [NAME] | retile | tile | show [SESSION_ID] | dismiss SESSION_ID | next | status" >&2; exit 2 ;;
 esac
 exit 0
