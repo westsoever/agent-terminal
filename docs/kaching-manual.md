@@ -38,6 +38,7 @@ The right hand does the most frequent work: `j` goes up, `l` goes down, `k` open
 | `o`, then `a` to `i` | Open the file with that letter. |
 | `g` | Show the Terminal window of the selected agent. |
 | `x` | Remove the selected agent from the waiting list. You do not send an answer. |
+| `Enter`, `←`, `→` | When the agent asks a question: confirm, or go to the previous or next question. |
 | `W` | Go to the wall. |
 | `R` | Read all data again now. |
 | `?` | Show the help. |
@@ -65,7 +66,7 @@ You can change these keys and messages. Refer to section 7.
 | `Option+Enter`, `Ctrl+J`, or `\` then `Enter` | Start a new line. |
 | `Option` + a key | Write the character that your keyboard layout puts on this key, for example `Option+L` for `@`, `Option+5` for `[`, `Option+8` for `{`, `Option+7` for `|`. |
 | `@`, then letters | Show the files of the agent folder that agree with the letters. |
-| `/` at the start, then letters | Show the commands and skills that agree with the letters. |
+| `/` at the start, then letters | Show the commands and skills that agree with the letters, with their descriptions: Claude Code commands, your commands and skills, the commands and skills of the agent folder and its parent folders, and the enabled plugins. |
 | `Tab` or `Enter` | Put the selected suggestion into the message. |
 | `↑`, `↓` | Select a suggestion. When there are no suggestions, move between lines. |
 | `Ctrl+V` | Paste an image from the clipboard. Kaching saves it as a file and writes its path. The agent opens the file. If the clipboard has no image, Kaching pastes the text. |
@@ -166,7 +167,7 @@ The agent list has three groups:
 
 | Group | Agents in the group |
 |---|---|
-| `WAITING` | The agent stopped and waits for you: it has a question (`input`), it cannot continue (`blocked`), it finished (`done`), or it is ready for release (`ready`). The agent that waited the longest time is at the top. |
+| `WAITING` | The agent stopped and waits for you: its screen shows a question or an approval (`asks`), it has a question (`input`), it cannot continue (`blocked`), it finished (`done`), or it is ready for release (`ready`). The agent that waited the longest time is at the top. |
 | `WORKING` | The agent does work now. |
 | `IDLE` | The agent does not do work and does not wait for an answer. |
 
@@ -231,14 +232,28 @@ Use this procedure when the agent panel shows numbered answers.
 
 When the agent shows a menu, Kaching pushes only the number key in the agent window. When the agent writes a numbered list in its message, Kaching writes the number and pushes `Enter`.
 
-### 6.3 Send a fixed message
+### 6.3 Answer a question with more than one part
+
+Use this procedure when the agent panel shows `THE AGENT ASKS`. Kaching shows the question as the agent shows it on its own screen. This includes questions with more parts, plan approvals and permission prompts.
+
+1. Select the agent. Its state is `asks`.
+2. Read the question and its numbered answers.
+3. Push the number of your answer. The agent goes to the next part, and Kaching shows it.
+4. Do step 3 again for each part.
+5. On the last screen (`Review your answers`), push `1` to send all answers.
+
+To write your own answer, push `k`, write the answer, and push `Enter`. Kaching selects `Type something.` for you and sends your text.
+
+To go back to a part, push `←`. To confirm a selection, push `Enter`.
+
+### 6.4 Send a fixed message
 
 1. Select the agent.
 2. Push the key of the message, for example `f` for "fix it".
 3. For a message on the space bar, push `Space`, then push the second key in less than half a second.
 4. Make sure that the command line shows `✓ <name> is on it`.
 
-### 6.4 Write a message
+### 6.5 Write a message
 
 1. Select the agent.
 2. Push `k`. The message box opens below the text of the agent.
@@ -248,7 +263,7 @@ When the agent shows a menu, Kaching pushes only the number key in the agent win
 
 To stop before step 4, push `Esc`. Kaching keeps your text as a draft. When you push `k` again for this agent, the draft comes back.
 
-### 6.5 Refer to a file or a command in a message
+### 6.6 Refer to a file or a command in a message
 
 1. In the message box, write `@` and some letters of the file name.
 2. A list of files in the folder of the agent shows above the box.
@@ -257,7 +272,7 @@ To stop before step 4, push `Esc`. Kaching keeps your text as a draft. When you 
 
 For a command, write `/` at the start of the message, then some letters. Select the command as in steps 3 and 4.
 
-### 6.6 Send an image
+### 6.7 Send an image
 
 1. Copy the image, for example with `Cmd+Ctrl+Shift+4` for a part of the screen.
 2. Push `k` to open the message box.
@@ -265,7 +280,7 @@ For a command, write `/` at the start of the message, then some letters. Select 
 4. Write your question about the image.
 5. Push `Enter`. The agent opens the image file.
 
-### 6.7 Open a file that an agent wrote about
+### 6.8 Open a file that an agent wrote about
 
 1. Select the agent.
 2. Find the file in `FILES IT MENTIONED`.
@@ -276,14 +291,14 @@ The file opens in its default application. A folder opens in Finder.
 
 To see the files of all agents, go to the files view (`/FL`). Select a file. Push `Enter`.
 
-### 6.8 Go to the Terminal window of an agent
+### 6.9 Go to the Terminal window of an agent
 
 1. Select the agent.
 2. Push `g`.
 3. The Terminal window of the agent comes to the front.
 4. To go back, push the Raycast hotkey of `Open Agent Terminal`.
 
-### 6.9 Remove an agent from the waiting list
+### 6.10 Remove an agent from the waiting list
 
 Use this procedure when an agent waits but you do not want to answer now.
 
@@ -293,7 +308,7 @@ Use this procedure when an agent waits but you do not want to answer now.
 
 The agent window goes back to its position on the second display. The agent does not get a message.
 
-### 6.10 Look at all agents together
+### 6.11 Look at all agents together
 
 1. Push `W`. The wall shows each agent as a tile.
 2. Push the number of a tile to select it.
@@ -303,14 +318,14 @@ The agent window goes back to its position on the second display. The agent does
 
 The tiles change size with the window. A wide window shows more tiles in each line.
 
-### 6.11 Look at the repos
+### 6.12 Look at the repos
 
 1. Push `/`.
 2. Write `RP`.
 3. Push `Enter`.
 4. Read the repos that need attention.
 
-### 6.12 Do a proposal of the learner
+### 6.13 Do a proposal of the learner
 
 1. Push `/`, write `PR`, push `Enter`.
 2. Push `l` (down) or `j` (up) to select a proposal.
@@ -322,7 +337,7 @@ The tiles change size with the window. A wide window shows more tiles in each li
 
 Only a person can approve a proposal. An agent cannot approve it.
 
-### 6.13 Do work on Paperclip issues
+### 6.14 Do work on Paperclip issues
 
 1. Push `/`, write `PC`, push `Enter`.
 2. Push `l` (down) or `j` (up) to select an issue. The lines below the issue show why it waits.

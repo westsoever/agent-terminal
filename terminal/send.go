@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -37,6 +38,10 @@ func sendKeys(tty string, keys ...string) string {
 	return osa(append([]string{"keys", tty}, keys...)...)
 }
 func raiseTab(tty string) string { return osa("raise", tty) }
+func screenOf(tty string) string { return osa("screen", tty) }
+func answerTyped(tty string, n int, text string) string {
+	return osa("answer", tty, strconv.Itoa(n), text)
+}
 
 // terminalTTYs is the set of ttys that are Terminal.app tabs.
 func terminalTTYs() map[string]bool {

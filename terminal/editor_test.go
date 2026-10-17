@@ -133,3 +133,23 @@ func TestTypingNotInCommandLine(t *testing.T) {
 		}
 	}
 }
+
+func TestSlashProjectCommands(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := filepath.Join(home, "code", "repo")
+	sub := filepath.Join(repo, "pkg")
+	os.MkdirAll(filepath.Join(repo, ".claude", "commands"), 0o755)
+	os.MkdirAll(filepath.Join(sub, ".claude", "skills", "deploy"), 0o755)
+	os.MkdirAll(filepath.Join(home, ".claude", "commands"), 0o755)
+	os.WriteFile(filepath.Join(repo, ".claude", "commands", "ship.md"), []byte("---\ndescription: Ship the repo\n---\nbody"), 0o644)
+	os.WriteFile(filepath.Join(sub, ".claude", "skills", "deploy", "SKILL.md"), []byte("---\nname: deploy\ndescription: Deploy this package\n---\n"), 0o644)
+	os.WriteFile(filepath.Join(home, ".claude", "commands", "mine.md"), []byte("# My command\nDo my thing"), 0o644)
+	got := map[string]string{}
+	for _, c := range slashCommands(sub) {
+		got[c.name] = c.desc
+	}
+	if got["ship"] != "Ship the repo" || got["deploy"] != "Deploy this package" || got["mine"] != "Do my thing" {
+		t.Fatalf("got %v", got)
+	}
+}
