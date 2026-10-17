@@ -2,6 +2,10 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D32 (2026-10-17): A fixed frame for waiting windows on the main display (amends D31)
+
+**Decision (user):** a window that comes to the main display takes one fixed frame: top-left 320,70 and bottom-right 780,860 on the owner's screen, so 460 x 790 (`queue_park_frame`, default 320,70,460,790). All waiting windows share it as a stack. Going back still restores the exact cell. Found while building it: Terminal sets a window's y from the top of the display the window is on, but reports it from the top of the main display, so `queue-term.js move` corrects for that. A second display also has its own menu bar that macOS does not take off its visible frame, so the helper takes it off.
+
 ## D31 (2026-10-17): The grid is a map of where each project lives (amends D30)
 
 **Decision (user):** moving never resizes a window, on either display, and the main display is never laid out. The grid on the second display is sized by all its agent windows, waiting ones included: a waiting window's cell stays empty while it is away, and it comes back to exactly that cell, so the layout is a visual guide to where each project is. When the count changes (a window opened or closed), each window takes the free cell nearest to where it was.

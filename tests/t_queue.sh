@@ -11,7 +11,7 @@ cat >"$FT/term" <<'EOS'
 #!/usr/bin/env bash
 d=$(dirname "$0"); printf '%s\n' "$*" >>"$d/calls"
 case "$1" in
-  screens) printf '0 30 1920 992 DELL_P2425H\n1920 -67 1920 1080 SA240Y\n' ;;
+  screens) printf '0 30 1920 992 DELL_P2425H 0 0\n1920 -67 1920 1080 SA240Y 1920 -67\n' ;;
   windows) awk 'NF == 6 { $7 = 1 } { print }' "$d/windows" ;;
   move) shift
         while [ $# -ge 5 ]; do
@@ -27,7 +27,8 @@ QD="$AGENT_HOME/queue"
 reset() { printf '%s\n' "$@" >"$FT/windows"; : >"$FT/calls"; rm -f "$QD"/waiting/* "$QD"/parked/* "$QD/last"; }
 win() { awk -v i="$1" '$1 == i { print $2, $3, $4, $5 }' "$FT/windows"; }
 mkdir -p "$QD/waiting" "$QD/parked"
-setcfg() { printf '%s\n' "$@" >"$AGENT_HOME/config"; }
+# the park frame is off (same size, cascaded) unless a test sets it: the last assignment wins
+setcfg() { printf '%s\n' queue_park_frame=off "$@" >"$AGENT_HOME/config"; }
 # the queue without tiling first; tiling (the default) is tested at the end
 setcfg queue_tile=off
 
@@ -52,9 +53,9 @@ reset "21 1920 -37 961 1043 ttys010,ttys011,ttys012"
 QUEUE_TTY=ttys011 "$Q" park w1
 QUEUE_TTY=ttys012 "$Q" park w2
 assert_eq "grouped window parked once" "1" "$(grep -c '^move' "$FT/calls")"
-assert_eq "a tall window is clamped to the display" "40 70 961 912" "$(win 21)"
+assert_eq "a tall window is clamped to the display" "40 30 961 992" "$(win 21)"
 QUEUE_TTY=ttys011 "$Q" back
-assert_eq "stays parked while another tab waits" "40 70 961 912" "$(win 21)"
+assert_eq "stays parked while another tab waits" "40 30 961 992" "$(win 21)"
 QUEUE_TTY=ttys012 "$Q" back
 assert_eq "goes back when no tab waits" "1920 -37 961 1043" "$(win 21)"
 
@@ -154,6 +155,26 @@ assert_eq "grow to 5: top right stays top right" "3200 -67 640 540" "$(win 152)"
 assert_eq "grow to 5: bottom left stays bottom left" "1920 473 960 540" "$(win 153)"
 assert_eq "grow to 5: bottom right stays bottom right" "2880 473 960 540" "$(win 154)"
 assert_eq "grow to 5: the new one takes the free cell" "2560 -67 640 540" "$(win 155)"
+
+# the park frame (default 320,70,460,790 from the main display's corner): every parked window gets it, a stack;
+# back restores each one's exact cell
+printf '%s\n' "" >"$AGENT_HOME/config"
+reset "161 1920 -67 960 1080 ttys150" "162 2880 -67 960 1080 ttys151"
+QUEUE_TTY=ttys150 "$Q" park a
+QUEUE_TTY=ttys151 "$Q" park b
+assert_eq "park frame: first window" "320 70 460 790" "$(win 161)"
+assert_eq "park frame: second window stacks on it" "320 70 460 790" "$(win 162)"
+QUEUE_TTY=ttys151 "$Q" back
+assert_eq "park frame: back to its exact cell" "2880 -67 960 1080" "$(win 162)"
+setcfg queue_tile=off queue_park_frame=100,0,3000,2000
+reset "171 2000 100 800 500 ttys160"
+QUEUE_TTY=ttys160 "$Q" park c
+assert_eq "park frame: kept inside the display, below the menu bar" "0 30 1920 992" "$(win 171)"
+setcfg queue_tile=off queue_park_frame=12,x,3,4
+reset "181 2000 100 800 500 ttys170"
+QUEUE_TTY=ttys170 "$Q" park d
+assert_eq "park frame: a bad value falls back to same size, cascaded" "40 70 800 500" "$(win 181)"
+setcfg ""
 
 # a window on a hidden desktop is not laid out
 reset "111 0 30 1920 992 ttys100" "112 2000 100 800 500 ttys101 0"

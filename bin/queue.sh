@@ -5,9 +5,9 @@
 # nothing there but your own windows means every agent is busy. `next` (bind it to a hotkey) brings the waiting
 # windows to the front one at a time, oldest first, with the waiting tab selected.
 #   park    a session waits (called by notify.sh for done, input, blocked, ready, idle): remember its tab;
-#           when its window sits on another display, save the window's frame and move it to the main display,
-#           same size (cascaded 32 px per window already there). A window on the main display is never moved
-#           (it is one of yours).
+#           when its window sits on another display, save the window's frame and move it to the main display
+#           into the park frame (queue_park_frame; all parked windows share it, a stack). A window on the main
+#           display is never moved (it is one of yours).
 #   back    the session was prompted (session-start.sh touch): forget its tab; when no other tab of a parked
 #           window still waits, move the window back to exactly the saved frame.
 #   forget  the session ended (session-start.sh end): forget its tab and, when nothing else waits there, the
@@ -21,7 +21,7 @@
 # there, parked ones included: a parked window keeps its cell (empty while it is away) and comes back to it, so
 # the grid only changes when a window is opened or closed. 1 fills the display, 2 side by side, 3 in three
 # columns, 4 as 2x2, more in ceil(sqrt(n)) columns (see queue-layout.pl). The main display is never laid out
-# and park/back never resize. Windows on a hidden desktop or minimised are left alone.
+# and back never resizes (it restores the exact cell). Windows on a hidden desktop or minimised are left alone.
 # Focus: moving or tiling never raises a window or takes focus (queue-term.js puts Terminal's front window
 # back if it changed); only `next` does, because you asked for it.
 # A tab is grouped by its window: workers opened as tabs of the orchestrator's window move together.
@@ -30,6 +30,8 @@
 # process to the first ancestor that has one; a run with no tty (the watcher, launchd, claude -p) does nothing.
 # park/back/forget find the tty at once, then do the window work in the background so a hook never waits on it.
 # Config ($AGENT_HOME/config): queue=off turns it off; queue_tile=off keeps the queue without tiling;
+# queue_park_frame=X,Y,W,H is where a parked window goes on the main display, X,Y from the display's top-left
+# corner (default 320,70,460,790; off = keep its size, cascaded);
 # queue_main_display=NAME picks the main display by (part of) its name, spaces as _ (default: the display with
 # the menu bar).
 # Env: QUEUE_TERM (the Terminal helper; default osascript -l JavaScript queue-term.js), QUEUE_TTY (skip the
@@ -126,33 +128,43 @@ flush() { # apply the relocations, then (tiling) the grid: moves for shown windo
   printf '%s\n' "$(( $(printf '%s' "$m" | wc -w) / 5 ))"
 }
 
-main_display() { # "x y w h" of the main display
+main_display() { # "x y w h fx fy" of the main display: visible frame, then its own top-left corner
   local want s
   want=$(config_get queue_main_display "")
   s=$(screens)
   if [ -n "$want" ]; then
-    printf '%s\n' "$s" | awk -v w="$want" 'index(tolower($5), tolower(w)) { print $1, $2, $3, $4; f = 1; exit } END { if (!f) exit 1 }' && return 0
+    printf '%s\n' "$s" | awk -v w="$want" 'index(tolower($5), tolower(w)) { print $1, $2, $3, $4, ($6 == "" ? $1 : $6), ($7 == "" ? $2 : $7); f = 1; exit } END { if (!f) exit 1 }' && return 0
   fi
-  printf '%s\n' "$s" | awk 'NF >= 4 { print $1, $2, $3, $4; exit }'
+  printf '%s\n' "$s" | awk 'NF >= 4 { print $1, $2, $3, $4, ($6 == "" ? $1 : $6), ($7 == "" ? $2 : $7); exit }'
 }
 
 do_park() { # tty name
-  local tty=$1 win id x y w h mx my mw mh n nx ny
+  local tty=$1 win id x y w h mx my mw mh fx fy n nx ny frame px py pw ph
   [ -f "$WAITING/$tty" ] || printf '%s %s\n' "$(date +%s)" "${2:-?}" >"$WAITING/$tty"
   lock || return 0
   load_windows
   win=$(window_of "$tty"); [ -n "$win" ] || return 0
   read -r id x y w h _ <<<"$win" || true
   [ ! -f "$PARKED/$id" ] || return 0
-  read -r mx my mw mh <<<"$(main_display)" || true
+  read -r mx my mw mh fx fy <<<"$(main_display)" || true
   [ -n "${mh:-}" ] || return 0
   # already on the main display (its centre is there): one of yours, leave it
   if [ $((x + w / 2)) -ge "$mx" ] && [ $((x + w / 2)) -lt $((mx + mw)) ] && [ $((y + h / 2)) -ge "$my" ] && [ $((y + h / 2)) -lt $((my + mh)) ]; then return 0; fi
-  # keep its size (at most the display less a margin) and cascade it 32 px per window already parked
-  n=$(find "$PARKED" -type f | wc -l | tr -d ' ')
-  [ "$w" -le $((mw - 80)) ] || w=$((mw - 80))
-  [ "$h" -le $((mh - 80)) ] || h=$((mh - 80))
-  nx=$((mx + 40 + (n % 8) * 32)); ny=$((my + 40 + (n % 8) * 32))
+  # the park frame: x,y from the display's own top-left corner (what the screenshot crosshair shows), w,h;
+  # every parked window gets the same frame, a stack that `next` goes through. off: keep the window's size
+  # and cascade it 32 px per window already parked.
+  frame=$(config_get queue_park_frame "320,70,460,790")
+  IFS=, read -r px py pw ph <<<"$frame" || true
+  if [[ "$frame" =~ ^[0-9]{1,5},[0-9]{1,5},[0-9]{1,5},[0-9]{1,5}$ ]] && [ $((10#$pw)) -gt 0 ] && [ $((10#$ph)) -gt 0 ]; then
+    nx=$(( ${fx:-$mx} + 10#$px )); ny=$(( ${fy:-$my} + 10#$py )); w=$((10#$pw)); h=$((10#$ph))
+    [ "$ny" -ge "$my" ] || ny=$my
+  else
+    n=$(find "$PARKED" -type f | wc -l | tr -d ' ')
+    nx=$((mx + 40 + (n % 8) * 32)); ny=$((my + 40 + (n % 8) * 32))
+  fi
+  # never larger than the display, never past its edges
+  [ "$w" -le "$mw" ] || w=$mw
+  [ "$h" -le "$mh" ] || h=$mh
   [ $((nx + w)) -le $((mx + mw)) ] || nx=$((mx + mw - w))
   [ $((ny + h)) -le $((my + mh)) ] || ny=$((my + mh - h))
   printf '%s %s\n' "$(printf '%s' "$win" | awk '{ print $2, $3, $4, $5 }')" "$(date +%s)" >"$PARKED/$id"
