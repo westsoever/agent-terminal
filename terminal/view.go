@@ -258,18 +258,14 @@ func (m model) queuePanel(w, h int) []string {
 	}
 	si := 0
 	for gi, g := range groups {
-		name := g.name
-		first := true
+		// every section keeps its header, also when empty: an empty INPUT shows at a glance that nothing needs the owner
+		if gi > 0 {
+			body = append(body, "")
+		}
+		body = append(body, row(in, s(" "+g.name, cDark)))
 		for i, a := range m.agents {
 			if familySection(m.agents, i) != gi {
 				continue
-			}
-			if first {
-				if len(body) > 0 {
-					body = append(body, "")
-				}
-				body = append(body, row(in, s(" "+name, cDark)))
-				first = false
 			}
 			if a.SID == m.selSID {
 				si = len(body)
@@ -279,9 +275,6 @@ func (m model) queuePanel(w, h int) []string {
 				body = append(body, row(in, s("   ↳ "+trunc(a.Ask, in-5), cText)))
 			}
 		}
-	}
-	if len(m.agents) == 0 {
-		body = append(body, row(in, s(" no live agents", cDark)))
 	}
 	if vis := h - 2; len(body) > vis && si >= vis { // keep the selected row visible
 		body = body[si-vis+1:]

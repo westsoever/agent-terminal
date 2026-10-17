@@ -268,6 +268,29 @@ func TestQueueSections(t *testing.T) {
 	}
 }
 
+// Every section keeps its header when it is empty, so an empty INPUT shows that nothing needs the owner.
+func TestQueueKeepsEmptySections(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	cfg, _, _ := loadConfig()
+	m := model{cfg: cfg, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}}
+	headers := []string{" INPUT", " WAITING", " WORKING", " IDLE", " DONE"}
+	check := func(label string) {
+		out := ansiRe.ReplaceAllString(strings.Join(m.queuePanel(60, 30), "\n"), "")
+		last := -1
+		for _, h := range headers {
+			at := strings.Index(out, h)
+			if at < 0 || at < last {
+				t.Fatalf("%s: %q missing or out of order in:\n%s", label, h, out)
+			}
+			last = at
+		}
+	}
+	check("no agents")
+	m.agents = []Agent{{SID: "z", Name: "fresh", State: "idle", Since: time.Now()}}
+	m.selSID = "z"
+	check("only an idle agent")
+}
+
 // The conversation keeps the owner's prompts (a slash command as "/name args") and the agent's texts in order;
 // tool calls, tool results, meta entries and tagged machinery (command output, reminders) are left out.
 func TestReadLastChat(t *testing.T) {

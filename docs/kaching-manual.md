@@ -208,7 +208,7 @@ The usage comes from the statusline: `~/.claude/statusline-command.sh` writes th
 
 ### 4.2 The agent list
 
-The agent list has five groups:
+The agent list has five groups. All five headers are always on the screen, also when a group has no agent. An empty `INPUT` shows that no agent needs you.
 
 | Group | Agents in the group |
 |---|---|
