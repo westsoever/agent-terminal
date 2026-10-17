@@ -202,7 +202,7 @@ func (m model) queuePanel(w, h int) []string {
 	for g, name := range groups {
 		first := true
 		for i, a := range m.agents {
-			if a.Group() != g {
+			if FamilyGroup(m.agents, i) != g {
 				continue
 			}
 			if first {
@@ -248,8 +248,21 @@ func (m model) queueRow(in, i int, a Agent) string {
 		ns = cDark
 	}
 	mark := "   "
+	if a.Lead != "" { // a sub-session: indented under its lead
+		mark = "   └ "
+		nameW -= 2
+		if width(name) > nameW {
+			name = trunc(name, nameW)
+		}
+	} else if a.Subs > 0 {
+		name = trunc(name, nameW-4) + fmt.Sprintf(" +%d", a.Subs)
+	}
 	if selected {
-		txt := fmt.Sprintf(" > %-*s %-*s %*s ", nameW, name, stateW, label, ageW, age(a.Since))
+		lead := " > "
+		if a.Lead != "" {
+			lead = " > └ "
+		}
+		txt := fmt.Sprintf("%s%-*s %-*s %*s ", lead, nameW, name, stateW, label, ageW, age(a.Since))
 		return row(in, s(padTo(txt, in), cSel))
 	}
 	_ = i
@@ -638,7 +651,8 @@ func (m model) helpView(h int) []string {
 		row2("enter, ←, →", "when the agent asks: confirm, previous / next part"),
 		row2(K.Reply, "write a message (keys below); esc keeps it as a draft"),
 		row2(K.Open+" then a-i", "open that file"),
-		row2(K.Goto, "show the agent's own Terminal window"),
+		row2(K.Goto, "show the agent's own Terminal window, where it is"),
+		row2(K.Here, "bring its window to monitor 1 and into focus, to type in it"),
 		row2(K.Dismiss, "remove a waiting agent from the list, no answer"),
 		row2(K.Refresh, "read all data again"),
 		"",
@@ -696,6 +710,7 @@ func (m model) footer() []string {
 		add(&r1, key(K.Waiting), "next waiting")
 		add(&r1, K.Open+" a-i", "open file")
 		add(&r1, K.Goto, "go to window")
+		add(&r1, K.Here, "bring here")
 		add(&r1, K.Dismiss, "dismiss")
 		add(&r1, K.Reply, "type reply")
 		add(&r1, K.Command, "command")

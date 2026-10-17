@@ -54,7 +54,8 @@ type model struct {
 	cfg       Config
 	cfgTime   time.Time
 	agents    []Agent
-	ttys      map[string]bool
+	ttys      map[string]tabPos
+	groups    [][]string
 	selSID    string
 	view      view
 	mode      mode
@@ -82,7 +83,10 @@ type cachedLast struct {
 }
 
 type tickMsg time.Time
-type ttysMsg map[string]bool
+type ttysMsg struct {
+	tabs   map[string]tabPos
+	groups [][]string
+}
 type sentMsg struct {
 	sid, name, what, res string
 }
@@ -101,7 +105,7 @@ func newModel() model {
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
 	}
-	m.agents = loadAgents(nil)
+	m.agents = loadAgents(nil, nil)
 	if len(m.agents) > 0 {
 		m.selSID = m.agents[0].SID
 	}
@@ -116,13 +120,13 @@ func tick() tea.Cmd {
 	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
-func loadTTYs() tea.Msg { return ttysMsg(terminalTTYs()) }
+func loadTTYs() tea.Msg { return ttysMsg{terminalTabs(), tabGroups()} }
 
 func (m *model) setStatus(t string) { m.status, m.statusErr = t, false }
 func (m *model) setErr(t string)    { m.status, m.statusErr = t, true }
 
 func (m *model) refresh() {
-	m.agents = loadAgents(m.ttys)
+	m.agents = loadAgents(m.ttys, m.groups)
 	m.applyPrompts()
 	for sid, at := range m.expect {
 		for _, a := range m.agents {
@@ -175,6 +179,18 @@ func (m *model) writeState() {
 	_ = os.MkdirAll(filepath.Dir(p), 0o755)
 	_ = os.WriteFile(p+".tmp", []byte(want), 0o644)
 	_ = os.Rename(p+".tmp", p)
+}
+
+// bringHere: the agent's window onto the main display (the monitor queue's `show`, as if the owner dragged it
+// there: its cell on the other display stays reserved, dragging it back returns it there), then into focus. With
+// the queue off it is only brought into focus where it is.
+func bringHere(sid, tty string) string {
+	out, _ := exec.Command(queueBin(), "show", sid).CombinedOutput()
+	res := raiseTab(tty)
+	if res == "ok" && !strings.Contains(string(out), "Shown") {
+		return "error: brought into focus, but not moved (" + strings.TrimSpace(string(out)) + ")"
+	}
+	return res
 }
 
 func queueBin() string {
@@ -361,7 +377,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case ttysMsg:
-		m.ttys = msg
+		m.ttys, m.groups = msg.tabs, msg.groups
 		m.refresh()
 		return m, nil
 	case promptMsg:
@@ -546,6 +562,14 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.mode = mOpen
 		}
+	case ks == K.Here && (m.view == vDesk || m.view == vWall):
+		a := m.sel()
+		if a == nil || a.TTY == "" || !a.InTerminal {
+			m.setErr("no Terminal window for this agent")
+			return m, nil
+		}
+		sid, tty, name := a.SID, a.TTY, a.Name
+		return m, func() tea.Msg { return sentMsg{"", name, "bring here", bringHere(sid, tty)} }
 	case ks == K.Goto:
 		if a := m.sel(); a != nil && a.TTY != "" {
 			tty := a.TTY

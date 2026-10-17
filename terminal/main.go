@@ -31,7 +31,7 @@ func main() {
 		lipgloss.SetColorProfile(termenv.ANSI256)
 		m := newModel()
 		m.w, m.h = w, h
-		m.ttys = terminalTTYs()
+		m.ttys, m.groups = terminalTabs(), tabGroups()
 		m.refresh()
 		m.status = ""
 		if *code != "" {
