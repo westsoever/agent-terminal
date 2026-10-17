@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # The menu bar dot (ui/menubar): the watcher's heartbeat and dash.sh --counts (no swiftc needed), then, with swiftc,
 # the app bundle, the dot's state from fixture files (KachingBar --status-once), and install.sh --install-menubar in the
-# sandbox HOME: plist content, dry run, idempotence, uninstall. Without swiftc the build half is skipped with a note.
+# sandbox HOME: plist content, dry run, idempotence, uninstall. Also the voice shortcut: the chord function
+# (--chord-test), its menu line, and one wake on fixture sessions (--wake-once, mostly --dry-run). Without swiftc the
+# build half is skipped with a note.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -130,6 +132,94 @@ assert_eq "status: fresh heartbeat but no watcher plist -> grey" "grey" "$(kv "$
 out=$(AGENT_HOME="$S_AH" LAUNCH_AGENTS_DIR="$S_LA" KACHING_DIR="$WORK/no-kit" "$EXE" --status-once 2>&1)
 assert_eq "status: no dash.sh -> still green/amber/grey from the heartbeat, counts unavailable" "unavailable" "$(kv "$out" counts)"
 assert_eq "status: without counts a running Kaching is green" "green" "$(kv "$out" state)"
+
+# ---------- the voice shortcut: the chord function (KachingBar --chord-test RAW PREV) ----------
+# raw flags as macOS sends them: control 0x40000 + right-control bit 0x2000, option 0x80000 + left-option bit 0x20,
+# 0x100 always set; command 0x100000 (left bit 0x8), shift 0x20000 (left bit 0x2)
+chord() { "$EXE" --chord-test "$1" "$2" 2>&1; }
+assert_eq "chord: right ctrl + left option pressed -> fires" "fire=1" "$(chord 0xC2120 0x42100)"
+assert_eq "chord: both from nothing -> fires" "fire=1" "$(chord 0xC2120 0x100)"
+assert_eq "chord: right ctrl only -> no" "fire=0" "$(chord 0x42100 0x100)"
+assert_eq "chord: left option only -> no" "fire=0" "$(chord 0x80120 0x100)"
+assert_eq "chord: left ctrl + left option -> no" "fire=0" "$(chord 0xC0121 0x40101)"
+assert_eq "chord: right ctrl + right option -> no" "fire=0" "$(chord 0xC2140 0x42100)"
+assert_eq "chord: with command held -> no" "fire=0" "$(chord 0x1C2128 0x142108)"
+assert_eq "chord: with shift held -> no" "fire=0" "$(chord 0xE2122 0x62102)"
+assert_eq "chord: still held (another modifier changed) -> no repeat" "fire=0" "$(chord 0xC2120 0xC2120)"
+assert_eq "chord: releasing command while both stay held -> no" "fire=0" "$(chord 0xC2120 0x1C2128)"
+assert_eq "chord: let go of option, pressed again -> fires again" "fire=1" "$(chord 0xC2120 0x42100)"
+assert_eq "chord: decimal flags work too" "fire=1" "$(chord 8224 0)"
+assert_fails "chord: missing argument is refused" "$EXE" --chord-test 0x2020
+assert_fails "wake: unknown --wake-once option is refused" "$EXE" --wake-once --bogus
+
+# ---------- the voice shortcut's menu line (Accessibility forced with KACHING_BAR_AX_TRUSTED) ----------
+assert_contains "voice: trusted -> the shortcut is shown" "$(KACHING_BAR_AX_TRUSTED=1 status)" "menu=Voice: Right Ctrl + Left Option [info]"
+out=$(KACHING_BAR_AX_TRUSTED=0 status)
+assert_contains "voice: not trusted -> the menu asks for Accessibility" "$out" "menu=Voice shortcut off: allow KachingBar in Accessibility"
+assert_not_contains "voice: not trusted -> no 'Voice:' line" "$out" "menu=Voice: Right Ctrl"
+
+# ---------- one wake: KachingBar --wake-once [--dry-run] on fixture sessions ----------
+W_CD="$WORK/wake-claude"; W_AH="$WORK/wake-agent"; mkdir -p "$W_CD/sessions" "$W_AH/dispatcher"
+wake() { CLAUDE_DIR="$W_CD" AGENT_HOME="$W_AH" KACHING_DIR="$KIT" KACHING_BAR_NO_CUE=1 KACHING_BAR_DISPATCHER_TTY="${W_TTY-ttys009}" "$EXE" --wake-once "$@" 2>&1; }
+w_sess() { # file pid name cwd status
+  printf '{"pid":%s,"sessionId":"x","cwd":"%s","name":"%s","status":"%s","updatedAt":1}\n' "$2" "$4" "$3" "$5" >"$W_CD/sessions/$1.json"
+}
+sleep 300 & LIVE=$!
+sleep 0 & DEAD=$!; wait "$DEAD" 2>/dev/null
+
+out=$(KACHING_BAR_FRONT_TTY=ttys003 wake --dry-run)
+assert_eq "wake: no sessions -> dispatcher absent" "absent" "$(kv "$out" dispatcher)"
+assert_eq "wake: absent -> start" "start" "$(kv "$out" action)"
+assert_contains "wake: start opens launch.sh in a new Terminal window" "$(kv "$out" command)" "/usr/bin/osascript -e 'tell application \"Terminal\" to do script \"export AGENT_HOME="
+assert_contains "wake: start runs the kit's launch.sh" "$(kv "$out" command)" "$KIT/dispatcher/launch.sh"
+assert_contains "wake: start passes the wake text" "$(kv "$out" command)" "[shortcut] listen"
+assert_eq "wake: focus tty from KACHING_BAR_FRONT_TTY" "ttys003" "$(kv "$out" focus_tty)"
+if printf '%s\n' "$(kv "$out" focus_line)" | grep -Eq '^ttys003 [0-9]{10}$'; then pass "wake: focus line is '<tty> <epoch>'"; else fail "wake: focus line is '<tty> <epoch>'" "  got: $(kv "$out" focus_line)"; fi
+assert_eq "wake: dry run says so" "yes" "$(kv "$out" dry_run)"
+assert_no_file "wake: dry run writes no focus file" "$W_AH/dispatcher/focus"
+assert_no_file "wake: dry run writes no log" "$W_AH/dispatcher/shortcut.log"
+
+w_sess dead "$DEAD" dispatcher "$W_AH/dispatcher" idle
+assert_eq "wake: a dead pid counts as absent" "absent" "$(kv "$(wake --dry-run)" dispatcher)"
+rm -f "$W_CD/sessions/dead.json"
+w_sess other "$LIVE" worker "$WORK/plain" idle
+assert_eq "wake: another session is not the dispatcher" "absent" "$(kv "$(wake --dry-run)" dispatcher)"
+
+w_sess d "$LIVE" dispatcher /somewhere/else idle
+out=$(KACHING_BAR_FRONT_TTY=/dev/ttys004 wake --dry-run)
+assert_eq "wake: named dispatcher, idle" "idle" "$(kv "$out" dispatcher)"
+assert_eq "wake: its pid" "$LIVE" "$(kv "$out" dispatcher_pid)"
+assert_eq "wake: idle -> wake" "wake" "$(kv "$out" action)"
+assert_eq "wake: types the wake text through send.js" "/usr/bin/osascript -l JavaScript $KIT/terminal/send.js text ttys009 '[shortcut] listen'" "$(kv "$out" command)"
+assert_eq "wake: /dev/ is stripped from the focus tty" "ttys004" "$(kv "$out" focus_tty)"
+w_sess d "$LIVE" 76281-bf "$W_AH/dispatcher" idle
+assert_eq "wake: found by cwd \$AGENT_HOME/dispatcher too" "wake" "$(kv "$(wake --dry-run)" action)"
+out=$(W_TTY= wake --dry-run)
+assert_eq "wake: idle but no tty -> cue only" "cue" "$(kv "$out" action)"
+assert_eq "wake: no tty is the reason" "dispatcher has no tty" "$(kv "$out" reason)"
+w_sess d "$LIVE" dispatcher "$W_AH/dispatcher" busy
+out=$(KACHING_BAR_FRONT_TTY= wake --dry-run)
+assert_eq "wake: busy dispatcher" "busy" "$(kv "$out" dispatcher)"
+assert_eq "wake: busy -> cue only" "cue" "$(kv "$out" action)"
+assert_eq "wake: busy -> nothing typed" "none" "$(kv "$out" command)"
+assert_eq "wake: Terminal not in front -> focus none" "none" "$(kv "$out" focus_tty)"
+assert_eq "wake: Terminal not in front -> no focus line" "" "$(kv "$out" focus_line)"
+
+# for real, busy: only the focus file and the log are written (no osascript runs on this path)
+out=$(KACHING_BAR_FRONT_TTY=ttys003 wake)
+assert_eq "wake: busy, for real -> result busy" "busy" "$(kv "$out" result)"
+assert_file "wake: focus file written" "$W_AH/dispatcher/focus"
+f=$(cat "$W_AH/dispatcher/focus" 2>/dev/null)
+fe=${f#ttys003 }
+if [ "${f%% *}" = ttys003 ] && [ "$(wc -l <"$W_AH/dispatcher/focus" | tr -d ' ')" = 1 ] && [ $(( $(date +%s) - fe )) -le 60 ]; then
+  pass "wake: focus file is one line '<tty> <now>'"; else fail "wake: focus file is one line '<tty> <now>'" "  got: $f"; fi
+assert_eq "wake: no temp files left next to it" "focus shortcut.log" "$(ls "$W_AH/dispatcher" | tr '\n' ' ' | sed 's/ $//')"
+assert_contains "wake: logged" "$(cat "$W_AH/dispatcher/shortcut.log" 2>/dev/null)" " busy dispatcher=busy pid=$LIVE tty=ttys009 focus=ttys003"
+printf 'ttys001 1\n' >"$W_AH/dispatcher/focus"
+KACHING_BAR_FRONT_TTY= wake >/dev/null
+assert_eq "wake: Terminal not in front leaves the older focus file" "ttys001 1" "$(cat "$W_AH/dispatcher/focus")"
+assert_eq "wake: one log line per chord" "2" "$(wc -l <"$W_AH/dispatcher/shortcut.log" | tr -d ' ')"
+kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null
 
 # ---------- install.sh --install-menubar in the sandbox HOME ----------
 export KACHING_APPS_DIR="$HOME/Applications"

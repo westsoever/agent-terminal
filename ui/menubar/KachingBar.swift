@@ -23,6 +23,9 @@
 // (park frame on the main display, its reserved cell or the grid on the other). Windows the queue moves itself
 // are reported too; queue.sh leaves those alone. KACHING_BAR_DRAGS=off turns the watcher off.
 //
+// Voice shortcut (dispatcher v2): Right Control + Left Option wakes the voice dispatcher; VoiceShortcut.swift has it
+// all (chord, Accessibility, the wake, --wake-once and --chord-test). Here: one menu line, its action, the hooks.
+//
 // CLI: KachingBar --status-once  prints the computed state as key=value lines and exits (used by tests/t_menubar.sh).
 // Env: AGENT_HOME (~/.agent) KACHING_DIR (~/.claude/kaching) LAUNCH_AGENTS_DIR (~/Library/LaunchAgents)
 //      KACHING_BAR_STALE_SECS (660) KACHING_BAR_POLL_SECS (12); the CHING_* names from before D35 still count.
@@ -86,7 +89,7 @@ struct KachingCounts: Sendable, Equatable {
     }
 }
 
-enum MenuAction: String, Sendable { case openInbox, openProposals, quit }
+enum MenuAction: String, Sendable { case openInbox, openProposals, openAccessibility, quit }
 
 enum MenuEntry: Sendable, Equatable {
     case info(String)                      // disabled text line
@@ -127,6 +130,7 @@ struct KachingSnapshot: Sendable {
         var m: [MenuEntry] = [.info(statusLine), .info(detailLine), .separator, .action("Open inbox", .openInbox)]
         if let p = counts?.proposals, p > 0 { m.append(.action("Proposals waiting: \(p)", .openProposals)) }
         m.append(.placeholder("Transcripts (coming soon)"))
+        m.append(VoiceShortcut.menuEntry)
         m += [.separator, .action("Quit KachingBar", .quit)]
         return m
     }
@@ -398,6 +402,8 @@ final class StatusBarController: NSObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.refresh() }
         case .openProposals:
             TerminalLauncher.run(name: "proposals", body: "\(env)\n\(TerminalLauncher.quote(paths.proposalsTool.path)) list")
+        case .openAccessibility:
+            VoiceShortcut.openSettings()
         case .quit:
             NSApp.terminate(nil)
         }
@@ -442,6 +448,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.start()
         drags?.start()
+        VoiceKeys.start(env: kachingEnvironment())
     }
 }
 
@@ -464,6 +471,7 @@ struct KachingBarMain {
         }
         let provider = KachingStatusProvider(paths: .fromEnvironment(env), staleAfter: num("KACHING_BAR_STALE_SECS", 660))
         let args = CommandLine.arguments.dropFirst()
+        if let code = MainActor.assumeIsolated({ VoiceShortcut.cli(Array(args), env: env) }) { exit(code) }
         if args.contains("--status-once") {
             print(provider.snapshot().report)
             exit(0)
