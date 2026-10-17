@@ -1,0 +1,233 @@
+package main
+
+// The PR view's side panel: one pull request read with gh pr view, and the hand-off of a comment on it to a new
+// background agent that works on it in the repo's local clone.
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+)
+
+// PRDetail is the side panel of one pull request.
+type PRDetail struct {
+	URL       string
+	Err       string
+	At        time.Time
+	Head      string // its branch
+	Base      string // the branch it merges into
+	Body      string
+	Add, Del  int
+	Files     []PRFile
+	Mergeable string // MERGEABLE, CONFLICTING, UNKNOWN
+	Review    string // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED or ""
+	Checks    string // e.g. "3 passed, 1 failed"; "" when it has none
+	Thread    []PRComment
+}
+
+type PRFile struct {
+	Path     string
+	Add, Del int
+}
+
+// PRComment is a comment or a review on the pull request, oldest first.
+type PRComment struct {
+	Author, Body, State string // State: a review's verdict (APPROVED, ...); "" for a comment
+	At                  time.Time
+}
+
+type prDetailMsg PRDetail
+
+// ghPRView reads one pull request; a variable so tests can hand back their own JSON.
+var ghPRView = func(ctx context.Context, url string) ([]byte, error) {
+	return exec.CommandContext(ctx, "gh", "pr", "view", url, "--json",
+		"body,headRefName,baseRefName,additions,deletions,files,mergeable,reviewDecision,statusCheckRollup,comments,reviews").Output()
+}
+
+func loadPRDetail(url string) PRDetail {
+	ctx, cancel := context.WithTimeout(context.Background(), pullsTimeout)
+	defer cancel()
+	d := PRDetail{URL: url, At: time.Now()}
+	out, err := ghPRView(ctx, url)
+	if err != nil {
+		msg := err.Error()
+		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
+			msg = string(ee.Stderr)
+		}
+		d.Err = "gh pr view: " + strings.Join(strings.Fields(msg), " ")
+		return d
+	}
+	type author struct {
+		Login string `json:"login"`
+	}
+	var raw struct {
+		Body      string `json:"body"`
+		Head      string `json:"headRefName"`
+		Base      string `json:"baseRefName"`
+		Additions int    `json:"additions"`
+		Deletions int    `json:"deletions"`
+		Mergeable string `json:"mergeable"`
+		Review    string `json:"reviewDecision"`
+		Files     []struct {
+			Path      string `json:"path"`
+			Additions int    `json:"additions"`
+			Deletions int    `json:"deletions"`
+		} `json:"files"`
+		Checks []struct {
+			Status     string `json:"status"`     // check run: COMPLETED, IN_PROGRESS, ...
+			Conclusion string `json:"conclusion"` // check run: SUCCESS, FAILURE, ...
+			State      string `json:"state"`      // status context: SUCCESS, FAILURE, PENDING, ERROR
+		} `json:"statusCheckRollup"`
+		Comments []struct {
+			Author    author `json:"author"`
+			Body      string `json:"body"`
+			CreatedAt string `json:"createdAt"`
+		} `json:"comments"`
+		Reviews []struct {
+			Author      author `json:"author"`
+			Body        string `json:"body"`
+			State       string `json:"state"`
+			SubmittedAt string `json:"submittedAt"`
+		} `json:"reviews"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		d.Err = "gh pr view: " + err.Error()
+		return d
+	}
+	d.Head, d.Base, d.Body, d.Add, d.Del = raw.Head, raw.Base, raw.Body, raw.Additions, raw.Deletions
+	d.Mergeable, d.Review = raw.Mergeable, raw.Review
+	for _, f := range raw.Files {
+		d.Files = append(d.Files, PRFile{f.Path, f.Additions, f.Deletions})
+	}
+	var pass, fail, wait int
+	for _, c := range raw.Checks {
+		r := c.Conclusion
+		if r == "" {
+			r = c.State
+		}
+		switch {
+		case r == "SUCCESS" || r == "NEUTRAL" || r == "SKIPPED":
+			pass++
+		case r == "PENDING" || r == "EXPECTED" || (c.Status != "" && c.Status != "COMPLETED"):
+			wait++
+		default:
+			fail++
+		}
+	}
+	var parts []string
+	for _, p := range []struct {
+		n    int
+		what string
+	}{{pass, "passed"}, {fail, "failed"}, {wait, "running"}} {
+		if p.n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", p.n, p.what))
+		}
+	}
+	d.Checks = strings.Join(parts, ", ")
+	for _, c := range raw.Comments {
+		at, _ := time.Parse(time.RFC3339, c.CreatedAt)
+		d.Thread = append(d.Thread, PRComment{c.Author.Login, c.Body, "", at})
+	}
+	for _, r := range raw.Reviews {
+		if r.Body == "" && r.State == "COMMENTED" { // the shell of inline comments: nothing to read here
+			continue
+		}
+		at, _ := time.Parse(time.RFC3339, r.SubmittedAt)
+		d.Thread = append(d.Thread, PRComment{r.Author.Login, r.Body, r.State, at})
+	}
+	sort.SliceStable(d.Thread, func(i, j int) bool { return d.Thread[i].At.Before(d.Thread[j].At) })
+	return d
+}
+
+// prQuick: the panel's number keys, each a comment that starts an agent on the pull request at once.
+var prQuick = []struct{ label, text string }{
+	{"review it", "Review this pull request: does it do what it says, and is the code right? Tell me what you find."},
+	{"merge it", "Merge this pull request if it is ready: its checks pass and it has no conflicts. If it isn't, tell me what stops it."},
+}
+
+// prPrompt: the first message of the agent that works on pr, with the owner's comment as its task.
+func prPrompt(pr PullReq, d PRDetail, comment string, cloned bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Pull request %s#%d: %s\n%s\n", pr.Repo, pr.Number, pr.Title, pr.URL)
+	if d.Head != "" {
+		fmt.Fprintf(&b, "Branch %s into %s.\n", d.Head, d.Base)
+	}
+	fmt.Fprintf(&b, "\nMy comment on it:\n%s\n\n", comment)
+	if !cloned {
+		b.WriteString("This Mac has no clone of the repo; if you need its code, clone it into a folder under /private/tmp.\n")
+	}
+	b.WriteString("Read it with gh pr view and gh pr diff. If you change or test code, do it in your own git worktree of " +
+		"the pull request's branch, not in the main checkout. Report back here; comment on the pull request on GitHub " +
+		"only if I ask for it.")
+	return b.String()
+}
+
+var (
+	cloneMu    sync.Mutex
+	cloneCache map[string]string // owner/name (lower case) -> local folder
+)
+
+// cloneRoots: where local clones are looked for, one level deep; a variable so tests can use their own.
+var cloneRoots = func() []string {
+	home := os.Getenv("HOME")
+	return []string{filepath.Join(home, "bbq"), home}
+}
+
+// prCloneDir: the local clone of repo (owner/name), or "" when there is none. A folder named like the repo wins
+// over another clone of it.
+func prCloneDir(repo string) string {
+	key := strings.ToLower(repo)
+	cloneMu.Lock()
+	defer cloneMu.Unlock()
+	if d, ok := cloneCache[key]; ok && dirExists(d) {
+		return d
+	}
+	found := ""
+	for _, root := range cloneRoots() {
+		ents, _ := os.ReadDir(root)
+		for _, e := range ents {
+			dir := filepath.Join(root, e.Name())
+			if !e.IsDir() || !dirExists(filepath.Join(dir, ".git")) {
+				continue
+			}
+			out, _ := exec.Command("git", "-C", dir, "remote", "get-url", "origin").Output()
+			if remoteRepo(string(out)) != key {
+				continue
+			}
+			if found == "" || strings.EqualFold(e.Name(), filepath.Base(repo)) {
+				found = dir
+			}
+			if strings.EqualFold(e.Name(), filepath.Base(repo)) {
+				break
+			}
+		}
+		if found != "" {
+			break
+		}
+	}
+	if found != "" {
+		if cloneCache == nil {
+			cloneCache = map[string]string{}
+		}
+		cloneCache[key] = found
+	}
+	return found
+}
+
+// remoteRepo: "owner/name" in lower case from a GitHub remote URL (https, www, ssh, with or without .git).
+func remoteRepo(url string) string {
+	u := strings.ToLower(strings.TrimSpace(url))
+	for _, p := range []string{"https://www.github.com/", "https://github.com/", "http://github.com/", "ssh://git@github.com/", "git@github.com:"} {
+		if strings.HasPrefix(u, p) {
+			return strings.TrimSuffix(strings.TrimSuffix(u[len(p):], "/"), ".git")
+		}
+	}
+	return ""
+}

@@ -14,7 +14,7 @@ Push `/`, write the code, then push `Enter`.
 | `FL` | Files | The last 30 files that the agents wrote about, newest first. Files of agents that stopped stay in the list. |
 | `RP` | Repos | The git sync check: repos with work that you can lose. |
 | `RC` | Recaps | The last recap of each agent. Claude Code writes a recap when you come back to a session after some time. The desk also shows the recap of the selected agent above its last message. |
-| `PR` | Pull requests | The open GitHub pull requests that involve you (yours, assigned to you, or that ask your review), the last updated first. The number in the tab is how many. |
+| `PR` | Pull requests | The open GitHub pull requests that involve you (yours, assigned to you, that ask your review, or where you commented or were mentioned), the last updated first. The number in the tab is how many. |
 | `PO` | Proposals | The changes that the learner proposes. The tab is orange when proposals are open. |
 | `PC` | Paperclip | Paperclip issues that need you, and issues in progress. The selected issue shows on the right, with what it asks you. The tab is orange when an issue needs you. |
 | `FIND` | Find a session | Look for a session by its name, or by what you and the agents said in it. Write the words after `FIND`, for example `FIND kaching resume`. No tab shows this view. Refer to section 6.17. |
@@ -103,6 +103,10 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | `FL` | `Enter` | Open the selected file. |
 | `RC` | `Enter` | Go to the desk, with that agent selected. |
 | `PR` | `Enter` | Open the pull request on GitHub in your browser. |
+| `PR` | `k` | Open the pull request on the right: its branch, size, checks, description, files and thread. Push `k` again to write a comment for a new agent. |
+| `PR` | `1`, `2` | With the pull request open: start a new agent that reviews it (`1`) or merges it when it is ready (`2`). |
+| `PR` | `↑`, `↓` | Scroll the pull request on the right. |
+| `PR` | `Esc` | Close the pull request on the right. Push `Esc` again to go to the desk. |
 | `PO` | `Enter` | Show the full proposal. Push `q` to close it. |
 | `PO` | `a` | Approve the proposal. The screen asks you to write a code. |
 | `PO` | `x` | Reject the proposal. |
@@ -404,9 +408,12 @@ The folder must be trusted by Claude Code. If the command line shows `Workspace 
 
 1. Push `/`, write `PR`, push `Enter`.
 2. Push `l` (down) or `j` (up) to select a pull request. Each line shows the repo and number, how long ago it changed, and its title. A draft shows `draft` after its number.
-3. Push `Enter` to open it on GitHub in your browser.
+3. Push `Enter` to open it on GitHub in your browser, or push `k` to read it on the right: the branch, how many lines and files it changes, conflicts and checks, the description, the files and the comments and reviews. Push `↑` and `↓` to scroll. Push `l` or `j` to go to the next pull request; the right side follows.
+4. To have an agent work on it, push `k` again. Write what it should do, for example `review this feature and check that it does what it says`. Push `Enter`. Kaching starts a new background agent in your local clone of the repo (in your home folder when there is none) with the pull request and your comment as its task. It works in its own worktree of the pull request's branch and reports back to you; it comments on GitHub only if you ask it to. It shows in the inbox like any other agent.
+5. For the usual tasks, push a number instead: `1` reviews it, `2` merges it when its checks pass and it has no conflicts.
+6. Push `Esc` to close the pull request on the right.
 
-Kaching reads the list with `gh` every 30 seconds. If the view shows a `gh search prs` error, write `gh auth login` in a terminal.
+Kaching reads the list with `gh`: every 30 seconds while the view is open, every 2 minutes for the number in the tab. If a read fails, the last list stays and the error shows at the top. If the error says you are not logged in, write `gh auth login` in a terminal.
 
 ### 6.17 Find a session
 

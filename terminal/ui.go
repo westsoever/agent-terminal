@@ -73,9 +73,13 @@ type model struct {
 	pcDet      map[string]PCDetail // issue id -> its side panel (PC view)
 	pcScroll   *chatScroll         // how far the PC side panel is scrolled back
 	pcAt       time.Time
-	pulls      PullsState // the PR view: open GitHub pull requests
-	badgeAt    time.Time  // when the proposals, pull requests and Paperclip were last read for the tab bar
-	pendingJob string     // a background agent /NW started: selected once it shows in the list
+	pulls      PullsState          // the PR view: open GitHub pull requests
+	pullsAt    time.Time           // when they were last asked for
+	prOpen     bool                // the PR view's side panel is open (k)
+	prDet      map[string]PRDetail // pull request url -> its side panel
+	prScroll   *chatScroll         // how far the PR side panel is scrolled back
+	badgeAt    time.Time           // when the proposals and Paperclip were last read for the tab bar
+	pendingJob string              // a background agent /NW started: selected once it shows in the list
 	props      []string
 	sync       []string
 	ed         *editor
@@ -130,7 +134,7 @@ type execDone struct{ err error }
 
 func newModel() model {
 	cfg, ct, err := loadConfig()
-	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}}
+	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, prDet: map[string]PRDetail{}, prScroll: &chatScroll{}}
 	m.ed.drafts = loadDrafts()
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
@@ -451,13 +455,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if time.Time(msg).Second()%10 < 2 {
 			cmds = append(cmds, loadTTYs)
 		}
+		every := pullsEvery // the PR tab's count, read slower than what the open view shows
+		if m.view == vPulls {
+			every = badgeEvery
+		}
+		if time.Since(m.pullsAt) > every {
+			m.pullsAt = time.Now()
+			cmds = append(cmds, func() tea.Msg { return pullsMsg(loadPulls()) })
+		}
 		if m.view == vPaperclip && time.Since(m.pcAt) > 5*time.Second {
 			m.pcAt = time.Now()
 			cmds = append(cmds, func() tea.Msg { return pcMsg(loadPaperclip()) })
 		}
 		if time.Since(m.badgeAt) > badgeEvery { // the PO and PC tabs turn orange on other views too
 			m.badgeAt = time.Now()
-			cmds = append(cmds, func() tea.Msg { return propsMsg(readProposals()) }, func() tea.Msg { return pullsMsg(loadPulls()) })
+			cmds = append(cmds, func() tea.Msg { return propsMsg(readProposals()) })
 			if m.view != vPaperclip {
 				m.pcAt = time.Now()
 				cmds = append(cmds, func() tea.Msg { return pcMsg(loadPaperclip()) })
@@ -486,6 +498,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pcDetailMsg:
 		m.pcDet[msg.ID] = PCDetail(msg)
 		return m, nil
+	case prDetailMsg:
+		m.prDet[msg.URL] = PRDetail(msg)
+		return m, nil
 	case pcActedMsg:
 		if msg.err != "" {
 			m.setErr(msg.ref + ": " + msg.err)
@@ -505,9 +520,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case findNamesMsg, findTextMsg, findAIMsg, findPanelMsg:
 		return m.findUpdate(msg)
 	case pullsMsg:
-		m.pulls = PullsState(msg)
-		if m.listSel >= len(m.pulls.Items) && m.view == vPulls {
-			m.listSel = max(0, len(m.pulls.Items)-1)
+		sel := ""
+		if m.view == vPulls && m.listSel < len(m.pulls.Items) {
+			sel = m.pulls.Items[m.listSel].URL
+		}
+		m.pulls = m.pulls.merge(PullsState(msg))
+		if m.view == vPulls { // the selection stays on its pull request when the order changes
+			if i := m.pulls.index(sel); i >= 0 {
+				m.listSel = i
+			} else if m.listSel >= len(m.pulls.Items) {
+				m.listSel = max(0, len(m.pulls.Items)-1)
+			}
 		}
 		return m, nil
 	case propsMsg:
@@ -632,6 +655,8 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ks == "esc":
 		if m.zoom {
 			m.zoom = false
+		} else if m.view == vPulls && m.prOpen {
+			m.prOpen = false
 		} else {
 			m.view = vDesk
 		}
@@ -847,6 +872,13 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return bgStartedMsg{job, dir}
 			}
 		}
+		if url, ok := strings.CutPrefix(target, "pr:"); ok {
+			if i := m.pulls.index(url); i >= 0 {
+				return m, m.prStart(&m.pulls.Items[i], text)
+			}
+			m.setErr("that pull request is no longer open")
+			return m, nil
+		}
 		if id, ok := strings.CutPrefix(target, "pcno:"); ok { // a decline with its reason
 			d := m.pcDet[id]
 			n := 0
@@ -907,7 +939,7 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 // editorWidth: the reply box's width in the view that shows it.
 func (m model) editorWidth() int {
 	switch {
-	case m.view == vPaperclip:
+	case m.view == vPaperclip || m.view == vPulls:
 		_, rw := pcWidths(m.w)
 		return rw - 4
 	case m.view == vWall:
@@ -923,6 +955,50 @@ func (m *model) pcSelected() *PCItem {
 		return nil
 	}
 	return &m.pc.Items[m.listSel]
+}
+
+// prSelected: the selected pull request in the PR view, nil when none.
+func (m *model) prSelected() *PullReq {
+	if m.view != vPulls || m.listSel >= len(m.pulls.Items) {
+		return nil
+	}
+	return &m.pulls.Items[m.listSel]
+}
+
+// prDetailCmd reads the selected pull request's side panel, while it is open, when it has none or it is older
+// than stale.
+func (m *model) prDetailCmd(stale time.Duration) tea.Cmd {
+	pr := m.prSelected()
+	if pr == nil || !m.prOpen {
+		return nil
+	}
+	if d, ok := m.prDet[pr.URL]; ok && time.Since(d.At) < stale {
+		return nil
+	}
+	url := pr.URL
+	return func() tea.Msg { return prDetailMsg(loadPRDetail(url)) }
+}
+
+// prStart starts a background agent on pr in its repo's local clone (home when there is none), with the
+// owner's comment as its task.
+func (m *model) prStart(pr *PullReq, comment string) tea.Cmd {
+	if pr == nil {
+		return nil
+	}
+	p, d := *pr, m.prDet[pr.URL]
+	m.setStatus(fmt.Sprintf("starting an agent on %s#%d…", p.Repo, p.Number))
+	return func() tea.Msg {
+		dir := prCloneDir(p.Repo)
+		cloned := dir != ""
+		if !cloned {
+			dir = os.Getenv("HOME")
+		}
+		job, err := bgStart(dir, prPrompt(p, d, comment, cloned))
+		if err != nil {
+			return sentMsg{"", fmt.Sprintf("%s#%d", p.Repo, p.Number), "start", "error: " + err.Error()}
+		}
+		return bgStartedMsg{job, dir}
+	}
 }
 
 // pcDetailCmd reads the selected issue's side panel when it has none or it is older than stale.
@@ -969,8 +1045,10 @@ func (m *model) pcAnswer(n int) tea.Cmd {
 }
 
 // pcScrollKey scrolls the PC side panel for the scroll keys; false for any other key.
-func (m *model) pcScrollKey(ks string) bool {
-	c := m.pcScroll
+func (m *model) pcScrollKey(ks string) bool { return m.panelScroll(m.pcScroll, ks) }
+
+// panelScroll scrolls a side panel (PC, PR) for the scroll keys; false for any other key.
+func (m *model) panelScroll(c *chatScroll, ks string) bool {
 	if c == nil {
 		return false
 	}
@@ -1006,6 +1084,26 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 		n = len(m.props)
 	case vPulls:
 		n = len(m.pulls.Items)
+		if m.prOpen && m.panelScroll(m.prScroll, ks) {
+			return true, nil
+		}
+		if len(ks) == 1 && ks[0] >= '1' && ks[0] <= '9' { // the panel's quick comments; never an agent's answer here
+			if i := int(ks[0] - '1'); m.prOpen && i < len(prQuick) {
+				return true, m.prStart(m.prSelected(), prQuick[i].text)
+			}
+			if !m.prOpen {
+				m.setStatus(K.Reply + " opens the pull request first")
+			}
+			return true, nil
+		}
+		if pr := m.prSelected(); pr != nil && ks == K.Reply {
+			if !m.prOpen { // k opens the panel, k again the comment box
+				m.prOpen = true
+				return true, m.prDetailCmd(time.Minute)
+			}
+			m.mode = mTyping
+			return true, m.ed.open("pr:"+pr.URL, "", m.editorWidth())
+		}
 	case vRecaps:
 		n = len(m.recaps())
 	case vPaperclip:
@@ -1024,12 +1122,12 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 		if m.listSel < n-1 {
 			m.listSel++
 		}
-		return true, m.pcDetailCmd(5 * time.Second)
+		return true, tea.Batch(m.pcDetailCmd(5*time.Second), m.prDetailCmd(time.Minute))
 	case K.Prev, "up":
 		if m.listSel > 0 {
 			m.listSel--
 		}
-		return true, m.pcDetailCmd(5 * time.Second)
+		return true, tea.Batch(m.pcDetailCmd(5*time.Second), m.prDetailCmd(time.Minute))
 	case "enter":
 		switch m.view {
 		case vFiles:
@@ -1107,6 +1205,7 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 			case vProposals:
 				m.loadProposals()
 			case vPulls:
+				m.pullsAt = time.Now()
 				return m, func() tea.Msg { return pullsMsg(loadPulls()) }
 			case vPaperclip:
 				m.pcAt = time.Now()
@@ -1225,7 +1324,7 @@ func (m *model) recaps() []agentRecap {
 	return out
 }
 
-// badgeEvery: how often the tab bar reads the proposals, pull requests and Paperclip.
+// badgeEvery: how often the tab bar reads the proposals and Paperclip, and the PR view its pull requests.
 const badgeEvery = 30 * time.Second
 
 // readProposals: the learner's open proposals, one "kind id: ..." line each.

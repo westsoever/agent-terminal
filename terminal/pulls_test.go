@@ -23,9 +23,30 @@ func TestLoadPulls(t *testing.T) {
 	if p := st.Items[0]; p.Repo != "o/b" || p.Number != 12 || !p.Draft || p.URL != "https://github.com/o/b/pull/12" {
 		t.Fatalf("first = %+v", p)
 	}
-	ghPulls = func(context.Context) ([]byte, error) { return nil, errors.New("not logged in") }
-	if st := loadPulls(); !strings.Contains(st.Err, "not logged in") || len(st.Items) != 0 {
-		t.Fatalf("error state = %+v", st)
+	ghPulls = func(context.Context) ([]byte, error) { return nil, errors.New("not logged in\n  run gh auth login") }
+	bad := loadPulls()
+	if bad.Err != "gh search prs: not logged in run gh auth login" || len(bad.Items) != 0 {
+		t.Fatalf("error state = %+v", bad)
+	}
+	// a failed read keeps the last good list
+	if kept := st.merge(bad); len(kept.Items) != 2 || kept.Err == "" {
+		t.Fatalf("merge = %+v", kept)
+	}
+	if fresh := st.merge(bad).merge(st); fresh.Err != "" {
+		t.Fatalf("a good read clears the error: %+v", fresh)
+	}
+}
+
+// A new read that changes the order keeps the selection on the same pull request.
+func TestPullsSelectionFollows(t *testing.T) {
+	m := newModel()
+	m.view = vPulls
+	a, b, c := PullReq{URL: "a"}, PullReq{URL: "b"}, PullReq{URL: "c"}
+	m.pulls = PullsState{Items: []PullReq{a, b, c}}
+	m.listSel = 1
+	mm, _ := m.Update(pullsMsg{Items: []PullReq{c, a, b}})
+	if got := mm.(model); got.pulls.Items[got.listSel].URL != "b" {
+		t.Fatalf("selection moved to %q", got.pulls.Items[got.listSel].URL)
 	}
 }
 
