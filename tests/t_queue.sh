@@ -280,4 +280,22 @@ QUEUE_SID=s311 QUEUE_NAME=b QUEUE_TTY=ttys311 "$Q" retile
 assert_eq "show: done" "Shown" "$("$Q" show s311)"
 assert_eq "show: on the main display" "hand" "$(cut -d' ' -f6 "$QD/parked/312")"
 assert_eq "dragged: bad arguments" "2" "$("$Q" dragged 1 x >/dev/null 2>&1; echo $?)"
+# return SESSION_ID: kaching sent the agent an answer; its window goes back to its cell, also while kaching is
+# open (an action of the owner, not an automatic move)
+printf 'pid=%s\nself_tty=ttys999\nsid=\ntty=\n' "$$" >"$AGENT_HOME/terminal/open"
+cell=$(cut -d' ' -f1-4 "$QD/parked/312")
+assert_eq "return: done" "Returned" "$("$Q" return s311)"
+assert_eq "return: back in its cell" "$cell" "$(win 312)"
+assert_no_file "return: no longer parked" "$QD/parked/312"
+assert_eq "return: a window that is not parked stays" "Not parked" "$("$Q" return s311)"
+assert_eq "return: unknown session" "Unknown session: nope" "$("$Q" return nope)"
+# another tab of the window still waits: the window stays
+reset "321 1920 -67 960 1080 ttys320,ttys321"
+QUEUE_SID=s320 QUEUE_NAME=a QUEUE_TTY=ttys320 "$Q" retile
+QUEUE_SID=s321 QUEUE_NAME=b QUEUE_TTY=ttys321 "$Q" retile
+"$Q" show s320 >/dev/null
+QUEUE_KIND=input QUEUE_SID=s321 QUEUE_NAME=b QUEUE_TTY=ttys321 "$Q" park b
+assert_eq "return: another tab waits, the window stays" "Another tab waits" "$("$Q" return s320)"
+assert_eq "return: still parked" "321" "$(ls "$QD/parked")"
+rm -f "$AGENT_HOME/terminal/open"
 exit 0

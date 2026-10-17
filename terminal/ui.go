@@ -201,6 +201,19 @@ func bringHere(sid, tty string) string {
 	return res
 }
 
+// returnWindow: kaching sent the agent an answer, so a window of it that the queue moved to the main display
+// goes back to its cell (queue.sh return, D42). Moving around inside a menu is no answer.
+func returnWindow(sid, what string) tea.Cmd {
+	switch what {
+	case "key left", "key right", "key tab", "key up", "key down":
+		return nil
+	}
+	return func() tea.Msg {
+		_ = exec.Command(queueBin(), "return", sid).Run()
+		return nil
+	}
+}
+
 func queueBin() string {
 	return filepath.Join(kitDir(), "bin", "queue.sh")
 }
@@ -437,6 +450,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setErr(msg.name + ": " + msg.res)
 		}
 		delete(m.prompts, msg.sid)
+		if msg.res == "ok" && msg.sid != "" {
+			return m, tea.Batch(m.readPrompt(500*time.Millisecond), returnWindow(msg.sid, msg.what))
+		}
 		return m, m.readPrompt(500 * time.Millisecond)
 	case statusMsg:
 		m.setStatus(string(msg))
@@ -677,6 +693,14 @@ func (m *model) applyPrompts() {
 // typingKey: every key while writing goes to the editor; enter sends to the agent (or the Paperclip issue).
 func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	w := m.editorWidth()
+	if ks := k.String(); m.ed.scrolls(ks) {
+		dir := map[string]string{"up": m.cfg.Keys.Older, "down": m.cfg.Keys.Newer}[ks]
+		if dir == "" {
+			dir = ks // pgup, pgdown
+		}
+		m.scrollChat(dir)
+		return m, nil
+	}
 	act, cmd := m.ed.key(k, w)
 	switch act {
 	case edClose:

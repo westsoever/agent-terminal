@@ -142,6 +142,25 @@ const (
 	edImage
 )
 
+// scrolls: while writing, this key scrolls the agent's conversation instead of moving the cursor: no suggestion
+// list is open and the cursor is already on the first row (up) or the last row (down) of the text; pgup and
+// pgdown always.
+func (e *editor) scrolls(ks string) bool {
+	if len(e.comp) > 0 {
+		return false
+	}
+	li := e.ta.LineInfo()
+	switch ks {
+	case "pgup", "pgdown":
+		return true
+	case "up":
+		return e.ta.Line() == 0 && li.RowOffset == 0
+	case "down":
+		return e.ta.Line() == e.ta.LineCount()-1 && li.RowOffset+1 >= li.Height
+	}
+	return false
+}
+
 // key handles a key while writing. It returns what the model must do next.
 func (e *editor) key(k tea.KeyMsg, width int) (editorAction, tea.Cmd) {
 	ks := k.String()
