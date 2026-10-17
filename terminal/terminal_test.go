@@ -194,13 +194,14 @@ func TestQueueSections(t *testing.T) {
 	}
 }
 
-// The conversation keeps the owner's prompts and the agent's texts in order; tool calls, tool results, meta
-// entries and tagged machinery (slash-command records, reminders) are left out.
+// The conversation keeps the owner's prompts (a slash command as "/name args") and the agent's texts in order;
+// tool calls, tool results, meta entries and tagged machinery (command output, reminders) are left out.
 func TestReadLastChat(t *testing.T) {
 	l := readLast(writeTranscript(t,
 		`{"type":"user","message":{"content":"first prompt"}}`,
 		`{"type":"user","isMeta":true,"message":{"content":"Caveat: meta"}}`,
 		`{"type":"user","message":{"content":"<command-name>/rename</command-name>"}}`,
+		`{"type":"user","message":{"content":"<local-command-stdout>Session renamed</local-command-stdout>"}}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"Looking."},{"type":"tool_use","id":"t1","name":"Bash","input":{}}]}}`,
 		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"out"}]}}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"Done."}]}}`,
@@ -214,7 +215,7 @@ func TestReadLastChat(t *testing.T) {
 		}
 		got = append(got, who+":"+c.Text)
 	}
-	if want := "you:first prompt|agent:Looking.|agent:Done.|you:second prompt"; strings.Join(got, "|") != want {
+	if want := "you:first prompt|you:/rename|agent:Looking.|agent:Done.|you:second prompt"; strings.Join(got, "|") != want {
 		t.Fatalf("chat: got %q want %q", strings.Join(got, "|"), want)
 	}
 }
