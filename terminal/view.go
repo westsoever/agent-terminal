@@ -227,7 +227,7 @@ func (m model) queuePanel(w, h int) []string {
 			}
 			body = append(body, m.queueRow(in, i, a))
 			if a.State == "input" && !a.Busy && a.Ask != "" { // what its last turn asked, under its row
-				body = append(body, row(in, s("   ↳ "+trunc(a.Ask, in-5), cGrey)))
+				body = append(body, row(in, s("   ↳ "+trunc(a.Ask, in-5), cText)))
 			}
 		}
 	}
@@ -337,7 +337,7 @@ func chatLines(l Last, in int) []string {
 			continue
 		}
 		for _, ml := range collapse(wrap(plain(t.Text), in)) {
-			out = append(out, row(in, s(ml, cGrey)))
+			out = append(out, row(in, s(ml, cText)))
 		}
 	}
 	return out
@@ -571,7 +571,7 @@ func (m model) tile(i, w, h int) []string {
 		lines = lines[len(lines)-avail:]
 	}
 	for _, t := range lines {
-		body = append(body, " "+row(in, s(t, cGrey))+" ")
+		body = append(body, " "+row(in, s(t, cText))+" ")
 	}
 	for len(body) < avail {
 		body = append(body, "")
@@ -730,11 +730,11 @@ func (m model) helpView(h int) []string {
 		"## Desk",
 		row2(k(K.Next)+" / "+k(K.Prev), "next / previous agent"),
 		row2(k(K.Waiting), "next agent that waits for you"),
-		row2(k(K.Older)+" / "+k(K.Newer), "scroll the agent's conversation 3 lines back / on (also when zoomed)"),
+		row2(k(K.Older)+" / "+k(K.Newer), "scroll the agent's conversation 3 lines back / on (also when zoomed, and while writing on the draft's first / last line)"),
 		row2("pgup / pgdown", "a page back / on   ·   home: its start   ·   end: the newest"),
 		row2("1-9", "send that numbered answer"),
 		row2("enter, ←, →", "when the agent asks: confirm, previous / next part"),
-		row2(K.Reply, "write a message (keys below); esc keeps it as a draft"),
+		row2(K.Reply, "write a message (keys below); esc keeps it as a draft; sending it sends a window on monitor 1 back"),
 		row2(K.Open+" then a-i", "open that file"),
 		row2(K.Goto, "show the agent's own Terminal window, where it is"),
 		row2(K.Here, "bring its window to monitor 1 and into focus, to type in it"),

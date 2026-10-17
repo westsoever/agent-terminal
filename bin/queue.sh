@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # queue.sh park|back|forget [NAME] | retile | tile | dragged ID X Y W H | show SESSION_ID | dismiss SESSION_ID |
-#          next | status
+#          return SESSION_ID | next | status
 # The monitor queue: a Terminal window whose session waits for you moves to the main display; when you prompt
 # it again it goes back to where it was. The main display holds only your own work plus what waits for you, so
 # nothing there but your own windows means every agent is busy. `next` (bind it to a hotkey) brings the waiting
@@ -20,6 +20,8 @@
 #           display: it takes the park frame and its cell stays reserved. Back onto the other display: into
 #           exactly its reserved cell. Any other window put on the other display joins the grid (D38).
 #   show    put that agent's window on the main display now, as if dragged there.
+#   return  kaching sent that agent an answer: a window the queue moved to the main display (by its event, show
+#           or a drag) goes back to its cell, also while kaching is open; not while another tab of it waits (D42).
 #   retile  a session started (session-start.sh): lay out the grid again, in the background.
 #   tile    the same now, for a hotkey; prints how many windows moved.
 #   status  the waiting tabs and the parked windows.
@@ -361,6 +363,24 @@ case "$CMD" in
     esac
     if [ "${QUEUE_SYNC:-}" = 1 ]; then job; else (job) </dev/null >/dev/null 2>&1 & fi
     exit 0 ;;
+  return)
+    # return SESSION_ID: kaching answered the agent; its parked window goes back to its cell (D42). Moving it is
+    # the owner's own action, so kaching being open does not stop it.
+    [ -n "$NAME_ARG" ] || { echo "usage: queue.sh return SESSION_ID" >&2; exit 2; }
+    tty=$(tty_of_sid "$NAME_ARG")
+    if [ -z "$tty" ]; then echo "Unknown session: $NAME_ARG"; exit 0; fi
+    lock || { echo "Queue busy, try again"; exit 0; }
+    load_windows
+    win=$(window_of "$tty")
+    id=${win%% *}
+    if [ -z "$win" ] || [ ! -f "$PARKED/$id" ]; then echo "Not parked"; exit 0; fi
+    if others_waiting "$win" "$tty"; then echo "Another tab waits"; exit 0; fi
+    # shellcheck disable=SC2046
+    relocate "$id" $(cut -d' ' -f1-4 "$PARKED/$id")
+    rm -f "$PARKED/$id" "$COME/$tty"
+    ev queue_back "$(jq -nc --arg w "$id" '{window:$w,how:"answered"}')"
+    flush >/dev/null
+    echo "Returned" ;;
   show|dismiss)
     # show SESSION_ID: put that agent's window on the main display now, as if you dragged it there.
     # dismiss SESSION_ID: take the agent out of the queue without an answer; a window the queue brought over
@@ -407,6 +427,6 @@ case "$CMD" in
   status)
     list=$(pending)
     if [ -z "$list" ]; then echo "nothing waiting"; else printf '%s\n' "$list" | awk '{ n = $3; for (i = 4; i <= NF; i++) n = n " " $i; printf "%s  %s  (window %s)\n", n, $1, $2 }'; fi ;;
-  *) echo "usage: queue.sh park|back|forget [NAME] | retile | tile | dragged ID X Y W H | show SESSION_ID | dismiss SESSION_ID | next | status" >&2; exit 2 ;;
+  *) echo "usage: queue.sh park|back|forget [NAME] | retile | tile | dragged ID X Y W H | show SESSION_ID | dismiss SESSION_ID | return SESSION_ID | next | status" >&2; exit 2 ;;
 esac
 exit 0

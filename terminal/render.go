@@ -11,6 +11,7 @@ import (
 var (
 	cWhite  = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Bold(true)
 	cGrey   = lipgloss.NewStyle().Foreground(lipgloss.Color("248"))
+	cText   = lipgloss.NewStyle().Foreground(lipgloss.Color("253")) // what agents wrote: bright enough to read
 	cDark   = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 	cOrange = lipgloss.NewStyle().Foreground(lipgloss.Color("202"))
 	cSel    = lipgloss.NewStyle().Background(lipgloss.Color("202")).Foreground(lipgloss.Color("16")).Bold(true)

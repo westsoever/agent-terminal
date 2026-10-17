@@ -2,6 +2,12 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D42 (2026-10-17): Answering an agent from kaching sends its window back to monitor 2 (amends D38)
+
+**Decision (user):** "once I kick off the session here within kaching, even though it's on monitor 1, it doesn't get moved back to monitor 2 after I hit confirm. Please fix that." D38 kept a window that was dragged (or brought with `h`) on monitor 1 until it was dragged back, and with kaching open nothing moves at all (D37).
+
+**Built:** after kaching delivers an answer (a reply, a numbered answer, Enter in a menu, a typed menu answer), it runs `queue.sh return SESSION_ID`. A window the queue moved to the main display (its own event, `show`/`h`, or a drag) goes back to exactly its cell, also while kaching is open, because it is the owner's own action. It stays when another tab of the same window still waits. Moving inside a menu (←/→/Tab) is no answer. Typing in the window itself still leaves it on monitor 1 (D38), since bringing it there to type in it is what `h` is for.
+
 ## D41 (2026-10-17): kaching splits waiting agents into INPUT and WAITING, and shows what each one asks
 
 **Decision (user):** waiting, working and idle are sorted right, but inside waiting the owner can't tell who needs an answer from who just finished. The queue now has four sections: INPUT (asked you something, or blocked), WAITING (done), WORKING, IDLE. Each INPUT agent shows what it asks on a line under its name.

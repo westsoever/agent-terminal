@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -278,3 +279,68 @@ func TestChatScroll(t *testing.T) {
 }
 
 func itoa(i int) string { return strconv.Itoa(i) }
+
+// With the reply box open, ↑ on the first row and ↓ on the last row of the draft scroll the conversation; inside
+// a draft of several lines they move the cursor; with a suggestion list open they pick in it; pgup always scrolls.
+func TestTypingScroll(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	cfg, _, _ := loadConfig()
+	var lines []string
+	for i := 1; i <= 40; i++ {
+		lines = append(lines, `{"type":"user","message":{"content":"prompt `+itoa(i)+`"}}`,
+			`{"type":"assistant","message":{"content":[{"type":"text","text":"answer `+itoa(i)+`"}]}}`)
+	}
+	m := model{cfg: cfg, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(),
+		prompts: map[string]Prompt{}, scroll: &chatScroll{}, w: 140, h: 40}
+	m.agents = []Agent{{SID: "a", Name: "one", Cwd: "/tmp", State: "done", Transcript: writeTranscript(t, lines...), InTerminal: true}}
+	m.selSID = "a"
+	m.mode = mTyping
+	m.ed.open("a", "/tmp", m.editorWidth())
+	m.View()
+	press := func(k tea.KeyType) {
+		nm, _ := m.typingKey(tea.KeyMsg{Type: k})
+		m = nm.(model)
+		m.View()
+	}
+	press(tea.KeyUp)
+	if m.scroll.off != 3 {
+		t.Fatalf("empty draft: up did not scroll (off %d)", m.scroll.off)
+	}
+	press(tea.KeyDown)
+	if m.scroll.off != 0 {
+		t.Fatalf("empty draft: down did not scroll back (off %d)", m.scroll.off)
+	}
+	m.ed.ta.SetValue("line one\nline two") // the cursor ends on the second line
+	press(tea.KeyUp)
+	if m.scroll.off != 0 || m.ed.ta.Line() != 0 {
+		t.Fatalf("two-line draft: up should move the cursor (off %d, line %d)", m.scroll.off, m.ed.ta.Line())
+	}
+	press(tea.KeyUp)
+	if m.scroll.off != 3 {
+		t.Fatalf("two-line draft, first line: up did not scroll (off %d)", m.scroll.off)
+	}
+	press(tea.KeyPgDown)
+	if m.scroll.off != 0 {
+		t.Fatalf("pgdown did not scroll (off %d)", m.scroll.off)
+	}
+	m.ed.comp = []string{"@a", "@b"}
+	m.ed.compSel = 1
+	press(tea.KeyUp)
+	if m.scroll.off != 0 || m.ed.compSel != 0 {
+		t.Fatalf("suggestions open: up should pick in them (off %d, sel %d)", m.scroll.off, m.ed.compSel)
+	}
+}
+
+// An answer sent from kaching sends the agent's window back (queue.sh return); moving inside a menu does not.
+func TestReturnWindow(t *testing.T) {
+	for _, w := range []string{"key left", "key right", "key tab", "key up", "key down"} {
+		if returnWindow("s", w) != nil {
+			t.Errorf("%s returns the window", w)
+		}
+	}
+	for _, w := range []string{"answer", "fix it", "key 1", "key enter"} {
+		if returnWindow("s", w) == nil {
+			t.Errorf("%s does not return the window", w)
+		}
+	}
+}
