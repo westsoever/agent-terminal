@@ -6,7 +6,8 @@
 # code or a URL does not count).
 #   input  a sentence there ends in "?" (the last one is the ask), else a sentence there asks the owner to do or
 #          decide something ("let me know", "tell me", "should I", "you'll need to", "left the check to you" ...)
-#   done   anything else, and sentences that say nothing is needed ("no action needed from you")
+#   done   anything else, and sentences that say nothing is needed ("no action needed", "nothing is waiting on you");
+#          a bold question that leads a paragraph ("**Is anything left?** ...") is a label, not a question
 # Used by stop-check.sh (the state and the notification) and safe to run by hand on a transcript's last text.
 set -euo pipefail
 exec perl -CSD -e '
@@ -19,12 +20,13 @@ exec perl -CSD -e '
   @lines = @lines[-6 .. -1] if @lines > 6;
   my @sent;                                # the tail sentences, in order
   for my $l (@lines) {
+    $l =~ s/^(\s*(?:[-*>]|\d+[.)])?\s*)\*\*[^*\n]+\?\*\*(?=\s*\S)/$1/;  # "**Is anything left?** text": a label
     $l =~ s/\*\*|__//g;
     $l =~ s/^\s*(?:[-*>]|\d+[.)])\s+//;
     $l =~ s/^\s+|\s+$//g;
     push @sent, grep { /\S/ } split /(?<=[.?!])["\x27)\]]*\s+(?=\S)/, $l;
   }
-  my $none = qr/\b(?:no (?:action|input|decision)s? (?:is )?(?:needed|required)|nothing (?:else )?(?:is )?(?:needed )?(?:for|from) you|(?:don\x27t|do not|no) need to)\b/i;
+  my $none = qr/\b(?:no (?:action|input|decision)s? (?:is )?(?:needed|required)|nothing\b.{0,40}\byou|(?:don\x27t|do not|no) need to)\b/i;
   my $asks = join "|", map { "\\b$_\\b" } (
     "let me know", "tell me", "(?:left|leave|leaving)\\b.{0,40}\\bto you",
     "you(?:\x27ll| will)? (?:need|have) to", "(?:can|could|would) you", "do you want",

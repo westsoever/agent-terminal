@@ -66,5 +66,14 @@ Tests pass.
 Installed.
 Restarted.
 Nothing else to do.")"
+assert_eq "nothing is waiting on you" done "$(kind "Merged and pushed. Nothing is waiting on you from my side.")"
+assert_eq "nothing needs you" done "$(kind "Nothing here needs you.")"
+# a bold question that leads a paragraph is a label, not the question
+M="**Is anything left?** Everything I did is verified. These are still open, and all need you:
+- The Littlebird change above.
+- Pushing main."
+assert_eq "bold lead-in label, then a request" input "$(kind "$M")"
+assert_eq "the request is the ask, not the label" "These are still open, and all need you:" "$(ask "$M")"
+assert_eq "bold lead-in label, then a plain answer" done "$(kind "**Is anything left?** No, everything is merged and installed.")"
 assert_eq "no action needed from you" done "$(kind "Merged and installed. No action needed from you.")"
 exit 0
