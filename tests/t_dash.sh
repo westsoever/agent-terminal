@@ -67,6 +67,14 @@ rm -rf "$AGENT_HOME/sessions/sidX"* "$AGENT_HOME/sessions/sidB/STATE.md"; reg si
 assert_contains "speak: needs-input session" "$("$BIN/dash.sh" --speak)" "repoB needs your input."
 reg sidB "$B" working
 assert_contains "speak: nothing blocked summary" "$("$BIN/dash.sh" --speak)" "Nothing is blocked."
+# home folder: "~" is silent in text-to-speech, so it is said as "home"
+reg sidH "$HOME" input
+sp=$("$BIN/dash.sh" --speak)
+assert_contains "speak: home folder said as Home" "$sp" "Home needs your input."
+assert_not_contains "speak: no tilde read aloud" "$sp" "~"
+reg sidH "$HOME" working "$((NOW + 60))"
+assert_contains "speak: latest home said as home" "$("$BIN/dash.sh" --speak)" "Latest: home is working"
+reg sidH "$HOME" working
 
 # a fresh machine
 out=$(AGENT_HOME="$WORK/empty-ah" CLAUDE_DIR="$WORK/empty-claude" AGENT_REPOS_FILE="$WORK/none" "$BIN/dash.sh")
