@@ -195,7 +195,7 @@ func (m model) desk(h int) []string {
 func (m model) queuePanel(w, h int) []string {
 	in := w - 2
 	var body []string
-	// INPUT and WAITING are both Group 0 (waiting): INPUT asked the owner something, WAITING is done.
+	// INPUT and WAITING are both Group 0 (waiting): INPUT asks the owner something (needsYou), WAITING is done.
 	groups := []struct {
 		name string
 		in   func(Agent) bool
@@ -224,7 +224,7 @@ func (m model) queuePanel(w, h int) []string {
 				si = len(body)
 			}
 			body = append(body, m.queueRow(in, i, a))
-			if a.needsYou() && a.Ask != "" { // what it asks, under its row
+			if a.State == "input" && !a.Busy && a.Ask != "" { // what its last turn asked, under its row
 				body = append(body, row(in, s("   ↳ "+trunc(a.Ask, in-5), cGrey)))
 			}
 		}
@@ -298,7 +298,29 @@ func (m model) agentPanel(w, h int) []string {
 		title = append(title, s(" · "+a.Branch, cGrey))
 	}
 	var tail []string // options, files, reply: pinned to the bottom
-	if len(l.Options) > 0 {
+	if p, ok := m.prompts[a.SID]; ok && len(p.Options) > 0 {
+		tail = append(tail, "", row(in, s("THE AGENT ASKS", cDark)))
+		for _, pl := range p.Lines {
+			if mm := optRe.FindStringSubmatch(pl); mm != nil {
+				mark := "  "
+				if mm[1] != "" {
+					mark = "❯ "
+				}
+				tail = append(tail, row(in, s(mark, cOrange), s(mm[2], cOrange), s(" "+mm[3], cWhite)))
+				continue
+			}
+			st := cGrey
+			if strings.ContainsAny(pl, "☐☒✔←→") || strings.HasSuffix(strings.TrimSpace(pl), "?") {
+				st = cWhite
+			}
+			tail = append(tail, row(in, s(pl, st)))
+		}
+		hint := "1-9 pick · ←/→ other question · enter confirms"
+		if p.TypeOpt > 0 {
+			hint += " · " + m.cfg.Keys.Reply + " writes your own answer"
+		}
+		tail = append(tail, row(in, s(hint, cDark)))
+	} else if len(l.Options) > 0 {
 		tail = append(tail, "")
 		if l.Question != "" {
 			for _, ql := range wrap(l.Question, in) {
@@ -598,6 +620,7 @@ func (m model) helpView(h int) []string {
 		row2(k(K.Next)+" / "+k(K.Prev), "next / previous agent"),
 		row2(k(K.Waiting), "next agent that waits for you"),
 		row2("1-9", "send that numbered answer"),
+		row2("enter, ←, →", "when the agent asks: confirm, previous / next part"),
 		row2(K.Reply, "write a message (keys below); esc keeps it as a draft"),
 		row2(K.Open+" then a-i", "open that file"),
 		row2(K.Goto, "show the agent's own Terminal window"),

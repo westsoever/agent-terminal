@@ -26,6 +26,7 @@ type Agent struct {
 	InTerminal             bool   // the tty is a Terminal.app tab, so the terminal can type into it
 	Transcript             string
 	CtxPct                 string
+	Asking                 bool   // its screen shows a menu now (a question, an approval): it waits for the owner
 	Ask                    string // what a "needs input" turn asks the owner (meta ask=), '' when none
 }
 
@@ -42,6 +43,9 @@ func (a Agent) Group() int {
 }
 
 func (a Agent) waiting() bool {
+	if a.Asking { // Claude Code calls a session busy while its question is open; the screen says it waits
+		return true
+	}
 	if a.Busy {
 		return false
 	}
@@ -52,13 +56,17 @@ func (a Agent) waiting() bool {
 	return false
 }
 
-// needsYou: a waiting agent that asked the owner something or is stuck; the rest of the waiting ones are done.
+// needsYou: a waiting agent that asks the owner something (a menu on its screen, or its last turn asked) or is
+// stuck; the rest of the waiting ones are done.
 func (a Agent) needsYou() bool {
-	return a.waiting() && (a.State == "input" || a.State == "blocked")
+	return a.Asking || (a.waiting() && (a.State == "input" || a.State == "blocked"))
 }
 
 // Label is the short state word on the desk.
 func (a Agent) Label() string {
+	if a.Asking {
+		return "asks"
+	}
 	if a.Busy {
 		return "working"
 	}

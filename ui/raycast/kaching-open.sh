@@ -33,5 +33,13 @@ want=$(sed -n 's/^queue_main_display=//p' "${AGENT_HOME:-$HOME/.agent}/config" 2
 screens=$(osascript -l JavaScript "$QT" screens 2>/dev/null)
 frame=$(printf '%s\n' "$screens" | awk -v w="$want" 'w != "" && index(tolower($5), tolower(w)) { print $1, $2, $3, $4; exit }')
 [ -n "$frame" ] || frame=$(printf '%s\n' "$screens" | head -1 | awk '{ print $1, $2, $3, $4 }')
-# shellcheck disable=SC2086
-[ -z "$frame" ] || osascript -l JavaScript "$QT" move "$wid" $frame >/dev/null
+# A window Terminal has just opened ignores a new frame for about a second: set it until it holds (at most ~3 s).
+if [ -n "$frame" ]; then
+  for _ in 1 2 3 4 5 6 7 8; do
+    # shellcheck disable=SC2086
+    osascript -l JavaScript "$QT" move "$wid" $frame >/dev/null
+    got=$(osascript -l JavaScript "$QT" windows 2>/dev/null | awk -v i="$wid" '$1 == i { print $2, $3 }')
+    [ "$got" = "$(printf '%s' "$frame" | awk '{ print $1, $2 }')" ] && break
+    sleep 0.4
+  done
+fi

@@ -421,11 +421,21 @@ func slashCommands(cwd string) []slashEntry {
 			}
 		}
 	}
-	addDir(filepath.Join(home, ".claude"), "")
-	if cwd != "" && cwd != home {
-		addDir(filepath.Join(cwd, ".claude"), "")
+	// the session's folder and each parent up to (not including) home, nearest first, like Claude Code's project
+	// settings; then the owner's own
+	var projects []string
+	for d := filepath.Clean(cwd); cwd != "" && d != home && d != "/" && d != "."; d = filepath.Dir(d) {
+		projects = append(projects, filepath.Join(d, ".claude"))
 	}
-	for _, pd := range enabledPluginDirs(home) {
+	for _, p := range projects {
+		addDir(p, "")
+	}
+	addDir(filepath.Join(home, ".claude"), "")
+	settings := []string{filepath.Join(home, ".claude", "settings.json")}
+	for _, p := range projects {
+		settings = append(settings, filepath.Join(p, "settings.json"), filepath.Join(p, "settings.local.json"))
+	}
+	for _, pd := range enabledPluginDirs(home, settings) {
 		addDir(pd.dir, pd.name+":")
 	}
 	slashCache[cwd], slashAt[cwd] = out, time.Now()
@@ -434,21 +444,27 @@ func slashCommands(cwd string) []slashEntry {
 
 type pluginDir struct{ name, dir string }
 
-// enabledPluginDirs: for each plugin enabled in ~/.claude/settings.json ("name@marketplace": true), its newest
-// version folder in the plugin cache.
-func enabledPluginDirs(home string) []pluginDir {
-	b, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
-	if err != nil {
-		return nil
-	}
-	var st struct {
-		Enabled map[string]bool `json:"enabledPlugins"`
-	}
-	if json.Unmarshal(b, &st) != nil {
-		return nil
+// enabledPluginDirs: for each plugin enabled ("name@marketplace": true) in the owner's settings or a project's
+// (later files win, so a project can turn one on or off), its newest version folder in the plugin cache.
+func enabledPluginDirs(home string, settingsFiles []string) []pluginDir {
+	enabled := map[string]bool{}
+	for _, f := range settingsFiles {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		var st struct {
+			Enabled map[string]bool `json:"enabledPlugins"`
+		}
+		if json.Unmarshal(b, &st) != nil {
+			continue
+		}
+		for id, on := range st.Enabled {
+			enabled[id] = on
+		}
 	}
 	var out []pluginDir
-	for id, on := range st.Enabled {
+	for id, on := range enabled {
 		name, market, ok := strings.Cut(id, "@")
 		if !on || !ok {
 			continue

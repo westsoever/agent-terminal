@@ -5,6 +5,9 @@
 //   keys TTY KEY...      press keys: 0-9, enter, esc, tab, up, down, left, right, backspace
 //   raise TTY            select the tab, bring its window to the front and activate Terminal (the `g` key)
 //   ttys                 every Terminal tab's tty, one per line (which sessions can be typed into)
+//   screen TTY           what the tab shows now (its visible text), for reading a menu the agent shows
+//   answer TTY N TEXT    in a menu, pick option N (its "Type something." line) and type TEXT; the newline that
+//                        do script adds submits it, so no extra Enter
 // Typing text needs no focus. A key press is posted to Terminal's process, so the tab's window is put in front
 // of Terminal's other windows for ~0.1 s and the window that was in front is put back (the brief flicker the
 // owner accepted, design 2026-10-17). `do script` alone does not submit reliably: Claude Code treats a long
@@ -41,6 +44,17 @@ function inInputBox(tab, text) {
   return want.length > 0 && box.includes(want);
 }
 
+// frontIs: wait up to 0.5 s until the frontmost on-screen Terminal window (window server order) is id.
+function frontIs(id) {
+  for (let i = 0; i < 25; i++) {
+    const list = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(1, 0))) || [];
+    const top = list.find(w => w.kCGWindowOwnerName === 'Terminal' && w.kCGWindowLayer === 0);
+    if (top && top.kCGWindowNumber === id) return true;
+    delay(0.02);
+  }
+  return false;
+}
+
 function press(t, win, tab, keys) {
   const apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.Terminal');
   if (apps.count === 0) return 'error: Terminal not running';
@@ -49,7 +63,12 @@ function press(t, win, tab, keys) {
   try { prev = t.windows[0].id(); } catch (e) {}
   tab.selected = true;
   win.index = 1;
-  delay(0.05);
+  // A key event goes to Terminal's front window: wait until that is really this window, and send nothing
+  // when it never gets there (a key must never land in another session or in kaching itself).
+  if (!frontIs(win.id())) {
+    if (prev !== null && prev !== win.id()) { try { t.windows.byId(prev).index = 1; } catch (e) {} }
+    return 'error: could not bring its window to the front, no key sent';
+  }
   for (const k of keys) {
     const c = CODES[k];
     if (c === undefined) return 'error: unknown key ' + k;
@@ -96,6 +115,16 @@ function run(argv) {
       return inInputBox(tab, text) ? 'error: typed but not submitted (press enter in its window)' : 'ok';
     }
     if (cmd === 'keys') return press(t, win, tab, argv.slice(2));
+    if (cmd === 'screen') return tab.contents();
+    if (cmd === 'answer') {
+      const r = press(t, win, tab, [argv[2]]);
+      if (r !== 'ok') return r;
+      delay(0.4);
+      const text = argv.slice(3).join(' ');
+      if (!text) return 'error: empty text';
+      t.doScript(text, { in: tab });
+      return 'ok';
+    }
     if (cmd === 'raise') {
       tab.selected = true; win.index = 1; t.activate();
       return 'ok';

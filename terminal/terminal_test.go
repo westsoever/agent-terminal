@@ -151,23 +151,27 @@ func TestQueueSections(t *testing.T) {
 		{SID: "i", Name: "asks", State: "input", Ask: "Want me to merge?", Since: now.Add(-time.Minute)},
 		{SID: "z", Name: "fresh", State: "idle", Since: now},
 		{SID: "b", Name: "stuck", State: "blocked", Since: now.Add(-2 * time.Hour)},
+		{SID: "m", Name: "menu", State: "working", Busy: true, Asking: true, Ask: "stale", Since: now.Add(-30 * time.Minute)},
 	}
 	sortAgents(m.agents)
 	var order []string
 	for _, a := range m.agents {
 		order = append(order, a.Name)
 	}
-	if got, want := strings.Join(order, " "), "stuck asks old-done busy fresh"; got != want {
+	if got, want := strings.Join(order, " "), "stuck menu asks old-done busy fresh"; got != want {
 		t.Errorf("order: got %q want %q", got, want)
 	}
 	m.selSID = "z"
 	out := ansiRe.ReplaceAllString(strings.Join(m.queuePanel(60, 30), "\n"), "")
 	last := -1
-	for _, h := range []string{" INPUT", "stuck", "asks", "↳ Want me to merge?", " WAITING", "old-done", " WORKING", "busy", " IDLE", "fresh"} {
+	for _, h := range []string{" INPUT", "stuck", "menu", "asks", "↳ Want me to merge?", " WAITING", "old-done", " WORKING", "busy", " IDLE", "fresh"} {
 		at := strings.Index(out, h)
 		if at < 0 || at < last {
 			t.Fatalf("%q missing or out of order in:\n%s", h, out)
 		}
 		last = at
+	}
+	if strings.Contains(out, "stale") {
+		t.Errorf("an ask from an earlier turn is shown:\n%s", out)
 	}
 }
