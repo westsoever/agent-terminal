@@ -21,7 +21,9 @@
 #   --route    the voice dispatcher's routing list, for a model to read (no ANSI, no speech): a header line, then one TSV
 #              line per LIVE Claude Code session ($CLAUDE_DIR/sessions/*.json, kill -0 pid; the dispatcher and claude-mem
 #              observers left out):  name  message_to  status  state  state_dir  notes  focus  branch
-#              message_to is the json name (what SendMessage takes); name is "home" for ~; a missing value is "-".
+#              message_to is the json name (what SendMessage takes), or uds:<socket> when two live sessions
+#              share that name; a json whose procStart differs from its pid's start time is left out (reused pid);
+#              name is "home" for ~; a missing value is "-".
 #              Focused first (its tty is in $AGENT_HOME/dispatcher/focus, "<tty> <epoch>", at most DASH_FOCUS_MAX_AGE
 #              seconds old), then busy, idle, then by name. Columns and DASH_PS_TTY_CMD: see route_list in this file.
 # Git sync (bin/sync-check.sh writes $AGENT_HOME/sync-check.md): the default view ends with one `sync:` line when the
@@ -148,7 +150,8 @@ meta_load() {
 #              name "dispatcher" or cwd $AGENT_HOME/dispatcher), claude-mem observer sessions (cwd under
 #              /.claude-mem/observer-sessions, as terminal/snapshot.go hidden()).
 #   name       the display name used elsewhere (name_for: repo/worktree dir, else the folder), "home" for the home folder
-#   message_to the json name: what ListAgents shows and SendMessage takes
+#   message_to the json name: what ListAgents shows and SendMessage takes; when two live sessions share it,
+#              "uds:<messagingSocketPath>" instead (SendMessage takes that address; the bare name would be ambiguous)
 #   status     json busy|idle;  state: Kaching's meta state= (working/input/blocked/done/...)
 #   state_dir  $AGENT_HOME/sessions/<sid> if it holds STATE.md, else <root>/.agent if that does (root: meta root=,
 #              else the git toplevel of cwd), else $AGENT_HOME/sessions/<sid>;  notes: yes when state_dir has STATE.md
@@ -157,14 +160,16 @@ meta_load() {
 #              at most DASH_FOCUS_MAX_AGE (600) seconds old
 #   branch     meta branch=, else `git symbolic-ref --short -q HEAD` in cwd
 # A missing value is "-", so no field is ever empty. Sorted focused first, then busy, idle, other, then name and
-# message_to. No live session: the header only. The ttys come from ONE `ps -o pid=,tty= -p <pid,pid,...>`;
+# message_to. No live session: the header only. The ttys and start times come from ONE
+# `TZ=UTC0 ps -o pid=,tty=,lstart= -p <pid,pid,...>`;
 # DASH_PS_TTY_CMD (tests) replaces it: it is run with the comma-separated pid list as its one argument and prints
-# "pid tty" lines. ----
+# "pid tty [lstart]" lines (no lstart: the reused-pid check is skipped for that pid). ----
 route_list() {
   local sdir="$CLAUDE_DIR/sessions" f files=() raw rc
   local jqf='def v: if . == null then "-" else tostring | if . == "" then "-" else . end end;
     select(type == "object" and (.pid | type) == "number" and .pid > 0)
-    | [(.pid | tostring), (.sessionId | v), (.cwd | v), (.name | v), (.status | v), (.kind | v)] | @tsv'
+    | [(.pid | tostring), (.sessionId | v), (.cwd | v), (.name | v), (.status | v), (.kind | v),
+       (.procStart | v), (.messagingSocketPath | v)] | @tsv'
   printf 'name\tmessage_to\tstatus\tstate\tstate_dir\tnotes\tfocus\tbranch\n'
   [ -d "$sdir" ] || return 0
   for f in "$sdir"/*.json; do [ -f "$f" ] && files+=("$f"); done
@@ -178,26 +183,47 @@ route_list() {
   local home_l=$HOME home_p disp_l="$AGENT_HOME/dispatcher" disp_p
   home_p=$(cd "$HOME" 2>/dev/null && pwd -P || printf '%s' "$HOME")
   disp_p=$(cd "$disp_l" 2>/dev/null && pwd -P || printf '%s' "$disp_l")
-  local pid sid cwd jname jstatus kind live="$TMP/route.live" pids=""
+  local pid sid cwd jname jstatus kind pstart sock live="$TMP/route.live" pids=""
   : >"$live"
-  while IFS=$'\t' read -r pid sid cwd jname jstatus kind; do
+  while IFS=$'\t' read -r pid sid cwd jname jstatus kind pstart sock; do
     [ -n "$pid" ] || continue
     case "$kind" in -|interactive) ;; *) continue ;; esac
     [ "$jname" != dispatcher ] || continue
     if [ "$cwd" = "$disp_l" ] || [ "$cwd" = "$disp_p" ]; then continue; fi
     case "$cwd" in */.claude-mem/observer-sessions|*/.claude-mem/observer-sessions/*) continue ;; esac
     kill -0 "$pid" 2>/dev/null || continue
-    printf '%s\t%s\t%s\t%s\t%s\n' "$pid" "$sid" "$cwd" "$jname" "$jstatus" >>"$live"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$sid" "$cwd" "$jname" "$jstatus" "$pstart" "$sock" >>"$live"
     pids="${pids:+$pids,}$pid"
   done <<<"$raw"
   [ -n "$pids" ] || return 0
 
-  # ttys: one ps call for every pid. TTYS holds " pid=tty " pairs; "??" (no terminal) never matches a focus.
-  local TTYS=" " p t
-  while read -r p t; do
+  # ttys and start times: one ps call for every pid. TTYS holds " pid=tty " pairs; "??" (no terminal) never
+  # matches a focus. STARTS holds " pid=Dow_Mon_D_HH:MM:SS_YYYY " in UTC, the form of the json's procStart.
+  local TTYS=" " STARTS=" " p t w1 w2 w3 w4 w5
+  while read -r p t w1 w2 w3 w4 w5; do
     case "$p" in ''|*[!0-9]*) continue ;; esac
     TTYS="$TTYS$p=${t#/dev/} "
-  done < <(if [ -n "${DASH_PS_TTY_CMD:-}" ]; then "$DASH_PS_TTY_CMD" "$pids"; else ps -o pid=,tty= -p "$pids"; fi 2>/dev/null || true)
+    case "$w3" in ''|*[!0-9]*) ;; *) [ -z "$w5" ] || STARTS="$STARTS$p=${w1}_${w2}_$((10#$w3))_${w4}_$w5 " ;; esac
+  done < <(if [ -n "${DASH_PS_TTY_CMD:-}" ]; then "$DASH_PS_TTY_CMD" "$pids"; else TZ=UTC0 ps -o pid=,tty=,lstart= -p "$pids"; fi 2>/dev/null || true)
+
+  # A crashed session leaves its json behind, and its pid can be reused by another process: when both start
+  # times are known and differ, the row is not that session. Then count names: SendMessage cannot pick between
+  # two sessions with the same bare name, so those get their socket address (uds:<path>) as message_to.
+  local live2="$TMP/route.live2" js ps_s
+  : >"$live2"
+  while IFS=$'\t' read -r pid sid cwd jname jstatus pstart sock; do
+    if [ "$pstart" != "-" ]; then
+      ps_s=""
+      case "$STARTS" in *" $pid="*) ps_s=${STARTS#*" $pid="}; ps_s=${ps_s%% *} ;; esac
+      read -r w1 w2 w3 w4 w5 <<<"$pstart"
+      js=""; case "$w3" in ''|*[!0-9]*) ;; *) js="${w1}_${w2}_$((10#$w3))_${w4}_$w5" ;; esac
+      if [ -n "$ps_s" ] && [ -n "$js" ] && [ "$ps_s" != "$js" ]; then continue; fi
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$sid" "$cwd" "$jname" "$jstatus" "$sock" >>"$live2"
+  done <"$live"
+  local dupes
+  dupes=$(cut -f4 "$live2" | LC_ALL=C sort | uniq -d)
+
 
   # the focus file: "<tty> <epoch>"; fresh when the epoch (else the mtime) is at most DASH_FOCUS_MAX_AGE old and at most 60 s ahead
   local ffile="$AGENT_HOME/dispatcher/focus" ftty="" fep="" fage max=${DASH_FOCUS_MAX_AGE:-600} focus_tty=""
@@ -213,7 +239,10 @@ route_list() {
   # git lookups (only for what the meta lacks), cached per cwd: many sessions share a folder
   local nl=$'\n' us=$'\037' gcache=$'\n' rest g_root g_branch
   local root branch state sd notes focus name tty srank frank
-  while IFS=$'\t' read -r pid sid cwd jname jstatus; do
+  local msg
+  while IFS=$'\t' read -r pid sid cwd jname jstatus sock; do
+    msg=$jname
+    if [ "$sock" != "-" ] && [ -n "$dupes" ] && printf '%s\n' "$dupes" | grep -qxF -- "$jname"; then msg="uds:$sock"; fi
     # the registry dir name, as hook_init derives it from the session id
     case "$sid" in .*|*..*|*[!A-Za-z0-9._-]*) sid="sid-$(printf '%s' "$sid" | shasum | cut -c1-16)" ;; esac
     [ "${#sid}" -le 128 ] || sid="sid-$(printf '%s' "$sid" | shasum | cut -c1-16)"
@@ -245,9 +274,9 @@ route_list() {
     focus="-"; frank=1
     if [ -n "$focus_tty" ] && [ "$tty" = "$focus_tty" ]; then focus=focused; frank=0; fi
     case "$jstatus" in busy) srank=0 ;; idle) srank=1 ;; *) srank=2 ;; esac
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$frank" "$srank" "$name" "$jname" "$jstatus" "$state" "$sd" \
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$frank" "$srank" "$name" "$msg" "$jstatus" "$state" "$sd" \
       "$notes" "$focus" "${branch:--}"
-  done <"$live" | LC_ALL=C sort -t $'\t' -k1,1n -k2,2n -k3,3 -k4,4 | cut -f3-
+  done <"$live2" | LC_ALL=C sort -t $'\t' -k1,1n -k2,2n -k3,3 -k4,4 | cut -f3-
 }
 if [ "$MODE" = route ]; then route_list; exit 0; fi
 

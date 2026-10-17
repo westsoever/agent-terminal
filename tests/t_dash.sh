@@ -407,7 +407,7 @@ cat >"$WORK/fake-ps" <<'EOS'
 printf '%s\n' "$*" >>"$(dirname "$0")/fake-ps.log"
 f="$(dirname "$0")/route-ttys"; [ -f "$f" ] || exit 0
 IFS=, read -r -a want <<<"$1"
-while read -r p t; do for w in "${want[@]}"; do if [ "$p" = "$w" ]; then printf '%5s %s\n' "$p" "$t"; fi; done; done <"$f"
+while read -r p t rest; do for w in "${want[@]}"; do if [ "$p" = "$w" ]; then printf '%5s %s %s\n' "$p" "$t" "$rest"; fi; done; done <"$f"
 EOS
 chmod +x "$WORK/fake-ps"
 route() { AGENT_HOME="$RAH" CLAUDE_DIR="$RCD" DASH_NOW="$RNOW" DASH_PS_TTY_CMD="$WORK/fake-ps" "$BIN/dash.sh" --route; }
@@ -514,5 +514,40 @@ err=$("$BIN/dash.sh" --bogus 2>&1 >/dev/null); rc=$?
 assert_eq "an unknown flag exits 64" "64" "$rc"
 assert_contains "the unknown-flag text lists --route" "$err" "--route"
 assert_contains "--help lists --route" "$("$BIN/dash.sh" --help)" "--route"
-kill $L1 $L2 $L3 $L4 2>/dev/null
+
+# ---------------- --route: duplicate names and reused pids ----------------
+# Two live sessions with the same name: SendMessage needs more than the bare name, so message_to becomes the
+# session's socket address (uds:<messagingSocketPath>), which SendMessage takes as is. A json whose procStart
+# (UTC, as Claude Code writes it) differs from the live process's start time is a crashed session whose pid was
+# reused: it is left out. The fake ps prints "pid tty lstart" from $WORK/route-ttys.
+RCD2="$WORK/route-claude2"; mkdir -p "$RCD2/sessions"
+route2() { AGENT_HOME="$RAH" CLAUDE_DIR="$RCD2" DASH_NOW="$RNOW" DASH_PS_TTY_CMD="$WORK/fake-ps" "$BIN/dash.sh" --route; }
+rj2() { # file pid name socket(''= absent) procStart(''= absent)
+  jq -nc --argjson p "$2" --arg n "$3" --arg so "$4" --arg ps "$5" --arg c "$RPLAIN" \
+    '{pid:$p,sessionId:("sid-" + ($p|tostring)),cwd:$c,name:$n,status:"idle",kind:"interactive"}
+     | if $so != "" then .messagingSocketPath = $so else . end | if $ps != "" then .procStart = $ps else . end' \
+    >"$RCD2/sessions/$1.json"
+}
+sleep 600 & D1=$!; sleep 600 & D2=$!; sleep 600 & D3=$!; sleep 600 & D4=$!
+trap 'kill $L1 $L2 $L3 $L4 $D1 $D2 $D3 $D4 2>/dev/null' EXIT
+printf '%s ttys011 Sat Oct 17 11:02:20 2026\n%s ttys012 Sat Oct 17 11:28:52 2026\n%s ttys013 Fri Oct  7 09:00:01 2026\n%s ttys014\n' \
+  "$D1" "$D2" "$D3" "$D4" >"$WORK/route-ttys"
+rj2 d1 "$D1" miso-Sessions /tmp/cc-socks/d1.sock "Sat Oct 17 11:02:20 2026"
+rj2 d2 "$D2" miso-Sessions /tmp/cc-socks/d2.sock "Sat Oct 17 11:28:52 2026"
+rj2 d3 "$D3" solo /tmp/cc-socks/d3.sock "Fri Oct 7 09:00:01 2026"
+mt() { route2 | awk -F'\t' 'NR > 1 && $1 == "routeplain" { print $2 }' | LC_ALL=C sort | tr '\n' ' '; }
+assert_eq "route: two sessions with the same name get their socket addresses" \
+  "solo uds:/tmp/cc-socks/d1.sock uds:/tmp/cc-socks/d2.sock " "$(mt)"
+assert_eq "route: a single-digit day matches however it is padded" "1" "$(route2 | grep -c '	solo	')"
+rj2 d2 "$D2" miso-Sessions "" "Sat Oct 17 11:28:52 2026"
+assert_eq "route: a duplicate without a socket keeps its name; the other still gets its address" \
+  "miso-Sessions solo uds:/tmp/cc-socks/d1.sock " "$(mt)"
+rj2 d2 "$D2" miso-Sessions /tmp/cc-socks/d2.sock "Sat Oct 17 08:00:00 2026"
+assert_eq "route: a reused pid (procStart differs) is left out, so the other name is unique again" \
+  "miso-Sessions solo " "$(mt)"
+rj2 d4 "$D4" nostart /tmp/cc-socks/d4.sock "Sat Oct 17 01:00:00 2026"
+assert_eq "route: no start time from ps keeps the row" "1" "$(route2 | grep -c '	nostart	')"
+rj2 d4 "$D4" nostart /tmp/cc-socks/d4.sock ""
+assert_eq "route: no procStart in the json keeps the row" "1" "$(route2 | grep -c '	nostart	')"
+kill $L1 $L2 $L3 $L4 $D1 $D2 $D3 $D4 2>/dev/null
 exit 0
