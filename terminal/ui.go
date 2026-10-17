@@ -659,8 +659,8 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case c == "W" || c == "WALL":
 		m.view = vWall
-	case strings.HasPrefix(c, "A"):
-		if n, err := strconv.Atoi(c[1:]); err == nil && n >= 1 && n <= len(m.agents) {
+	case len(c) > 1 && c[0] == 'A' && isDigits(c[1:]):
+		if n, _ := strconv.Atoi(c[1:]); n >= 1 && n <= len(m.agents) {
 			m.selSID = m.agents[n-1].SID
 			m.view = vDesk
 			m.writeState()
@@ -696,6 +696,15 @@ func kitDir() string {
 func dirExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && st.IsDir()
+}
+
+func isDigits(t string) bool {
+	for _, r := range t {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return t != ""
 }
 
 func proposalsBin() string {

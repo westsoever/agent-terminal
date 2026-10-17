@@ -535,6 +535,10 @@ func (m model) textView(title string, lines []string, h int) []string {
 			st = cWhite
 			l = strings.TrimPrefix(l, "## ")
 		}
+		if width(l) <= in { // keep its spacing: columns stay aligned
+			body = append(body, " "+row(in, s(l, st))+" ")
+			continue
+		}
 		for _, wl := range wrap(l, in) {
 			body = append(body, " "+row(in, s(wl, st))+" ")
 		}
@@ -550,24 +554,40 @@ func (m model) helpView(h int) []string {
 		}
 		return key
 	}
+	row2 := func(key, what string) string { return fmt.Sprintf("%-14s %s", key, what) }
 	lines := []string{
-		"## Moving",
-		fmt.Sprintf("%s / %s   next / previous agent        %s   next agent that waits for you", k(K.Next), k(K.Prev), k(K.Waiting)),
-		fmt.Sprintf("%s   wall of every agent   %s   zoom one tile   esc   back to the desk", K.Wall, K.Zoom),
-		fmt.Sprintf("%s   command line: IN AG FL RP PR PC · A<n> agent n · a name · HELP · QUIT", K.Command),
+		"## Go to a view: push " + K.Command + ", write the code, push enter. esc goes back to the desk.",
+		row2("IN", "inbox (the desk): all agents and the selected agent"),
+		row2("AG or "+K.Wall, "agents (the wall): all agents as tiles"),
+		row2("FL", "files the agents wrote about (enter opens)"),
+		row2("RP", "repos with work that you can lose"),
+		row2("PR", "proposals: enter shows, a approve, x reject, z hide 7 days"),
+		row2("PC", "Paperclip issues: r comment, enter opens in the browser"),
+		row2("A3, or a name", "select agent 3, or the first agent whose name starts so"),
+		row2("HELP, QUIT", "this page; stop kaching (ctrl+c also stops it)"),
 		"",
-		"## Answering the selected agent",
-		"1-9   pick its numbered option (a menu gets the key, a list in its message gets the number + enter)",
-		fmt.Sprintf("%s   type a free reply, enter sends, esc cancels", K.Reply),
-		fmt.Sprintf("%s + letter   open a file it mentioned        %s   go to its own Terminal window", K.Open, K.Goto),
-		fmt.Sprintf("%s   dismiss: out of the queue without an answer (its window goes back)", K.Dismiss),
+		"## Desk",
+		row2(k(K.Next)+" / "+k(K.Prev), "next / previous agent"),
+		row2(k(K.Waiting), "next agent that waits for you"),
+		row2("1-9", "send that numbered answer"),
+		row2(K.Reply, "write a message: enter sends, esc cancels"),
+		row2(K.Open+" then a-i", "open that file"),
+		row2(K.Goto, "show the agent's own Terminal window"),
+		row2(K.Dismiss, "remove a waiting agent from the list, no answer"),
+		row2(K.Refresh, "read all data again"),
 		"",
-		"## Pre-written replies (" + tildify(configPath()) + ")",
+		"## Wall",
+		row2("1-9", "select that tile"),
+		row2(K.Zoom, "tile on the full screen, again to go back (then 1-9 answer)"),
+		"",
+		"## Fixed messages (desk and wall; space keys: push space, then the key)",
 	}
 	for _, r := range m.cfg.Replies {
-		lines = append(lines, fmt.Sprintf("%-8s %-20s → %q", r.Key, r.Label, r.Text))
+		lines = append(lines, row2(r.Key, fmt.Sprintf("%q", r.Text)))
 	}
-	lines = append(lines, "", "Edit the file and save: the terminal reloads it. ctrl+c quits.")
+	lines = append(lines, "",
+		"Change keys and messages in "+tildify(configPath())+". Save: kaching reloads it.",
+		"Full manual: ~/.claude/kaching/docs/kaching-manual.md")
 	return m.textView("help", lines, h)
 }
 
