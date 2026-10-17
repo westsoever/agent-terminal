@@ -8,22 +8,28 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Last is what the desk shows for the selected agent, read from the tail of its transcript.
 type Last struct {
-	Text     string   // the agent's last message
-	Question string   // an open AskUserQuestion, '' when none
-	Options  []string // numbered options: from the open question, else "1. ..." lines in the last message
-	Menu     bool     // true: the options are a menu in Claude Code (answer with a key press, no Enter)
-	Files    []string // paths the last message mentions that exist, absolute
+	Text     string    // the agent's last message
+	Question string    // an open AskUserQuestion, '' when none
+	Options  []string  // numbered options: from the open question, else "1. ..." lines in the last message
+	Menu     bool      // true: the options are a menu in Claude Code (answer with a key press, no Enter)
+	Files    []string  // paths the last message mentions that exist, absolute
+	Recap    string    // Claude Code's latest recap (the "while you were away" summary), '' when none
+	RecapAt  time.Time // when Claude Code wrote it
 }
 
 const tailBytes = 512 << 10
 
 type entry struct {
-	Type    string `json:"type"`
-	Message struct {
+	Type      string          `json:"type"`
+	Subtype   string          `json:"subtype"`
+	Content   json.RawMessage `json:"content"` // system entries: plain text
+	Timestamp time.Time       `json:"timestamp"`
+	Message   struct {
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
 }
@@ -69,11 +75,22 @@ func readLast(path, cwd string) Last {
 	var openAsk *askInput
 	openID := ""
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
-		if len(line) == 0 || (!bytes.Contains(line, []byte(`"assistant"`)) && !bytes.Contains(line, []byte(`"user"`))) {
+		if len(line) == 0 || (!bytes.Contains(line, []byte(`"assistant"`)) && !bytes.Contains(line, []byte(`"user"`)) &&
+			!bytes.Contains(line, []byte(`"away_summary"`))) {
 			continue
 		}
 		var e entry
-		if json.Unmarshal(line, &e) != nil || (e.Type != "assistant" && e.Type != "user") {
+		if json.Unmarshal(line, &e) != nil {
+			continue
+		}
+		if e.Type == "system" && e.Subtype == "away_summary" {
+			var c string
+			if json.Unmarshal(e.Content, &c) == nil && strings.TrimSpace(c) != "" {
+				l.Recap, l.RecapAt = recapText(c), e.Timestamp
+			}
+			continue
+		}
+		if e.Type != "assistant" && e.Type != "user" {
 			continue
 		}
 		var blocks []block
@@ -107,6 +124,15 @@ func readLast(path, cwd string) Last {
 	}
 	l.Files = mentionedFiles(l.Text, cwd)
 	return l
+}
+
+// recapText drops Claude Code's "(disable recaps in /config)" hint from the end of a recap.
+func recapText(c string) string {
+	c = strings.TrimSpace(c)
+	if i := strings.LastIndex(c, "(disable recaps"); i > 0 && strings.HasSuffix(c, ")") {
+		c = strings.TrimSpace(c[:i])
+	}
+	return c
 }
 
 var numRe = regexp.MustCompile(`^\s*(?:[-*]\s+)?\**(\d)[.)]\**\s+(.+)$`)

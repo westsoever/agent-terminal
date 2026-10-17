@@ -104,6 +104,19 @@ var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // Every view, at several sizes, is exactly as tall as the screen and no line is wider than it; framed lines
 // fill the width exactly (the box lines stay straight).
+const recapLine = `{"type":"system","subtype":"away_summary","content":"We fixed the queue. Next, merge it. (disable recaps in /config)","timestamp":"2026-10-17T15:29:15.319Z"}`
+
+func TestReadLastRecap(t *testing.T) {
+	msg := `{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}`
+	l := readLast(writeTranscript(t, msg, recapLine), "/")
+	if l.Recap != "We fixed the queue. Next, merge it." || l.RecapAt.IsZero() || l.Text != "done" {
+		t.Fatalf("got %+v", l)
+	}
+	if l := readLast(writeTranscript(t, msg), "/"); l.Recap != "" {
+		t.Fatalf("no recap line, got %q", l.Recap)
+	}
+}
+
 func TestViewGeometry(t *testing.T) {
 	t.Setenv("AGENT_HOME", t.TempDir())
 	cfg, _, _ := loadConfig()
@@ -115,10 +128,12 @@ func TestViewGeometry(t *testing.T) {
 	}
 	sortAgents(m.agents)
 	m.selSID = m.agents[0].SID
+	long := strings.Replace(recapLine, "We fixed the queue.", strings.Repeat("A long recap line. ", 40), 1)
+	m.agents[0].Transcript = writeTranscript(t, `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}`, long)
 	m.pc = PCState{Items: []PCItem{{Ref: "COS-5", Status: "blocked", Title: "t", Detail: "why", Needs: true}}}
 	m.props = []string{"skill x: something"}
 	m.sync = []string{"## repo", "needs: 1 stash"}
-	for _, v := range []view{vDesk, vWall, vFiles, vRepos, vProposals, vPaperclip, vHelp} {
+	for _, v := range []view{vDesk, vWall, vFiles, vRepos, vRecaps, vProposals, vPaperclip, vHelp} {
 		for _, sz := range [][2]int{{80, 24}, {120, 40}, {200, 60}} {
 			m.view, m.w, m.h = v, sz[0], sz[1]
 			lines := strings.Split(m.View(), "\n")

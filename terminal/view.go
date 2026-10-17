@@ -35,6 +35,8 @@ func (m model) View() string {
 		body = m.textView("repos", m.sync, bodyH)
 	case vProposals:
 		body = m.proposalsView(bodyH)
+	case vRecaps:
+		body = m.recapsView(bodyH)
 	case vPaperclip:
 		body = m.paperclipView(bodyH)
 	case vHelp:
@@ -351,6 +353,19 @@ func (m model) agentPanel(w, h int) []string {
 	for _, ml := range collapse(wrap(text, in)) {
 		msg = append(msg, ml)
 	}
+	var body []string
+	if l.Recap != "" { // the recap goes on top: at most a third of the space, the message keeps the rest
+		rl := wrap(l.Recap, in)
+		if most := max(1, avail/3-1); len(rl) > most {
+			rl = append(rl[:most-1:most-1], trunc(rl[most-1], in-1)+"…")
+		}
+		body = append(body, " "+row(in, s("RECAP", cDark), s(" · "+age(l.RecapAt)+" ago", cDark))+" ")
+		for _, r := range rl {
+			body = append(body, " "+row(in, s(r, cWhite))+" ")
+		}
+		body = append(body, "")
+		avail -= len(rl) + 2
+	}
 	if avail < 1 {
 		avail = 1
 	}
@@ -358,11 +373,10 @@ func (m model) agentPanel(w, h int) []string {
 		msg = msg[len(msg)-avail:]
 		msg[0] = "…"
 	}
-	var body []string
 	for _, ml := range msg {
 		body = append(body, " "+row(in, s(ml, cGrey))+" ")
 	}
-	for len(body) < avail {
+	for len(body) < h-2-len(tail) {
 		body = append(body, "")
 	}
 	for _, t := range tail {
@@ -523,6 +537,19 @@ func (m model) filesView(h int) []string {
 	return m.listBox("FILES AGENTS MENTIONED", items, h, "no files mentioned yet")
 }
 
+// recapsView: every agent's latest recap, newest first; the selected one shows it in full.
+func (m model) recapsView(h int) []string {
+	var items [][]seg
+	var details []string
+	for _, r := range m.recaps() {
+		items = append(items, []seg{s(padTo(r.agent.Name, 18), cWhite), s(" "+padTo(age(r.last.RecapAt), 4), cDark),
+			s(" "+r.last.Recap, cGrey)})
+		details = append(details, r.last.Recap)
+	}
+	return m.listBox("RECAPS   what Claude Code summed up while you were away · enter goes to the agent", items, h,
+		"no recaps yet: Claude Code writes one when you come back to a session after a while", details...)
+}
+
 func (m model) proposalsView(h int) []string {
 	var items [][]seg
 	for _, p := range m.props {
@@ -598,6 +625,7 @@ func (m model) helpView(h int) []string {
 		row2("AG or "+K.Wall, "agents (the wall): all agents as tiles"),
 		row2("FL", "files the agents wrote about (enter opens)"),
 		row2("RP", "repos with work that you can lose"),
+		row2("RC", "recaps: what each agent summed up while you were away (enter goes to it)"),
 		row2("PR", "proposals: enter shows, a approve, x reject, z hide 7 days"),
 		row2("PC", "Paperclip issues: "+K.Reply+" comment, enter opens in the browser"),
 		row2("A3, or a name", "select agent 3, or the first agent whose name starts so"),
@@ -657,7 +685,7 @@ func (m model) footer() []string {
 		add(&r1, K.Next+" "+K.Prev, "next/prev")
 		add(&r1, key(K.Waiting), "next waiting")
 		add(&r1, "esc", "desk")
-	case vFiles, vProposals, vPaperclip, vRepos:
+	case vFiles, vProposals, vRecaps, vPaperclip, vRepos:
 		add(&r1, K.Next+" "+K.Prev, "move")
 		add(&r1, "enter", "open")
 		add(&r1, "esc", "desk")

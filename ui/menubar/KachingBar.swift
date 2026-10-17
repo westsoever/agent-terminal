@@ -9,7 +9,11 @@
 //   KachingSnapshot     the model: one computed reading of Kaching's state, plus the menu it implies (MenuEntry list)
 //   KachingStatusProvider  reads the files and runs `dash.sh --counts` (cheap, read-only); no UI code
 //   StatusBarController  draws the dot and the menu from a snapshot; actions open Terminal
-// A later TranscriptProvider / notification poster plugs in next to KachingStatusProvider and adds MenuEntry cases.
+//
+// Menu: Open Kaching (ui/raycast/kaching-open.sh: brings kaching forward, or starts it); one submenu per open
+// proposal (Show and Approve open Terminal, approve asks for its typed code there; Reject and Snooze 7 days run
+// here); Recaps: the latest recap (Claude Code's "while you were away" summary, an away_summary line in the
+// transcript) of each live session, newest first.
 //
 // Signals (no launchctl calls):
 //   running  $LAUNCH_AGENTS_DIR/org.kaching.watch.plist exists AND the newest mtime of $AGENT_HOME/watch.heartbeat
@@ -24,7 +28,7 @@
 // are reported too; queue.sh leaves those alone. KACHING_BAR_DRAGS=off turns the watcher off.
 //
 // CLI: KachingBar --status-once  prints the computed state as key=value lines and exits (used by tests/t_menubar.sh).
-// Env: AGENT_HOME (~/.agent) KACHING_DIR (~/.claude/kaching) LAUNCH_AGENTS_DIR (~/Library/LaunchAgents)
+// Env: AGENT_HOME (~/.agent) KACHING_DIR (~/.claude/kaching) LAUNCH_AGENTS_DIR (~/Library/LaunchAgents) CLAUDE_DIR (~/.claude)
 //      KACHING_BAR_STALE_SECS (660) KACHING_BAR_POLL_SECS (12); the CHING_* names from before D35 still count.
 //      The watcher counts as installed under its old label org.ching.watch too, until install.sh replaces it.
 
@@ -37,6 +41,7 @@ struct KachingPaths: Sendable {
     let agentHome: URL
     let kachingDir: URL
     let launchAgentsDir: URL
+    var claudeDir: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude", isDirectory: true)
 
     var heartbeat: URL { agentHome.appendingPathComponent("watch.heartbeat") }
     var watchLog: URL { agentHome.appendingPathComponent("watch.log") }
@@ -45,6 +50,8 @@ struct KachingPaths: Sendable {
     var dash: URL { kachingDir.appendingPathComponent("bin/dash.sh") }
     var queue: URL { kachingDir.appendingPathComponent("bin/queue.sh") }
     var proposalsTool: URL { kachingDir.appendingPathComponent("bin/kaching-proposals") }
+    var openKaching: URL { kachingDir.appendingPathComponent("ui/raycast/kaching-open.sh") }
+    var claudeSessions: URL { claudeDir.appendingPathComponent("sessions") }
 
     static func fromEnvironment(_ env: [String: String] = ProcessInfo.processInfo.environment) -> KachingPaths {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -54,7 +61,8 @@ struct KachingPaths: Sendable {
         }
         return KachingPaths(agentHome: dir("AGENT_HOME", ".agent"),
                           kachingDir: dir("KACHING_DIR", ".claude/kaching"),
-                          launchAgentsDir: dir("LAUNCH_AGENTS_DIR", "Library/LaunchAgents"))
+                          launchAgentsDir: dir("LAUNCH_AGENTS_DIR", "Library/LaunchAgents"),
+                          claudeDir: dir("CLAUDE_DIR", ".claude"))
     }
 }
 
@@ -86,13 +94,40 @@ struct KachingCounts: Sendable, Equatable {
     }
 }
 
-enum MenuAction: String, Sendable { case openInbox, openProposals, quit }
+enum MenuAction: String, Sendable {
+    case openInbox, showProposal, approveProposal, rejectProposal, snoozeProposal, quit
+}
 
 enum MenuEntry: Sendable, Equatable {
     case info(String)                      // disabled text line
     case action(String, MenuAction)
+    case actionOn(String, MenuAction, String)   // an action on one thing (a proposal id)
+    case text(String, MenuAction)          // a multi-line block of text that stays readable (enabled), with an action
+    case submenu(String, [MenuEntry])
     case placeholder(String)               // disabled, for features that are coming
     case separator
+}
+
+/// One open proposal, from a `kaching-proposals list` line: "  skill skill-x: Writes ... (4 sessions/4 days)".
+struct Proposal: Sendable, Equatable {
+    let id: String
+    let summary: String
+
+    static func parse(_ text: String) -> [Proposal] {
+        text.split(whereSeparator: \.isNewline).compactMap { line -> Proposal? in
+            guard line.hasPrefix("  "), !line.hasPrefix("  ("), let colon = line.firstIndex(of: ":") else { return nil }
+            let head = line[..<colon].split(separator: " ")
+            guard head.count >= 2 else { return nil }
+            return Proposal(id: String(head[1]), summary: line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces))
+        }
+    }
+}
+
+/// The latest recap of one live session.
+struct Recap: Sendable, Equatable {
+    let session: String
+    let text: String
+    let at: Date
 }
 
 struct KachingSnapshot: Sendable {
@@ -100,6 +135,9 @@ struct KachingSnapshot: Sendable {
     let heartbeatAge: Int?                 // seconds since the watcher last wrote; nil = never
     let staleAfter: Int
     let counts: KachingCounts?               // nil when dash.sh failed or timed out
+    var proposals: [Proposal] = []
+    var recaps: [Recap] = []               // newest first
+    var now = Date()
 
     var running: Bool { watcherInstalled && (heartbeatAge.map { $0 <= staleAfter } ?? false) }
 
@@ -124,11 +162,41 @@ struct KachingSnapshot: Sendable {
     }
 
     var menu: [MenuEntry] {
-        var m: [MenuEntry] = [.info(statusLine), .info(detailLine), .separator, .action("Open inbox", .openInbox)]
-        if let p = counts?.proposals, p > 0 { m.append(.action("Proposals waiting: \(p)", .openProposals)) }
-        m.append(.placeholder("Transcripts (coming soon)"))
+        var m: [MenuEntry] = [.info(statusLine), .info(detailLine), .separator, .action("Open Kaching", .openInbox)]
+        if let p = counts?.proposals, p > 0 {
+            m.append(.submenu("Proposals waiting: \(p)", proposals.map { pr in
+                .submenu(pr.id, [.actionOn(Self.wrap(pr.summary, 60), .showProposal, pr.id),
+                                 .separator,
+                                 .actionOn("Show…", .showProposal, pr.id),
+                                 .actionOn("Approve…", .approveProposal, pr.id),
+                                 .actionOn("Reject", .rejectProposal, pr.id),
+                                 .actionOn("Snooze 7 days", .snoozeProposal, pr.id)])
+            }))
+        }
+        if recaps.isEmpty {
+            m.append(.placeholder("Recaps: none yet"))
+        } else {
+            var sub: [MenuEntry] = []
+            for (i, r) in recaps.enumerated() {
+                if i > 0 { sub.append(.separator) }
+                sub.append(.text("\(r.session) · \(Self.ago(max(0, Int(now.timeIntervalSince(r.at)))))\n"
+                                 + Self.wrap(r.text, 64), .openInbox))
+            }
+            m.append(.submenu("Recaps (\(recaps.count))", sub))
+        }
         m += [.separator, .action("Quit KachingBar", .quit)]
         return m
+    }
+
+    /// Breaks text into lines of at most `width` characters, at spaces.
+    static func wrap(_ text: String, _ width: Int) -> String {
+        var lines: [String] = [], cur = ""
+        for word in text.split(whereSeparator: \.isWhitespace) {
+            if !cur.isEmpty && cur.count + 1 + word.count > width { lines.append(cur); cur = "" }
+            cur += (cur.isEmpty ? "" : " ") + word
+        }
+        if !cur.isEmpty { lines.append(cur) }
+        return lines.joined(separator: "\n")
     }
 
     static func ago(_ secs: Int) -> String {
@@ -153,14 +221,20 @@ struct KachingSnapshot: Sendable {
             lines.append("counts=unavailable")
         }
         lines.append("status=\(statusLine)")
-        for e in menu {
-            switch e {
-            case .info(let t): lines.append("menu=\(t) [info]")
-            case .action(let t, _): lines.append("menu=\(t)")
-            case .placeholder(let t): lines.append("menu=\(t) [disabled]")
-            case .separator: lines.append("menu=---")
+        func add(_ entries: [MenuEntry], _ indent: String) {
+            for e in entries {
+                switch e {
+                case .info(let t): lines.append("menu=\(indent)\(t.replacingOccurrences(of: "\n", with: " ")) [info]")
+                case .action(let t, _), .text(let t, _): lines.append("menu=\(indent)\(t.replacingOccurrences(of: "\n", with: " "))")
+                case .actionOn(let t, let a, let arg):
+                    lines.append("menu=\(indent)\(t.replacingOccurrences(of: "\n", with: " ")) [\(a.rawValue) \(arg)]")
+                case .submenu(let t, let sub): lines.append("menu=\(indent)\(t) >"); add(sub, indent + "  ")
+                case .placeholder(let t): lines.append("menu=\(indent)\(t) [disabled]")
+                case .separator: lines.append("menu=\(indent)---")
+                }
             }
         }
+        add(menu, "")
         return lines.joined(separator: "\n")
     }
 }
@@ -182,11 +256,73 @@ final class KachingStatusProvider: StatusProvider {
 
     func snapshot() -> KachingSnapshot {
         let fm = FileManager.default
+        let counts = readCounts()
         return KachingSnapshot(watcherInstalled: fm.fileExists(atPath: paths.watchPlist.path)
                                  || fm.fileExists(atPath: paths.oldWatchPlist.path),
                              heartbeatAge: heartbeatAge(now: Date()),
                              staleAfter: staleAfter,
-                             counts: readCounts())
+                             counts: counts,
+                             proposals: (counts?.proposals ?? 0) > 0 ? readProposals() : [],
+                             recaps: readRecaps())
+    }
+
+    func readProposals() -> [Proposal] {
+        run(paths.proposalsTool, ["list"]).map(Proposal.parse) ?? []
+    }
+
+    /// The latest recap of every live interactive session (~/.claude/sessions/<pid>.json, the process alive),
+    /// read from the tail of its transcript. Claude-mem's observer sessions are machinery: left out.
+    func readRecaps() -> [Recap] {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: paths.claudeSessions, includingPropertiesForKeys: nil) else { return [] }
+        var out: [Recap] = []
+        for f in files where f.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: f),
+                  let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let pid = o["pid"] as? Int, let sid = o["sessionId"] as? String,
+                  (o["kind"] as? String) == "interactive" else { continue }
+            let cwd = o["cwd"] as? String ?? ""
+            guard !cwd.contains("/.claude-mem/observer-sessions"), kill(pid_t(pid), 0) == 0 || errno == EPERM else { continue }
+            guard let (text, at) = Self.lastRecap(transcript(sid: sid, cwd: cwd)) else { continue }
+            var name = o["name"] as? String ?? ""
+            if name.isEmpty { name = (cwd as NSString).lastPathComponent + " " + sid.prefix(8) }
+            out.append(Recap(session: name, text: text, at: at))
+        }
+        return out.sorted { $0.at > $1.at }
+    }
+
+    /// Kaching's meta names the transcript; else Claude Code's project folder: the cwd with every
+    /// non-alphanumeric character as '-'.
+    func transcript(sid: String, cwd: String) -> URL {
+        let meta = (try? String(contentsOf: paths.agentHome.appendingPathComponent("sessions/\(sid)/meta"), encoding: .utf8)) ?? ""
+        for line in meta.split(whereSeparator: \.isNewline) where line.hasPrefix("transcript=") {
+            return URL(fileURLWithPath: String(line.dropFirst("transcript=".count)))
+        }
+        let folder = String(cwd.map { $0.isASCII && ($0.isLetter || $0.isNumber) ? $0 : "-" })
+        return paths.claudeDir.appendingPathComponent("projects/\(folder)/\(sid).jsonl")
+    }
+
+    /// The newest away_summary in the last 512 KB of a transcript, without Claude Code's "(disable recaps ...)" hint.
+    static func lastRecap(_ url: URL) -> (String, Date)? {
+        guard let h = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? h.close() }
+        let size = (try? h.seekToEnd()) ?? 0
+        try? h.seek(toOffset: size > 512 << 10 ? size - (512 << 10) : 0)
+        guard let data = try? h.readToEnd() else { return nil }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        for line in data.split(separator: UInt8(ascii: "\n")).reversed() {
+            guard line.count > 30, String(decoding: line.prefix(4096), as: UTF8.self).contains("\"away_summary\""),
+                  let o = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  o["subtype"] as? String == "away_summary", var text = o["content"] as? String else { continue }
+            text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let r = text.range(of: "(disable recaps", options: .backwards), text.hasSuffix(")") {
+                text = String(text[..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
+            }
+            guard !text.isEmpty else { continue }
+            return (text, (o["timestamp"] as? String).flatMap(iso.date(from:)) ?? Date())
+        }
+        return nil
     }
 
     /// Seconds since the newest of watch.heartbeat / watch.log was written (a future mtime counts as now).
@@ -198,12 +334,17 @@ final class KachingStatusProvider: StatusProvider {
         return max(0, Int(now.timeIntervalSince(newest)))
     }
 
-    /// Runs `dash.sh --counts` with AGENT_HOME pinned to ours; nil on any failure or after dashTimeout.
+    /// `dash.sh --counts`; nil when it fails or times out.
     func readCounts() -> KachingCounts? {
-        guard FileManager.default.fileExists(atPath: paths.dash.path) else { return nil }
+        run(paths.dash, ["--counts"]).flatMap(KachingCounts.parse)
+    }
+
+    /// Runs a kit script with bash and AGENT_HOME pinned to ours; its stdout, or nil on any failure or after dashTimeout.
+    func run(_ script: URL, _ args: [String]) -> String? {
+        guard FileManager.default.fileExists(atPath: script.path) else { return nil }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = [paths.dash.path, "--counts"]
+        p.arguments = [script.path] + args
         var env = ProcessInfo.processInfo.environment
         env["AGENT_HOME"] = paths.agentHome.path
         p.environment = env
@@ -217,7 +358,7 @@ final class KachingStatusProvider: StatusProvider {
         if p.isRunning { p.terminate(); p.waitUntilExit(); return nil }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         guard p.terminationStatus == 0 else { return nil }
-        return KachingCounts.parse(String(decoding: data, as: UTF8.self))
+        return String(decoding: data, as: UTF8.self)
     }
 }
 
@@ -379,7 +520,27 @@ final class StatusBarController: NSObject {
             case .action(let t, let a):
                 let mi = NSMenuItem(title: t, action: #selector(menuAction(_:)), keyEquivalent: a == .quit ? "q" : "")
                 mi.target = self
-                mi.representedObject = a.rawValue
+                mi.representedObject = [a.rawValue]
+                menu.addItem(mi)
+            case .actionOn(let t, let a, let arg):
+                let mi = NSMenuItem(title: t, action: #selector(menuAction(_:)), keyEquivalent: "")
+                if t.contains("\n") { mi.attributedTitle = NSAttributedString(string: t, attributes: [.font: NSFont.menuFont(ofSize: 0)]) }
+                mi.target = self
+                mi.representedObject = [a.rawValue, arg]
+                menu.addItem(mi)
+            case .text(let t, let a):
+                // first line bold (who and when), the rest in the menu font: an enabled item, so it reads in full contrast
+                let mi = NSMenuItem(title: t, action: #selector(menuAction(_:)), keyEquivalent: "")
+                let head = t.prefix { $0 != "\n" }
+                let s = NSMutableAttributedString(string: t, attributes: [.font: NSFont.menuFont(ofSize: 0)])
+                s.addAttribute(.font, value: NSFont.boldSystemFont(ofSize: NSFont.systemFontSize), range: NSRange(location: 0, length: (head as Substring).utf16.count))
+                mi.attributedTitle = s
+                mi.target = self
+                mi.representedObject = [a.rawValue]
+                menu.addItem(mi)
+            case .submenu(let t, let sub):
+                let mi = NSMenuItem(title: t, action: nil, keyEquivalent: "")
+                mi.submenu = buildMenu(sub)
                 menu.addItem(mi)
             case .separator:
                 menu.addItem(.separator())
@@ -389,17 +550,57 @@ final class StatusBarController: NSObject {
     }
 
     @objc private func menuAction(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let a = MenuAction(rawValue: raw) else { return }
+        guard let rep = sender.representedObject as? [String], let raw = rep.first, let a = MenuAction(rawValue: raw) else { return }
+        let id = rep.count > 1 ? rep[1] : ""
         let paths = provider.paths
         let env = "export AGENT_HOME=\(TerminalLauncher.quote(paths.agentHome.path))"
+        let tool = TerminalLauncher.quote(paths.proposalsTool.path)
         switch a {
         case .openInbox:
-            TerminalLauncher.run(name: "inbox", body: "\(env)\n\(TerminalLauncher.quote(paths.dash.path)) --inbox")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.refresh() }
-        case .openProposals:
-            TerminalLauncher.run(name: "proposals", body: "\(env)\n\(TerminalLauncher.quote(paths.proposalsTool.path)) list")
+            openKaching()
+        case .showProposal:
+            TerminalLauncher.run(name: "proposal", body: "\(env)\n\(tool) show \(TerminalLauncher.quote(id))")
+        case .approveProposal:   // only a person approves: kaching-proposals asks for its typed code in this window
+            TerminalLauncher.run(name: "approve", body: "\(env)\n\(tool) approve \(TerminalLauncher.quote(id))")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in self?.refresh() }
+        case .rejectProposal, .snoozeProposal:
+            let args = a == .rejectProposal ? ["reject", id] : ["snooze", id, "7"]
+            let provider = self.provider
+            Task.detached(priority: .userInitiated) {
+                let ok = provider.run(paths.proposalsTool, args) != nil
+                await MainActor.run {
+                    // on failure, run it again where the owner can read why
+                    if !ok { TerminalLauncher.run(name: "proposal", body: "\(env)\n\(tool) \(args.map(TerminalLauncher.quote).joined(separator: " "))") }
+                    self.refresh()
+                }
+            }
         case .quit:
             NSApp.terminate(nil)
+        }
+    }
+
+    /// kaching-open.sh brings kaching forward or starts it; it talks to Terminal with Apple Events. When that fails
+    /// (no Automation permission yet, or the script is missing), kaching starts in a plain new Terminal window.
+    private func openKaching() {
+        let paths = provider.paths
+        Task.detached(priority: .userInitiated) {
+            var ok = false
+            if FileManager.default.fileExists(atPath: paths.openKaching.path) {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/bin/bash")
+                p.arguments = [paths.openKaching.path]
+                var env = ProcessInfo.processInfo.environment
+                env["AGENT_HOME"] = paths.agentHome.path
+                p.environment = env
+                p.standardOutput = FileHandle.nullDevice
+                p.standardError = FileHandle.nullDevice
+                p.standardInput = FileHandle.nullDevice
+                if (try? p.run()) != nil { p.waitUntilExit(); ok = p.terminationStatus == 0 }
+            }
+            if !ok {
+                let bin = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/kaching").path
+                TerminalLauncher.run(name: "kaching", body: "export AGENT_HOME=\(TerminalLauncher.quote(paths.agentHome.path))\nexec \(TerminalLauncher.quote(bin))")
+            }
         }
     }
 
