@@ -17,6 +17,7 @@ Push `/`, write the code, then push `Enter`.
 | `PR` | Pull requests | The open GitHub pull requests that involve you (yours, assigned to you, that ask your review, or where you commented or were mentioned), the last updated first. The number in the tab is how many. |
 | `PO` | Proposals | The changes that the learner proposes. The tab is orange when proposals are open. |
 | `PC` | Paperclip | Paperclip issues and company approvals that need you, and issues in progress. The selected row shows on the right, with what it asks you. The tab is orange when a row needs you. |
+| `FIND` | Find a session | Look for a session by its name, or by what you and the agents said in it. Write the words after `FIND`, for example `FIND kaching resume`. No tab shows this view. Refer to section 6.19. |
 | `NW` | New agent | Start a background agent. You can add a folder, a model, an effort and a mode, for example `NW soii sonnet high`. Refer to section 6.15. |
 | `ALL` | Write to a group | Write one message to a group of agents: `ALL waiting`, `ALL input`, `ALL idle` or `ALL working`. Refer to section 6.17. |
 | `STOP` | – | Stop the selected background agent. Its conversation stays. |
@@ -125,6 +126,17 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | `PC` | `Enter` | Open the row in Paperclip in your browser. |
 | `PC` | `k` | Write a comment on the row. `Enter` sends it. |
 
+### 1.7 Keys in the FIND view
+
+| Key | Result |
+|---|---|
+| `l`, `j` | Select the next or previous result. |
+| `Enter` | For a live session: go to the desk with that agent selected. For a session that ended: show the messages that match, on a page that you can only read. |
+| `s` | Ask Claude which sessions fit the words. |
+| `r` | Resume the selected session that ended. A new Terminal window opens and starts `claude --resume`. |
+| `l`, `j` on the page | Scroll the page one line down or up. `PgDn` and `PgUp` scroll one page. `Home` and `End` go to the start and the end. |
+| `Esc` | Close the page. Push `Esc` again to go back to the desk. |
+
 ## 2. Introduction
 
 ### 2.1 What Kaching is
@@ -133,7 +145,7 @@ Kaching is one screen for all the Claude Code agents on this Mac. You operate it
 
 ### 2.2 What Kaching does not do
 
-Kaching does not have its own AI. It does not decide for you. It reads the session records of the agents. It writes the text that you select into the Terminal window of the agent. The agent then does the work.
+Kaching does not have its own AI. It does not decide for you. The only exception is the `AI` step of `FIND` (section 6.19). It runs when you push `s`, or when the other steps find nothing. It reads the session records of the agents. It writes the text that you select into the Terminal window of the agent. The agent then does the work.
 
 Kaching can only send text to agents in Terminal.app and to background agents. It shows agents in Claude Desktop, VS Code or Cursor, but you cannot send text to them.
 
@@ -493,6 +505,38 @@ A name in the middle of a message stays in the message. The selected agent then 
 
 If the name is not a live session, Kaching sends the message to the selected agent. If two sessions have the name, or the session shows a menu, the box stays open and the command line tells you.
 
+### 6.19 Find a session
+
+Use this procedure when you know what you or an agent said, but not in which session.
+
+1. Push `/`. Write `FIND` and the words, for example `FIND kaching resume`. Push `Enter`.
+2. Read the top line of the view. It shows the progress: `searching…`, and then for example `3 in names, 12 in text`.
+3. Look at the results. Kaching searches in three steps:
+
+   | Step | Label | What Kaching searches |
+   |---|---|---|
+   | 1 | `name` | The name, the folder and the git branch of each live agent. The name of each session that ended: the name that you gave with `/rename`, or the title that Claude Code made. |
+   | 2 | `text` | Your prompts and the text replies of the agents, in all sessions on this Mac. A message is a result when it has all the words. Capital letters do not matter. |
+   | 3 | `AI` | Claude reads a short list of the last 120 sessions. It selects the sessions that fit the words by meaning. |
+
+4. Read each result. The first line shows the label of the step, the session name, the start folder and the date. A session without a name shows the first 7 characters of its id. A `●` shows a live agent.
+5. Read the second line of a result. For a `text` result, it shows the newest message that matches, with the words in white. It also shows who wrote it: `you` or `agent`. `×3` after `text` shows that 3 messages match. For an `AI` result, it shows the reason that Claude gives.
+6. Push `l` or `j` to select a result. Push `Enter`:
+   - For a live agent, Kaching goes to the desk with that agent selected.
+   - For a session that ended, Kaching shows the newest 4 messages that match. Each one has the message before it and the message after it. Push `l` or `j` to scroll. Push `Esc` to close the page.
+7. To continue a session that ended, push `r`. Kaching opens a new Terminal window. The window goes to the folder where the session started and runs `claude --resume <session id>`. Kaching does this only when you push `r`.
+
+Step 3 starts by itself when steps 1 and 2 find nothing. The top line then shows `asking Claude…`. This takes approximately 10 seconds. To ask Claude when steps 1 and 2 found results, push `s`. The results of Claude show at the top of the list.
+
+Notes:
+
+- To search for a phrase, write it in double quotes, for example `FIND "pull request" merge`.
+- The `text` step stops after 3 seconds. If it stops early, the top line shows `partial`. The list then shows only the newest sessions. Write more words to get fewer results.
+- The list shows at most 50 sessions for each step.
+- Kaching does not search the claude-mem observer sessions or the sessions of sub-agents that an agent started.
+- Step 3 uses your Claude usage. It makes one small call with the model Haiku. The call sends the name, folder, date, first prompt and last reply of the last 120 sessions to Claude. Kaching cuts each prompt and reply to 200 characters.
+- The call does not run your hooks. It does not save a session, and it does not add a folder to `~/.agent/sessions`. While it runs, Claude Code lists it as a session in `claude agents`. Kaching does not show it in the agent list.
+
 ## 7. Change the keys and the fixed messages
 
 All keys and fixed messages are in the file `~/.agent/terminal/keys.toml`. Kaching writes this file when it starts the first time.
@@ -600,6 +644,9 @@ To read the screen of a background agent, Kaching does not attach. It runs `clau
 | The PC view shows `Paperclip isn't running`. | The Paperclip service does not operate. | Start Paperclip. Then go to `PC` again. |
 | The command line shows `Paperclip refused`. | Paperclip does not accept the answer. The text after it says why. | Read the text. Change your answer, or open the row in the browser. |
 | The command line shows `no recommended answer for question`. | The question has no `★`. Kaching does not guess. | Pick an answer for each question. Push `s`. |
+| The FIND view shows `Claude failed` and a reason. | Claude did not answer in 2 minutes, or your Claude usage is used up. The reason says which. | Wait. Push `s` to ask again. |
+| The FIND view shows `partial`. | The `text` step did not finish in 3 seconds. | Write more words. Push `/`, write `FIND` and the new words. |
+| `r` in the FIND view shows `its folder is gone`. | The folder where the session started does not exist now. | Make the folder again, or open a terminal and write `claude --resume <session id>` in another folder. |
 
 ## 11. Files
 
@@ -610,5 +657,7 @@ To read the screen of a background agent, Kaching does not attach. It runs `clau
 | `~/.agent/terminal/open` | Tells the monitor queue that Kaching operates and which agent is selected. Kaching removes it when it stops. |
 | `~/.agent/terminal/send.js` | The script that sends text to Terminal windows. Kaching writes it when it starts. |
 | `~/.agent/terminal/files.json` | The last 30 files that the agents wrote about (the `FL` view). |
+| `~/.claude/projects/` | The conversations of all sessions. The `FIND` view reads them. It never changes them. |
+| `kaching-find` in the temporary folder of your Mac | An empty folder. The `AI` step of `FIND` runs Claude there, so that Claude finds no project settings. |
 | `~/.claude/kaching/terminal/` | The source code. |
 | `~/.claude/kaching/docs/superpowers/specs/2026-10-17-agent-terminal-design.md` | The design. |

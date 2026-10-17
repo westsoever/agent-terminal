@@ -138,7 +138,8 @@ func TestViewGeometry(t *testing.T) {
 	m.props = []string{"skill x: something"}
 	m.pulls = PullsState{Items: []PullReq{{Repo: "westsoever/cos", Number: 12, Title: "t", Draft: true, Updated: now.Add(-time.Hour)}}}
 	m.sync = []string{"## repo", "needs: 1 stash"}
-	for _, v := range []view{vDesk, vWall, vFiles, vRepos, vRecaps, vProposals, vPulls, vPaperclip, vHelp} {
+	m.find = findFixtureState()
+	for _, v := range []view{vDesk, vWall, vFiles, vRepos, vRecaps, vProposals, vPulls, vPaperclip, vFind, vHelp} {
 		for _, sz := range [][2]int{{80, 24}, {120, 40}, {200, 60}} {
 			m.view, m.w, m.h = v, sz[0], sz[1]
 			lines := strings.Split(m.View(), "\n")

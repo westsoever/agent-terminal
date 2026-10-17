@@ -41,6 +41,8 @@ func (m model) View() string {
 		body = m.recapsView(bodyH)
 	case vPaperclip:
 		body = m.paperclipView(bodyH)
+	case vFind:
+		body = m.findView(bodyH)
 	case vHelp:
 		body = m.helpView(bodyH)
 	}
@@ -185,6 +187,9 @@ func (m model) commandLine() string {
 			if t.v == m.view {
 				code = t.code
 			}
+		}
+		if m.view == vFind {
+			code = "FIND"
 		}
 		left = []seg{s(" > ", cOrange), s(code, cWhite), s(" <GO>", cGrey)}
 		if m.leader {
@@ -1149,6 +1154,7 @@ func (m model) helpView(h int) []string {
 		row2("PO", "proposals: enter shows, a approve, x reject, z hide 7 days (the tab is orange while some are open)"),
 		row2("PC", "Paperclip issues and company approvals, the selected one's thread on the right: 1-9 answer what it asks (approve, decline, …), "+K.Reply+" comment, enter opens it in the browser (orange while one needs you); the keys below"),
 		row2("NW [folder] [opts]", "start a background agent: write its first message, enter starts it (folder: a path, a folder in ~/bbq, an agent's name; none: the selected agent's). Opts, in any place: a model (opus sonnet haiku fable), an effort (low … max), a mode (plan auto bypass accept manual dontask), e.g. NW soii sonnet high"),
+		row2("FIND words", "find a session: by its name, then by what was said in it (one message with all the words), then Claude picks (s). See Find below"),
 		row2("STOP", "stop the selected background agent (its conversation stays)"),
 		row2("ALL group", "one message to a group of agents: waiting (INPUT and WAITING), input, idle or working; agents with a menu on screen are left out"),
 		row2("A3, or a name", "select agent 3, or the first agent whose name starts so"),
@@ -1186,6 +1192,12 @@ func (m model) helpView(h int) []string {
 		row2("o", "write your own answer to a question (enter keeps it)"),
 		row2("a", "questions: give every ★ recommended answer and send; it says which question has none and sends nothing"),
 		row2("n / p", "next / previous page of a long list"),
+		"",
+		"## Find (/FIND words)",
+		row2(k(K.Next)+" / "+k(K.Prev), "next / previous result"),
+		row2("enter", "a live session: go to it on the desk. An ended one: read the messages that match, with the message before and after (esc closes)"),
+		row2("s", "ask Claude which sessions fit (it runs by itself when names and text find nothing)"),
+		row2("r", "resume an ended session in a new Terminal window: cd to its folder, claude --resume"),
 		"",
 		"## Wall (push " + K.Wall + ")",
 		row2("1-9", "select that tile"),
@@ -1237,6 +1249,10 @@ func (m model) footer() []string {
 		add(&r1, K.Reply, "comment")
 		add(&r1, "enter", "in browser")
 		add(&r1, "esc", "desk")
+	case vFind:
+		for _, h := range m.findHints() {
+			add(&r1, h[0], h[1])
+		}
 	case vPulls:
 		add(&r1, K.Next+" "+K.Prev, "move")
 		if m.prOpen {

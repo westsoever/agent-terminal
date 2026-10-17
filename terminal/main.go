@@ -3,7 +3,8 @@
 //
 //	kaching                 open the desk
 //	kaching --render WxH    print one frame of the desk at that size and exit (for checks and screenshots)
-//	                        --view CODE picks another view (FL RP RC PR PO PC HELP)
+//	                        --view CODE picks another view (FL RP RC PR PO PC HELP, or "FIND words": the names and
+//	                        text tiers run first)
 package main
 
 import (
@@ -38,6 +39,9 @@ func main() {
 		if *code != "" {
 			mm, _ := m.command(*code)
 			m = mm.(model)
+			if m.view == vFind { // only here: the tiers run in the background in the program
+				m = m.findRenderSync()
+			}
 			if m.view == vPulls { // only here: it asks GitHub
 				m.pulls = loadPulls()
 			}

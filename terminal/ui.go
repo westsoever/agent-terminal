@@ -91,6 +91,7 @@ type model struct {
 	nw         nwOpts              // what /NW is starting: its folder, model, effort and permission mode
 	bgScr      map[string]Prompt   // sid -> the menu on a background agent's screen (rebuilt from claude logs)
 	files      *fileHistory        // the FL view: the last files the agents mentioned
+	find       findState           // the FIND view: the search on the screen
 	asked      map[string]askSeen  // sid -> when its menu first showed: a busy agent's wait starts there
 	ticks      int
 }
@@ -528,6 +529,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingJob = msg.job
 		m.refresh()
 		return m, nil
+	case findNamesMsg, findTextMsg, findAIMsg, findPanelMsg:
+		return m.findUpdate(msg)
 	case pullsMsg:
 		sel := ""
 		if m.view == vPulls && m.listSel < len(m.pulls.Items) {
@@ -660,6 +663,9 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ks == K.Command:
 		m.mode, m.buf = mCommand, ""
 		return m, nil
+	case ks == "esc" && m.view == vFind && m.find.Panel != nil: // the excerpts close first, then the view
+		m.find.Panel = nil
+		return m, nil
 	case ks == "esc":
 		if m.zoom {
 			m.zoom = false
@@ -686,6 +692,9 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch m.view {
+	case vFind:
+		_, cmd := m.findKey(ks)
+		return m, cmd
 	case vFiles, vProposals, vPulls, vRecaps, vPaperclip, vRepos:
 		if done, cmd := m.listKey(ks); done {
 			return m, cmd
@@ -1255,6 +1264,8 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 		}
 	}
 	switch {
+	case c == "FIND":
+		return m.findCommand(code)
 	case c == "HELP" || c == "?":
 		m.view = vHelp
 	case c == "QUIT" || c == "Q":
