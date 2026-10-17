@@ -6,7 +6,7 @@ Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are rec
 
 **Decision (user):** "Create the PR section here for pull requests. Make me access it with /pr, call it Pull Requests, and rename the Proposals one. Maybe make it PO instead. For now, you can remove or hide the AG Agents section. I'm not using it, and it's not really helpful because it does exactly the same as the inbox."
 
-**Built:** `PR` (pull requests) lists the open GitHub pull requests that involve the owner, from `gh search prs --state open --involves @me`, the last updated first; Enter opens one in the browser. It is read with the tab-bar badges every 30 s and shows its count. Proposals keep their keys under `PO`. The `AG` tab and code are gone; the wall is still there behind `W` (and `/W`), so it can come back. A tab too narrow for its label now keeps its count (`PR  10`) instead of dropping to the code alone.
+**Built:** `PR` (pull requests) lists the open GitHub pull requests that involve the owner, from `gh search prs --state open --involves @me --sort updated`, the last updated first; Enter opens one in the browser. It is read every 30 s while the view is open and every 2 min for the tab's count (GitHub's search quota is 30 a minute); a failed read keeps the last list and shows its error above it, and the selection stays on its pull request when the order changes. Proposals keep their keys under `PO`. The `AG` tab and code are gone; the wall is still there behind `W` (and `/W`), so it can come back. A tab too narrow for its label now keeps its count (`PR  10`) instead of dropping to the code alone.
 
 ## D43 (2026-10-17): A prompt sends a window back, wherever it was prompted (amends D38, D42)
 

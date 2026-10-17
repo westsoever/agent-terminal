@@ -33,11 +33,14 @@ func main() {
 		m.w, m.h = w, h
 		m.ttys, m.groups = terminalTabs(), tabGroups()
 		m.refresh()
-		m.props, m.pc, m.pulls = readProposals(), loadPaperclip(), loadPulls()
+		m.props, m.pc = readProposals(), loadPaperclip()
 		m.status = ""
 		if *code != "" {
 			mm, _ := m.command(*code)
 			m = mm.(model)
+			if m.view == vPulls { // only here: it asks GitHub
+				m.pulls = loadPulls()
+			}
 			if m.view == vPaperclip {
 				m.pc = loadPaperclip()
 				if it := m.pcSelected(); it != nil {

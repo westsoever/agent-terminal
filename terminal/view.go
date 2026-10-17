@@ -74,14 +74,14 @@ func (m model) tabBar() []string {
 			pcNeeds++
 		}
 	}
-	nums := map[view]string{vDesk: fmt.Sprint(need), vWall: fmt.Sprint(len(m.agents)),
+	nums := map[view]string{vDesk: fmt.Sprint(need),
 		vProposals: fmt.Sprint(len(m.props)), vPulls: fmt.Sprint(len(m.pulls.Items)), vPaperclip: fmt.Sprint(pcNeeds)}
 	// a view with work that waits for the owner is filled orange: open proposals, Paperclip issues that need you
 	alert := map[view]bool{vProposals: len(m.props) > 0, vPaperclip: pcNeeds > 0}
 	var cells []cell
 	cells = append(cells, cell{[]seg{s("kaching", cWhite)}, false})
 	for _, t := range tabs {
-		active := m.view == t.v || (t.v == vWall && m.view == vWall)
+		active := m.view == t.v || (t.v == vDesk && m.view == vWall) // the wall (W) is the inbox as tiles
 		lbl := cGrey
 		if active {
 			lbl = cWhite
@@ -709,8 +709,12 @@ func (m model) proposalsView(h int) []string {
 
 // pullsView: the open pull requests that involve the owner, the last updated first.
 func (m model) pullsView(h int) []string {
+	title := "PULL REQUESTS   open, that involve you · enter opens it in the browser"
 	if m.pulls.Err != "" {
-		return m.listBox("PULL REQUESTS", nil, h, m.pulls.Err)
+		if len(m.pulls.Items) == 0 {
+			return m.listBox("PULL REQUESTS", nil, h, m.pulls.Err)
+		}
+		title = "PULL REQUESTS   from " + age(m.pulls.At) + " ago · " + m.pulls.Err
 	}
 	var items [][]seg
 	for _, pr := range m.pulls.Items {
@@ -721,7 +725,11 @@ func (m model) pullsView(h int) []string {
 		}
 		items = append(items, []seg{s(padTo(ref, 34), cGrey), s(" "+padTo(age(pr.Updated), 4), cDark), s(" "+pr.Title, tt)})
 	}
-	return m.listBox("PULL REQUESTS   open, that involve you · enter opens it in the browser", items, h, "no open pull requests")
+	empty := "no open pull requests"
+	if m.pulls.At.IsZero() {
+		empty = "loading…"
+	}
+	return m.listBox(title, items, h, empty)
 }
 
 // pcWidths: the PC view's issue list and side panel outer widths for a screen w wide.
