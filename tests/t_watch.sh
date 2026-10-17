@@ -259,7 +259,8 @@ assert_eq "sync: SYNC_CHECK_INTERVAL_H=0 switches the check off" "0" "$(scalls)"
 assert_no_file "sync: ... and leaves no stamp" "$SAH/sync-check.stamp"
 sreset; SYNC_CHECK_INTERVAL_H=soon srun; swait 1
 assert_eq "sync: a junk interval falls back to the default and still runs" "1" "$(scalls)"
-sreset; : >"$SAH/sync-check.md"; srun; sleep 1
+sreset; : >"$SAH/sync-check.md"; touch -t "$(date -r "$NOW" +%Y%m%d%H%M.%S)" "$SAH/sync-check.md"   # made "now" on the fake clock:
+srun; sleep 1   # under the parallel suite this line runs minutes after NOW was set, past the 60 s future-mtime guard
 assert_eq "sync: a snapshot younger than the interval (an on-demand run) counts as a run" "0" "$(scalls)"
 sreset; : >"$SAH/sync-check.md"; touch -t 202001010000 "$SAH/sync-check.md"; srun; swait 1
 assert_eq "sync: an old snapshot does not hold the check back" "1" "$(scalls)"

@@ -388,7 +388,7 @@ assert_eq "banner: fresh findings (under 24 h) give none" "0" "$(nlog)"
 assert_no_file "banner: and no day stamp" "$AH/sync-banner.day"
 # an old unpushed commit: one banner, then none the same day even when the notify budget is wiped
 R=$(mk ban1); new_ah ban1; repos "$R"
-GIT_COMMITTER_DATE=$(ago 3) commit_file "$R" f.txt f "three days old"
+GIT_COMMITTER_DATE="$((NOON - 3 * DAY)) +0000" commit_file "$R" f.txt f "three days old"   # from NOON, not NOW: the age is read at SYNC_NOW=NOON
 SYNC_NOW=$NOON sc --quiet
 assert_eq "banner: a finding older than 24 h gives one banner" "1" "$(nlog)"
 last=$(tail -1 "$AH/notify.log" 2>/dev/null || true)
