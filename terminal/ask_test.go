@@ -182,7 +182,7 @@ func TestQuickApproveLive(t *testing.T) {
 	if os.Getenv("KACHING_LIVE_BG") == "" {
 		t.Skip("KACHING_LIVE_BG=1 runs it")
 	}
-	job, err := bgStart(os.Getenv("HOME"), "Use the AskUserQuestion tool exactly once with two questions. Q1 (header Colour, single select): 'Which colour?' with options 'Red (Recommended)' and 'Blue'. Q2 (header Toppings, multiSelect true): 'Which toppings?' with options 'Cheese (Recommended)', 'Ham', 'Egg (Recommended)'. After I answer, reply with just my two answers.")
+	job, err := bgStart(nwOpts{Dir: os.Getenv("HOME")}, "Use the AskUserQuestion tool exactly once with two questions. Q1 (header Colour, single select): 'Which colour?' with options 'Red (Recommended)' and 'Blue'. Q2 (header Toppings, multiSelect true): 'Which toppings?' with options 'Cheese (Recommended)', 'Ham', 'Egg (Recommended)'. After I answer, reply with just my two answers.")
 	if err != nil {
 		t.Fatal(err)
 	}

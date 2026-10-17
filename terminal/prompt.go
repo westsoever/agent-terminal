@@ -21,7 +21,8 @@ var (
 )
 
 func isRule(l string) bool {
-	return strings.HasPrefix(strings.TrimSpace(l), "────────")
+	l = strings.TrimSpace(l)
+	return strings.HasPrefix(l, "────────") || strings.HasPrefix(l, "▔▔▔▔▔▔▔▔")
 }
 
 // parsePrompt finds the menu at the bottom of a screen. It counts only when an option carries the ❯ cursor and

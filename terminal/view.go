@@ -162,7 +162,11 @@ func (m model) commandLine() string {
 		}
 		left = []seg{s(" writing to ", cGrey), s(target, cWhite)}
 		if dir, ok := strings.CutPrefix(m.ed.target, "nw:"); ok {
-			left = []seg{s(" new background agent in ", cGrey), s(tildify(dir), cWhite), s("  enter starts it", cGrey)}
+			left = []seg{s(" new background agent in ", cGrey), s(tildify(dir), cWhite)}
+			if o := m.nw.summary(); o != "" {
+				left = append(left, s("  "+o, cOrange))
+			}
+			left = append(left, s("  enter starts it", cGrey))
 		}
 	case mOpen:
 		left = []seg{s(" open file: press its letter", cOrange)}
@@ -466,6 +470,9 @@ func (m model) agentPanel(w, h int) []string {
 	if newAgent { // /NW: the first message of a new background agent, written below the selected agent
 		dir := tildify(strings.TrimPrefix(m.ed.target, "nw:"))
 		hd := "─ new background agent in " + dir + " "
+		if o := m.nw.summary(); o != "" {
+			hd = "─ new background agent in " + dir + " · " + o + " "
+		}
 		tail = append(tail, "", row(in, s(hd, cOrange), s(strings.Repeat("─", max(0, in-width(hd))), cOrange)))
 		tail = append(tail, m.ed.lines(in)...)
 	} else {
@@ -959,7 +966,7 @@ func (m model) helpView(h int) []string {
 		row2("PR", "pull requests: the open ones that involve you on GitHub, the last updated first (enter opens it in the browser)"),
 		row2("PO", "proposals: enter shows, a approve, x reject, z hide 7 days (the tab is orange while some are open)"),
 		row2("PC", "Paperclip issues, the selected one's thread on the right: 1-9 answer what it asks (approve, decline, …), "+K.Reply+" comment, enter opens it in the browser (orange while one needs you)"),
-		row2("NW [folder]", "start a background agent: write its first message, enter starts it (folder: a path, a folder in ~/bbq, an agent's name; none: the selected agent's)"),
+		row2("NW [folder] [opts]", "start a background agent: write its first message, enter starts it (folder: a path, a folder in ~/bbq, an agent's name; none: the selected agent's). Opts, in any place: a model (opus sonnet haiku fable), an effort (low … max), a mode (plan auto bypass accept manual dontask), e.g. NW soii sonnet high"),
 		row2("STOP", "stop the selected background agent (its conversation stays)"),
 		row2("A3, or a name", "select agent 3, or the first agent whose name starts so"),
 		row2("HELP, QUIT", "this page; stop kaching (ctrl+c also stops it)"),

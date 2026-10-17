@@ -169,7 +169,7 @@ func TestBackgroundLive(t *testing.T) {
 		t.Skip("KACHING_LIVE_BG=1 runs it")
 	}
 	home := os.Getenv("HOME")
-	job, err := bgStart(home, "Reply with just: pong")
+	job, err := bgStart(nwOpts{Dir: home}, "Reply with just: pong")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestBackgroundLive(t *testing.T) {
 	for i := 0; i < 60 && a == nil; i++ {
 		time.Sleep(500 * time.Millisecond)
 		for _, x := range loadAgents(map[string]tabPos{}, nil) {
-			if x.Bg && x.Job == job && !x.Busy && x.State != "" {
+			if x.Bg && x.Job == job && !x.Busy && readLast(x.Transcript, x.Cwd).Text != "" { // idle, and it has replied
 				a = &x
 			}
 		}
@@ -221,4 +221,109 @@ func TestNWCommand(t *testing.T) {
 	if m = mm.(model); m.mode == mTyping || !m.statusErr {
 		t.Fatalf("unknown folder: mode %v status %q", m.mode, m.status)
 	}
+}
+
+// The words after /NW: model, effort and permission words are picked out wherever they stand; the rest is the
+// folder; keys.toml fills what they leave open.
+func TestParseNW(t *testing.T) {
+	cfg := Config{NWModel: "haiku", NWPerm: "bypass"}
+	for _, c := range []struct {
+		in   string
+		want nwOpts
+	}{
+		{"", nwOpts{Model: "haiku", Perm: "bypassPermissions"}},
+		{"soii", nwOpts{Dir: "soii", Model: "haiku", Perm: "bypassPermissions"}},
+		{"soii sonnet", nwOpts{Dir: "soii", Model: "sonnet", Perm: "bypassPermissions"}},
+		{"Opus xhigh ~/bbq/soii", nwOpts{Dir: "~/bbq/soii", Model: "opus", Effort: "xhigh", Perm: "bypassPermissions"}},
+		{"plan miso data", nwOpts{Dir: "miso data", Model: "haiku", Perm: "plan"}},
+		{"claude-opus-5-5", nwOpts{Model: "claude-opus-5-5", Perm: "bypassPermissions"}},
+	} {
+		if got := parseNW(c.in, cfg); got != c.want {
+			t.Errorf("parseNW(%q) = %+v, want %+v", c.in, got, c.want)
+		}
+	}
+	o := nwOpts{Dir: "/x", Model: "sonnet", Effort: "high", Perm: "plan"}
+	if got := strings.Join(o.args("/model opus"), " "); got != "--bg --model sonnet --effort high --permission-mode plan -- /model opus" {
+		t.Errorf("args = %q", got)
+	}
+	if got := strings.Join((nwOpts{Dir: "/x"}).args("hi"), " "); got != "--bg -- hi" {
+		t.Errorf("plain args = %q", got)
+	}
+	if o.summary() != "sonnet · high · plan" {
+		t.Errorf("summary = %q", o.summary())
+	}
+}
+
+// /NW soii sonnet opens the box for that folder and shows the options.
+func TestNWCommandOptions(t *testing.T) {
+	work, err := os.MkdirTemp("/tmp", "nw") // a short path: the command line has little room
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(work) })
+	m := newModel()
+	m.w, m.h = 140, 40
+	m.cfg.NWModel, m.cfg.NWPerm = "", ""
+	mm, _ := m.command("NW " + work + " sonnet high")
+	m = mm.(model)
+	if m.mode != mTyping || m.nw.Model != "sonnet" || m.nw.Effort != "high" || m.nw.Dir != work {
+		t.Fatalf("mode %v nw %+v", m.mode, m.nw)
+	}
+	if v := escRe.ReplaceAllString(m.View(), ""); !strings.Contains(v, "new background agent in "+tildify(work)+" · sonnet · high") {
+		t.Errorf("the box does not show the options:\n%s", v)
+	}
+}
+
+// Live: /model works inside a background session. Claude Code asks "Switch model?"; kaching shows that menu from the
+// session's logs, 1 confirms, and the next reply comes from the new model.
+func TestBackgroundModelCommandLive(t *testing.T) {
+	if os.Getenv("KACHING_LIVE_BG") == "" {
+		t.Skip("KACHING_LIVE_BG=1 runs it")
+	}
+	job, err := bgStart(nwOpts{Dir: os.Getenv("HOME"), Model: "haiku"}, "Reply with just: pong")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer exec.Command(claudeBin(), "rm", job).Run()
+	defer bgStop(job)
+	var a *Agent
+	for i := 0; i < 60 && a == nil; i++ {
+		time.Sleep(500 * time.Millisecond)
+		for _, x := range loadAgents(map[string]tabPos{}, nil) {
+			if x.Bg && x.Job == job && !x.Busy && readLast(x.Transcript, x.Cwd).Text != "" { // idle, and it has replied
+				a = &x
+			}
+		}
+	}
+	if a == nil {
+		t.Fatal("the agent never showed idle")
+	}
+	if l := readLast(a.Transcript, a.Cwd); !strings.Contains(l.Model, "haiku") {
+		t.Fatalf("started on %q, want haiku", l.Model)
+	}
+	if res := bgSend(job, "/model sonnet", nil); res != "ok" {
+		t.Fatal(res)
+	}
+	var p Prompt
+	for i := 0; i < 20 && len(p.Options) == 0; i++ {
+		time.Sleep(500 * time.Millisecond)
+		p = parsePrompt(bgScreen(job))
+	}
+	if len(p.Options) != 2 || !strings.HasPrefix(p.Options[0], "Yes, switch to Sonnet") {
+		t.Fatalf("the menu kaching reads from the logs: %+v", p)
+	}
+	if res := bgSend(job, "", []string{"1"}); res != "ok" {
+		t.Fatal(res)
+	}
+	time.Sleep(time.Second)
+	if res := bgSend(job, "Reply with just: ok", nil); res != "ok" {
+		t.Fatal(res)
+	}
+	for i := 0; i < 60; i++ {
+		time.Sleep(500 * time.Millisecond)
+		if l := readLast(a.Transcript, a.Cwd); strings.Contains(l.Model, "sonnet") && strings.Contains(l.Text, "ok") {
+			return
+		}
+	}
+	t.Fatalf("still on %q", readLast(a.Transcript, a.Cwd).Model)
 }

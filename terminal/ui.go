@@ -83,6 +83,8 @@ type model struct {
 	scroll     *chatScroll         // shared by every copy of the model: View records the limits it drew
 	usage      Usage               // the Claude usage limits, read on every tick
 	askProg    map[string]*askProg // sid -> where a background agent's menu is (see ask.go)
+	nw         nwOpts              // what /NW is starting: its folder, model, effort and permission mode
+	bgScr      map[string]Prompt   // sid -> the menu on a background agent's screen (rebuilt from claude logs)
 	files      *fileHistory        // the FL view: the last files the agents mentioned
 	asked      map[string]askSeen  // sid -> when its menu first showed: a busy agent's wait starts there
 	ticks      int
@@ -130,7 +132,7 @@ type execDone struct{ err error }
 
 func newModel() model {
 	cfg, ct, err := loadConfig()
-	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, askProg: map[string]*askProg{}}
+	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, askProg: map[string]*askProg{}, bgScr: map[string]Prompt{}}
 	m.ed.drafts = loadDrafts()
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
@@ -480,9 +482,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case promptMsg:
 		if len(msg.p.Options) == 0 {
 			delete(m.prompts, msg.sid)
+			delete(m.bgScr, msg.sid)
 		} else {
 			m.prompts[msg.sid] = msg.p
 			m.sawAsk(msg.sid, time.Now())
+			if a := m.agentBySID(msg.sid); a != nil && a.Bg {
+				m.bgScr[msg.sid] = msg.p
+			}
 		}
 		m.applyPrompts()
 		return m, nil
@@ -532,6 +538,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			delete(m.askProg, msg.sid) // a failed key: the menu may be elsewhere, start from the first question
 		}
 		delete(m.prompts, msg.sid)
+		delete(m.bgScr, msg.sid)
 		delete(m.asked, msg.sid) // answered: a menu after this is a new wait
 		if msg.res == "ok" && msg.sid != "" {
 			return m, tea.Batch(m.readPrompt(500*time.Millisecond), returnWindow(msg.sid, msg.what))
@@ -763,9 +770,12 @@ func (m *model) readPrompt(delay time.Duration) tea.Cmd {
 		if !m.screenWanted(a) {
 			continue
 		}
-		sid, tty := a.SID, a.TTY
+		sid, tty, bg, job := a.SID, a.TTY, a.Bg, a.Job
 		cmds = append(cmds, func() tea.Msg {
 			time.Sleep(delay)
+			if bg {
+				return promptMsg{sid, parsePrompt(bgScreen(job))}
+			}
 			return promptMsg{sid, parsePrompt(screenOf(tty))}
 		})
 	}
@@ -775,6 +785,9 @@ func (m *model) readPrompt(delay time.Duration) tea.Cmd {
 // applyPrompts marks the agents whose screen shows a menu and sorts them into WAITING.
 func (m *model) screenWanted(a Agent) bool {
 	_, asked := m.prompts[a.SID]
+	if a.Bg { // reading its screen runs claude logs: the selected one now and then, a waiting one at every tick
+		return asked || a.State == "input" || a.State == "blocked" || (a.SID == m.selSID && m.ticks%3 == 0)
+	}
 	busy := a.Busy && m.ticks%2 == 0
 	return a.InTerminal && (a.SID == m.selSID || a.State == "input" || a.State == "blocked" || asked || busy)
 }
@@ -848,8 +861,10 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = mKeys
 		if dir, ok := strings.CutPrefix(target, "nw:"); ok {
 			m.setStatus("starting a background agent in " + tildify(dir) + "…")
+			o := m.nw
+			o.Dir = dir
 			return m, func() tea.Msg {
-				job, err := bgStart(dir, text)
+				job, err := bgStart(o, text)
 				if err != nil {
 					return sentMsg{"", "new agent", "start", "error: " + err.Error()}
 				}
@@ -1142,11 +1157,14 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 		m.view = vWall
 	case c == "NW": // a new background agent: the folder, then its first message in the reply box
 		_, arg, _ := strings.Cut(strings.TrimSpace(code), " ")
-		dir := m.resolveDir(arg)
+		o := parseNW(arg, m.cfg)
+		dir := m.resolveDir(o.Dir)
 		if dir == "" {
-			m.setErr("NW: no folder " + strings.TrimSpace(arg) + " (a path, a folder in ~/bbq, or an agent's name)")
+			m.setErr("NW: no folder " + strings.TrimSpace(o.Dir) + " (a path, a folder in ~/bbq, or an agent's name)")
 			return m, nil
 		}
+		o.Dir = dir
+		m.nw = o
 		m.view, m.zoom, m.mode = vDesk, false, mTyping
 		return m, m.ed.open("nw:"+dir, dir, m.editorWidth())
 	case c == "STOP":

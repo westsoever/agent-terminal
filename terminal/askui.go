@@ -23,9 +23,14 @@ func (m *model) prog(sid, id string, n int) *askProg {
 	return p
 }
 
-// bgPrompt shows a background agent's open question as a menu. It has no screen to read, so the menu is drawn from
-// its transcript and the keys kaching sent (askProg), in the lines of a real screen.
+// bgPrompt shows a background agent's menu: the one on its screen (rebuilt from claude logs), or, until that is
+// read, its open question drawn from the transcript and the keys kaching sent (askProg), in the lines of a real
+// screen.
 func (m *model) bgPrompt(a *Agent) {
+	if p, ok := m.bgScr[a.SID]; ok {
+		m.prompts[a.SID] = p
+		return
+	}
 	l := m.last(a)
 	if len(l.Ask) == 0 {
 		delete(m.prompts, a.SID)
@@ -39,6 +44,15 @@ func (m *model) bgPrompt(a *Agent) {
 	}
 	m.prompts[a.SID] = p.screen(l.Ask)
 	m.sawAsk(a.SID, time.Now())
+}
+
+func (m *model) agentBySID(sid string) *Agent {
+	for i := range m.agents {
+		if m.agents[i].SID == sid {
+			return &m.agents[i]
+		}
+	}
+	return nil
 }
 
 // pressMenu notes a key that goes into a background agent's menu, so the menu drawn next is the one it shows.
@@ -90,17 +104,12 @@ func (m *model) quickApprove() tea.Cmd {
 		m.setErr(a.Name + " asks no question with answers to pick from")
 		return nil
 	}
-	from := 0
-	if a.Bg {
-		from = m.prog(a.SID, l.AskID, len(l.Ask)).cur
-	} else {
-		pr, ok := m.prompts[a.SID]
-		if !ok {
-			m.setErr(a.Name + "'s menu is not on its screen yet: try again in a moment")
-			return nil
-		}
-		from = screenStart(l.Ask, pr.Lines)
+	pr, ok := m.prompts[a.SID]
+	if !ok {
+		m.setErr(a.Name + "'s menu is not on its screen yet: try again in a moment")
+		return nil
 	}
+	from := screenStart(l.Ask, pr.Lines)
 	keys, err := quickKeys(l.Ask, from)
 	if err != nil {
 		m.setErr(a.Name + ": " + err.Error())
@@ -109,6 +118,7 @@ func (m *model) quickApprove() tea.Cmd {
 	if a.Bg {
 		m.prog(a.SID, l.AskID, len(l.Ask)).done = true
 		delete(m.prompts, a.SID)
+		delete(m.bgScr, a.SID)
 	}
 	return m.deliverAs("quick approve", "", keys)
 }

@@ -37,10 +37,13 @@ type Keys struct {
 }
 
 type Config struct {
-	OpenCmd string  `toml:"open_cmd"` // run with the file path as its only argument
-	Tables  string  `toml:"tables"`   // how agents' markdown tables are drawn: auto, grid, rule or records
-	Keys    Keys    `toml:"keys"`
-	Replies []Reply `toml:"reply"`
+	OpenCmd  string  `toml:"open_cmd"`      // run with the file path as its only argument
+	Tables   string  `toml:"tables"`        // how agents' markdown tables are drawn: auto, grid, rule or records
+	NWModel  string  `toml:"nw_model"`      // the model /NW starts an agent with, "" for Claude Code's default
+	NWEffort string  `toml:"nw_effort"`     // its effort level
+	NWPerm   string  `toml:"nw_permission"` // its permission mode: plan, auto, bypass, accept, manual or dontask
+	Keys     Keys    `toml:"keys"`
+	Replies  []Reply `toml:"reply"`
 }
 
 const defaultConfig = `# Kaching agent terminal: keys and pre-written replies.
@@ -53,6 +56,13 @@ open_cmd = "open"
 # How tables in an agent's messages are drawn: "auto" (columns under a rule; each row as a small block when the
 # columns would get too narrow), "rule", "grid" (every cell framed) or "records" (always blocks).
 tables = "auto"
+
+# /NW starts a background agent. These are its defaults; words after /NW override them, e.g. /NW soii sonnet high.
+# Model: opus, sonnet, haiku, fable or a full name. Effort: low, medium, high, xhigh, max. Permission: plan, auto,
+# bypass, accept, manual, dontask. Empty: Claude Code's own default.
+nw_model = ""
+nw_effort = ""
+nw_permission = ""
 
 [keys]
 next = "l"            # next agent (down the list)
