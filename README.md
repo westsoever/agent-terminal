@@ -114,10 +114,12 @@ Hand a task to an agent, put its Terminal window on your second display, and for
 
 - **Next waiting agent:** `bin/queue.sh next` brings the oldest waiting window to the front with the waiting tab selected. Each press after that shows the next one, wrapping around. Bind it to a hotkey with Raycast: Extensions > Script Commands > Add Directories > `~/bbq/ching/ui/raycast`, then give **Next Waiting Agent** a hotkey. It shows "Ching01 (2 more waiting)" as a small message.
 - **A lead agent and its workers:** open the workers as tabs of the lead's window (Cmd+T, or Window > Merge All Windows). The window moves as one: it comes over when any of its tabs waits and goes back once none does. `next` selects the tab that is waiting.
+- **Tiling:** each display lays out the Terminal windows shown on it: one fills the display, two sit side by side, three in three columns, four as a 2x2 grid, more in a larger grid. It re-tiles whenever a window comes or goes back and when a session starts, and on demand with **Tile Terminals** (same Raycast folder; `bin/queue.sh tile`). Your own windows come first, then the waiting ones, oldest first. Windows on a desktop you aren't viewing, and minimised ones, are left alone.
+- **Focus:** a window that comes over never takes the focus or jumps in front of what you're typing in. Only the **Next Waiting Agent** hotkey brings one to the front.
 - **What counts as waiting:** the same moments Ching notifies for: done, needs input, blocked, ready, and the idle prompt. A window already on the main display is never moved.
 - **Only Terminal.app.** A session inside VS Code or Cursor has no window of its own to move, so it is left alone.
 - **Status:** `bin/queue.sh status` lists the waiting tabs. State is in `~/.agent/queue/`.
-- **Settings** in `~/.agent/config`: `queue=off` turns it off; `queue_main_display=DELL` picks the main display by part of its name instead of the menu bar display.
+- **Settings** in `~/.agent/config`: `queue=off` turns it off; `queue_tile=off` keeps the queue but not the tiling; `queue_main_display=DELL` picks the main display by part of its name instead of the menu bar display.
 
 ## The guard
 

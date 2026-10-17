@@ -44,6 +44,8 @@ case "$SRC" in
 esac
 rm -f "$SESS_DIR/retries"
 ev session_start "$(jq -nc --arg s "$SRC" '{source:$s}')"
+# A new Terminal window takes its place in the grid (queue.sh tile); a compact changes no window.
+[ "$SRC" = compact ] || "$SELF_DIR/queue.sh" retile </dev/null >/dev/null 2>&1 || true
 
 MAX=${SESSION_START_MAX_BYTES:-6000}
 if [ "$REPO_MODE" -eq 1 ]; then WHERE="repo state in $STATE_DIR"; else WHERE="machine-level session state in $STATE_DIR (no repo GOAL.md here)"; fi

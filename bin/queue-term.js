@@ -1,11 +1,22 @@
 // queue-term.js - the Terminal.app side of queue.sh. Run as: osascript -l JavaScript queue-term.js CMD [ARGS]
 // All coordinates are top-left based (y grows down), like Terminal's own window bounds.
 //   screens              one line per display, the menu bar display first: "x y w h name" (visible frame)
-//   windows              one line per Terminal window: "id x y w h tty1,tty2,..." (ttys without /dev/)
-//   move ID X Y W H      set the window's frame; does not raise it or take focus
+//   windows              one line per Terminal window: "id x y w h tty1,tty2,... onscreen" (ttys without /dev/;
+//                        onscreen is 1 for a window on a desktop now shown, 0 on a hidden desktop or minimised)
+//   move ID X Y W H [ID X Y W H ...]
+//                        set each window's frame. Moving never raises a window or takes focus; when Terminal's front
+//                        window changed anyway, the one that was in front is put back.
 //   raise ID TTY         select the tab with that tty, bring the window to the front and activate Terminal
 // Prints nothing and exits 0 when Terminal is not running (windows, move, raise never launch it).
 ObjC.import('AppKit');
+ObjC.import('CoreGraphics');
+
+function onscreenIds() { // window numbers on the desktops now shown (Terminal's window id is its window number)
+  const list = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(1 /* on screen only */, 0))) || [];
+  const ids = {};
+  list.forEach(w => { if (w.kCGWindowOwnerName === 'Terminal') ids[w.kCGWindowNumber] = 1; });
+  return ids;
+}
 
 function screens() {
   const s = $.NSScreen.screens, out = [];
@@ -36,18 +47,23 @@ function run(argv) {
   const t = term();
   if (!t) return '';
   if (cmd === 'windows') {
-    const out = [];
+    const out = [], on = onscreenIds();
     t.windows().forEach(w => {
       let b, ttys;
       try { b = w.bounds(); ttys = w.tabs.tty(); } catch (e) { return; }   // a closing window
       const list = (ttys || []).filter(Boolean).map(x => String(x).replace('/dev/', ''));
-      if (list.length) out.push([w.id(), b.x, b.y, b.width, b.height, list.join(',')].join(' '));
+      if (list.length) out.push([w.id(), b.x, b.y, b.width, b.height, list.join(','), on[w.id()] ? 1 : 0].join(' '));
     });
     return out.join('\n');
   }
   if (cmd === 'move') {
-    const w = findWin(t, argv[1]);
-    if (w) w.bounds = { x: Number(argv[2]), y: Number(argv[3]), width: Number(argv[4]), height: Number(argv[5]) };
+    let front = null;
+    try { front = t.windows[0].id(); } catch (e) {}
+    for (let i = 1; i + 4 < argv.length; i += 5) {
+      const w = findWin(t, argv[i]);
+      if (w) w.bounds = { x: Number(argv[i + 1]), y: Number(argv[i + 2]), width: Number(argv[i + 3]), height: Number(argv[i + 4]) };
+    }
+    try { if (front !== null && t.windows[0].id() !== front) { const f = findWin(t, front); if (f) f.index = 1; } } catch (e) {}
     return '';
   }
   if (cmd === 'raise') {
@@ -58,5 +74,5 @@ function run(argv) {
     t.activate();
     return '';
   }
-  return 'usage: queue-term.js screens|windows|move ID X Y W H|raise ID TTY';
+  return 'usage: queue-term.js screens|windows|move ID X Y W H [...]|raise ID TTY';
 }

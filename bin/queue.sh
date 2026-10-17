@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# queue.sh park|back|forget [NAME] | next | status
+# queue.sh park|back|forget [NAME] | retile | tile | next | status
 # The monitor queue: a Terminal window whose session waits for you moves to the main display; when you prompt
 # it again it goes back to where it was. The main display holds only your own work plus what waits for you, so
 # nothing there but your own windows means every agent is busy. `next` (bind it to a hotkey) brings the waiting
@@ -13,14 +13,23 @@
 #           parked window too, without moving it.
 #   next    raise the next parked waiting window (after the one shown last, wrapping), select its tab, activate
 #           Terminal. Prints one line for a Raycast HUD.
+#   retile  a session started (session-start.sh): lay out the windows again, in the background.
+#   tile    the same now, for a hotkey; prints how many windows moved.
 #   status  the waiting tabs and the parked windows.
+# Tiling (on unless queue_tile=off): after every move each display lays out the Terminal windows shown on it in a
+# grid: 1 fills the display, 2 side by side, 3 in three columns, 4 as 2x2, more in ceil(sqrt(n)) columns (see
+# queue-layout.pl). Windows on a hidden desktop or minimised are left alone. Without tiling a parked window
+# keeps its size, cascaded on the main display, and goes back to its old frame.
+# Focus: moving or tiling never raises a window or takes focus (queue-term.js puts Terminal's front window
+# back if it changed); only `next` does, because you asked for it.
 # A tab is grouped by its window: workers opened as tabs of the orchestrator's window move together.
 # Only Terminal.app windows are handled; a session in another terminal (VS Code, Cursor) has no Terminal tab,
 # so every command is a no-op for it. The session's tab is its controlling tty, found by walking up from this
 # process to the first ancestor that has one; a run with no tty (the watcher, launchd, claude -p) does nothing.
 # park/back/forget find the tty at once, then do the window work in the background so a hook never waits on it.
-# Config ($AGENT_HOME/config): queue=off turns it off; queue_main_display=NAME picks the main display by
-# (part of) its name, spaces as _ (default: the display with the menu bar).
+# Config ($AGENT_HOME/config): queue=off turns it off; queue_tile=off keeps the queue without tiling;
+# queue_main_display=NAME picks the main display by (part of) its name, spaces as _ (default: the display with
+# the menu bar).
 # Env: QUEUE_TERM (the Terminal helper; default osascript -l JavaScript queue-term.js), QUEUE_TTY (skip the
 #      tty lookup; "none" = no tty), QUEUE_SYNC=1 (no background fork), AGENT_HOME
 set -euo pipefail
@@ -32,10 +41,12 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CMD=${1:-status}
 NAME_ARG=${2:-}
 case "$(config_get queue on | tr '[:upper:]' '[:lower:]')" in off|0|no|false) exit 0 ;; esac
+TILE=1
+case "$(config_get queue_tile on | tr '[:upper:]' '[:lower:]')" in off|0|no|false) TILE=0 ;; esac
 
 QDIR="$AGENT_HOME/queue"
 WAITING="$QDIR/waiting"   # one file per waiting tab: <tty>, holding "<epoch> <name>"
-PARKED="$QDIR/parked"     # one file per moved window: <window id>, holding its old frame "x y w h"
+PARKED="$QDIR/parked"     # one file per moved window: <window id>, holding its old frame and when: "x y w h epoch"
 mkdir -p "$WAITING" "$PARKED"
 
 term() {
@@ -66,8 +77,10 @@ lock() {
   trap 'rmdir "$QDIR/.lock" 2>/dev/null || true' EXIT
 }
 
-WINDOWS=""
+WINDOWS=""   # queue-term.js windows: "id x y w h ttys onscreen", updated in place by relocate
+SCREENS=""
 load_windows() { WINDOWS=$(term windows 2>/dev/null || true); }
+screens() { [ -n "$SCREENS" ] || SCREENS=$(term screens 2>/dev/null || true); printf '%s\n' "$SCREENS"; }
 window_of() { # tty -> "id x y w h ttys" of the window holding that tab
   printf '%s\n' "$WINDOWS" | awk -v t="$1" 'NF >= 6 { n = split($6, a, ","); for (i = 1; i <= n; i++) if (a[i] == t) { print; exit } }'
 }
@@ -80,10 +93,36 @@ others_waiting() { # window line, tty -> true when another tab of that window st
   return 1
 }
 
+# relocate ID X Y W H: the window goes there. WINDOWS is updated too, so a layout sees it in its new place.
+MOVES=""; FORCE=""
+relocate() {
+  WINDOWS=$(printf '%s\n' "$WINDOWS" | awk -v i="$1" -v x="$2" -v y="$3" -v w="$4" -v h="$5" '$1 == i { $2 = x; $3 = y; $4 = w; $5 = h; $7 = 1 } { print }')
+  MOVES="$MOVES $1 $2 $3 $4 $5"; FORCE="$FORCE $1"
+}
+layout() { # the moves that tile every display ("id x y w h" lines)
+  local mx my f
+  read -r mx my _ <<<"$(main_display)" || true
+  { screens | sed 's/^/S /'
+    [ -z "${my:-}" ] || printf 'M %s %s\n' "$mx" "$my"
+    printf '%s\n' "$WINDOWS" | sed 's/^/W /'
+    for f in "$PARKED"/*; do [ -f "$f" ] || continue; printf 'P %s %s\n' "${f##*/}" "$(awk '{ print $5 + 0 }' "$f")"; done
+    for f in $FORCE; do printf 'F %s\n' "$f"; done
+  } | perl "$SELF_DIR/queue-layout.pl"
+}
+flush() { # apply the relocations: through the layout when tiling, else as they are. Prints how many windows moved.
+  local m
+  if [ "$TILE" = 1 ]; then m=$(layout); else m=$MOVES; fi
+  MOVES=""; FORCE=""
+  m=$(printf '%s' "$m" | tr '\n' ' ')
+  # shellcheck disable=SC2086
+  if [ -n "${m// /}" ]; then term move $m >/dev/null 2>&1 || true; fi
+  printf '%s\n' "$(( $(printf '%s' "$m" | wc -w) / 5 ))"
+}
+
 main_display() { # "x y w h" of the main display
   local want s
   want=$(config_get queue_main_display "")
-  s=$(term screens 2>/dev/null || true)
+  s=$(screens)
   if [ -n "$want" ]; then
     printf '%s\n' "$s" | awk -v w="$want" 'index(tolower($5), tolower(w)) { print $1, $2, $3, $4; f = 1; exit } END { if (!f) exit 1 }' && return 0
   fi
@@ -109,8 +148,9 @@ do_park() { # tty name
   nx=$((mx + 40 + (n % 8) * 32)); ny=$((my + 40 + (n % 8) * 32))
   [ $((nx + w)) -le $((mx + mw)) ] || nx=$((mx + mw - w))
   [ $((ny + h)) -le $((my + mh)) ] || ny=$((my + mh - h))
-  printf '%s %s %s %s\n' "$x" "$y" "$(printf '%s' "$win" | awk '{ print $4 }')" "$(printf '%s' "$win" | awk '{ print $5 }')" >"$PARKED/$id"
-  term move "$id" "$nx" "$ny" "$w" "$h" >/dev/null 2>&1 || true
+  printf '%s %s\n' "$(printf '%s' "$win" | awk '{ print $2, $3, $4, $5 }')" "$(date +%s)" >"$PARKED/$id"
+  relocate "$id" "$nx" "$ny" "$w" "$h"
+  flush >/dev/null
   ev queue_park "$(jq -nc --arg t "$tty" '{tty:$t}')"
 }
 
@@ -123,9 +163,11 @@ do_back() { # tty move(1|0)
   id=${win%% *}
   [ -f "$PARKED/$id" ] || return 0
   ! others_waiting "$win" "$tty" || return 0
-  # shellcheck disable=SC2046
-  if [ "$2" = 1 ]; then term move "$id" $(cat "$PARKED/$id") >/dev/null 2>&1 || true; fi
+  local old
+  old=$(cut -d' ' -f1-4 "$PARKED/$id")
   rm -f "$PARKED/$id"
+  # shellcheck disable=SC2086
+  if [ "$2" = 1 ]; then relocate "$id" $old; flush >/dev/null; fi
   ev queue_back "$(jq -nc --arg t "$tty" --arg m "$2" '{tty:$t,moved:($m == "1")}')"
 }
 
@@ -150,13 +192,14 @@ pending() {
 }
 
 case "$CMD" in
-  park|back|forget)
+  park|back|forget|retile)
     TTY=$(session_tty)
     [ -n "$TTY" ] || exit 0
     # the session's name for the HUD (the callers pass theirs; stdin is never read)
     [ -n "$NAME_ARG" ] || NAME_ARG=$(basename "$PWD")
     case "$CMD" in
       park)   job() { do_park "$TTY" "$NAME_ARG"; } ;;
+      retile) [ "$TILE" = 1 ] || exit 0; job() { lock || return 0; load_windows; flush >/dev/null; } ;;
       back)   job() { do_back "$TTY" 1; } ;;
       forget) job() { do_back "$TTY" 0; } ;;
     esac
@@ -173,9 +216,15 @@ case "$CMD" in
     term raise "$id" "$tty" >/dev/null 2>&1 || true
     total=$(printf '%s\n' "$list" | wc -l | tr -d ' ')
     if [ "$total" -gt 1 ]; then echo "$name ($((total - 1)) more waiting)"; else echo "$name"; fi ;;
+  tile)
+    lock || { echo "Queue busy, try again"; exit 0; }
+    load_windows
+    TILE=1
+    n=$(flush)
+    if [ "$n" = 1 ]; then echo "Tiled: 1 window moved"; else echo "Tiled: $n windows moved"; fi ;;
   status)
     list=$(pending)
     if [ -z "$list" ]; then echo "nothing waiting"; else printf '%s\n' "$list" | awk '{ printf "%s  %s  (window %s)\n", $3, $1, $2 }'; fi ;;
-  *) echo "usage: queue.sh park|back|forget [NAME] | next | status" >&2; exit 2 ;;
+  *) echo "usage: queue.sh park|back|forget [NAME] | retile | tile | next | status" >&2; exit 2 ;;
 esac
 exit 0
