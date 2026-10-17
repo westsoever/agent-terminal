@@ -660,6 +660,28 @@ PROPOSALS_READERS=" grep egrep fgrep rg cat less more head tail wc ls stat file 
 deny_proposals() {
   emit_deny "approving a learner proposal is for the person at a terminal. A session may only call kaching-proposals directly as list, show, diff, reject or snooze. Tell the user to run: kaching-proposals approve <id>"
 }
+glob_path_may_name_cli() { # $1 = the raw command word; 0 = it may name a copy of the CLI, 1 = it cannot
+  # A glob with a directory part (bin/c*s, 06-Wiki/learned/**) can start the CLI only if that path can name a copy of it.
+  # The splitter cuts a quoted argument such as "Write(06-Wiki/learned/**)" at its parenthesis and leaves a word like
+  # that behind; testing just its last component (`**`) denied the whole command line. The CLI sits in a bin/
+  # directory: this guard's own, the installed link's, or any other .../bin. What this cannot place still counts as
+  # the CLI: a word with no directory part, one holding $, a backtick or ~, or one with a . or .. segment.
+  local w=$1 d n
+  case "$w" in */*) ;; *) return 0 ;; esac
+  case "$w" in *'$'*|*'`'*|'~'*) return 0 ;; esac
+  w=$(printf '%s' "$w" | LC_ALL=C tr 'A-Z' 'a-z' | LC_ALL=C tr -s '/')   # macOS volumes are case-insensitive; // is /
+  while :; do case "$w" in ./*) w=${w#./} ;; ../*) w=${w#../} ;; *) break ;; esac; done
+  case "$w" in */*) ;; *) return 0 ;; esac   # ./c*s and ../c*s leave a bare word: it expands in the shell's own folder
+  case "/$w/" in */./*|*/../*) return 0 ;; esac
+  for d in "$SELF_DIR" "${HOME:-/nonexistent}/.claude/kaching/bin" "${HOME:-/nonexistent}/.claude/ching/bin" /bin; do
+    d=$(printf '%s' "$d" | LC_ALL=C tr 'A-Z' 'a-z')
+    for n in kaching-proposals ching-proposals; do
+      # shellcheck disable=SC2053
+      if [[ "$d/$n" == $w || "$d/$n" == */$w ]]; then return 0; fi
+    done
+  done
+  return 1
+}
 check_proposals_call() { # TOKS is the segment
   local k=0 j b sub
   while [ "$k" -lt "$NT" ] && [[ "${TOKS[$k]}" == [A-Za-z_]*=* ]]; do k=$((k + 1)); done
@@ -670,12 +692,12 @@ check_proposals_call() { # TOKS is the segment
   # `)` and a word that is all pattern: no letter, digit or `/` outside its [...] classes (`*`, `*[!0-9]*`, `??`).
   # That is what the splitter leaves of a `case` arm or a heredoc line, not a command anyone types, and treating it
   # as the CLI denied any command quoting shell code. A glob with a letter or a path (bin/c*s, bin/*s,
-  # bin/???????????????) still counts. Run inside bin/, an all-pattern word could still start the CLI; the CLI's own
-  # checks refuse approve there.
+  # bin/???????????????) still counts, unless its directory part cannot name a copy of the CLI (glob_path_may_name_cli).
+  # Run inside bin/, an all-pattern word could still start the CLI; the CLI's own checks refuse approve there.
   local rawpat
   rawpat=$(printf '%s' "${TOKS[$k]}" | sed 's/\[[^]]*\]//g')
   # shellcheck disable=SC2053
-  if [[ "$b" == *[\*\?\[]* ]] && [[ "$b" != *')' ]] && [[ "$rawpat" == *[A-Za-z0-9/]* ]] && { [[ kaching-proposals == $b ]] || [[ ching-proposals == $b ]]; }; then b=kaching-proposals; fi
+  if [[ "$b" == *[\*\?\[]* ]] && [[ "$b" != *')' ]] && [[ "$rawpat" == *[A-Za-z0-9/]* ]] && { [[ kaching-proposals == $b ]] || [[ ching-proposals == $b ]]; } && glob_path_may_name_cli "${TOKS[$k]}"; then b=kaching-proposals; fi
   [ "$b" != ching-proposals ] || b=kaching-proposals   # the old name (D35) is a wrapper that runs the same CLI
   if [ "$b" = kaching-proposals ]; then
     j=$((k + 1))
