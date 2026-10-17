@@ -57,7 +57,7 @@ MSG=$(clean "$MSG")
 
 # The monitor queue (queue.sh): a session that now waits for you moves its Terminal window to the main display.
 # Only a call from inside the session has its tty; the watcher's calls find none and do nothing there.
-case "$KIND" in done|input|blocked|ready|idle) "$SELF_DIR/queue.sh" park "$NAME" </dev/null || true ;; esac
+case "$KIND" in done|input|blocked|ready|idle) QUEUE_SID=$SESSION QUEUE_KIND=$KIND "$SELF_DIR/queue.sh" park "$NAME" </dev/null || true ;; esac
 
 mkdir -p "$AGENT_HOME/notify"
 LAST="$AGENT_HOME/notify/$SESSION.last"

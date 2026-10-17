@@ -2,6 +2,10 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D34 (2026-10-17): The monitor queue serves kaching: one agent at a time while it is open
+
+**Decision (owner, through the agent terminal design, D33):** while kaching runs, the main display shows kaching plus at most one agent window: the one kaching has selected, else the head of the queue. The others keep their waiting records but stay in their cells; answering one brings the next, in the background, never taking focus. With kaching closed, the D29-D32 behaviour applies. Built as one reconcile step that every queue change runs: it works out which windows belong on the main display and moves only the difference. Also for kaching: a tabs map per session, the session id and kind in each waiting record, `queue.sh show` and `queue.sh dismiss`. Not built here: sending text into a tab (kaching's terminal/send.js) and any key layer (Raycast stays the global hotkey layer).
+
 ## D32 (2026-10-17): A fixed frame for waiting windows on the main display (amends D31)
 
 **Decision (user):** a window that comes to the main display takes one fixed frame: top-left 320,70 and bottom-right 780,860 on the owner's screen, so 460 x 790 (`queue_park_frame`, default 320,70,460,790). All waiting windows share it as a stack. Going back still restores the exact cell. Found while building it: Terminal sets a window's y from the top of the display the window is on, but reports it from the top of the main display, so `queue-term.js move` corrects for that. A second display also has its own menu bar that macOS does not take off its visible frame, so the helper takes it off.

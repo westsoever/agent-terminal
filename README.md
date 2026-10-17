@@ -120,6 +120,8 @@ Hand a task to an agent, put its Terminal window on your second display, and for
 - **What counts as waiting:** the same moments Ching notifies for: done, needs input, blocked, ready, and the idle prompt. A window already on the main display is never moved.
 - **Only Terminal.app.** A session inside VS Code or Cursor has no window of its own to move, so it is left alone.
 - **Status:** `bin/queue.sh status` lists the waiting tabs. State is in `~/.agent/queue/`.
+- **With kaching open** (the agent terminal): the main display holds kaching plus one agent window at a time, the one kaching has selected, or else the oldest waiting one. The others wait in their cells, and when you answer one, the next comes over in the background. Close kaching and every waiting window comes over again at the next change. `queue.sh show [SESSION_ID]` puts an agent on the main display (kaching calls it when its selection changes); `queue.sh dismiss SESSION_ID` takes an agent out of the queue without an answer.
+- **Files kaching reads:** `~/.agent/queue/tabs/<session id>` holds `tty window_id tab_index name` for every Terminal session (written at session start and on each prompt, removed at the end). `~/.agent/queue/waiting/<tty>` holds `epoch session_id kind name` (kind is done, input, blocked, ready or idle).
 - **Settings** in `~/.agent/config`: `queue=off` turns it off; `queue_tile=off` keeps the queue but not the tiling; `queue_main_display=DELL` picks the main display by part of its name instead of the menu bar display.
 
 ## The guard

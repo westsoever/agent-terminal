@@ -190,5 +190,58 @@ assert_eq "session start: re-tiled, right half" "2880 -67 960 1080" "$(win 132)"
 reset "141 2000 30 700 700 ttys130" "142 2800 30 700 700 ttys131"
 setcfg queue_tile=off
 QUEUE_TTY=ttys131 "$Q" retile
-assert_eq "queue_tile=off: retile moves nothing" "" "$(cat "$FT/calls")"
+assert_eq "queue_tile=off: retile moves nothing" "0" "$(moves)"
+
+# ---------- for kaching: the tabs map, the waiting record, dismiss, single mode, show ----------
+setcfg queue_tile=off
+TB="$QD/tabs"
+reset "201 2000 100 800 500 ttys200,ttys201" "202 2100 600 800 400 ttys202" "203 2900 100 800 400 ttys203"
+QUEUE_SID=s200 QUEUE_NAME="my proj" QUEUE_TTY=ttys200 "$Q" retile
+QUEUE_SID=s201 QUEUE_NAME=two QUEUE_TTY=ttys201 "$Q" retile
+assert_eq "tabs map: tty, window, tab index, name" "ttys201 201 2 two" "$(cat "$TB/s201")"
+assert_eq "tabs map: a name with spaces" "ttys200 201 1 my proj" "$(cat "$TB/s200")"
+QUEUE_SID=s201 QUEUE_NAME=two QUEUE_TTY=ttys201 "$Q" forget
+assert_eq "tabs map: removed when the session ends" "" "$(ls "$TB" | grep -c s201 | grep -v 0)"
+# waiting record: epoch, session id, kind, name; a second park keeps the epoch and takes the new kind
+QUEUE_SID=s202 QUEUE_KIND=input QUEUE_TTY=ttys202 "$Q" park "proj b"
+first=$(cut -d' ' -f1 "$QD/waiting/ttys202")
+assert_eq "waiting record: session id, kind, name" "s202 input proj b" "$(cut -d' ' -f2- "$QD/waiting/ttys202")"
+sleep 1
+QUEUE_SID=s202 QUEUE_KIND=idle QUEUE_TTY=ttys202 "$Q" park "proj b"
+assert_eq "waiting record: the epoch stays" "$first" "$(cut -d' ' -f1 "$QD/waiting/ttys202")"
+assert_eq "waiting record: the kind updates" "idle" "$(cut -d' ' -f3 "$QD/waiting/ttys202")"
+assert_eq "status shows the name" "proj b  ttys202  (window 202)" "$("$Q" status)"
+# dismiss: out of the queue without an answer, back to its cell
+assert_eq "dismiss names the agent" "Dismissed proj b" "$("$Q" dismiss s202)"
+assert_eq "dismiss: back in its cell" "2100 600 800 400" "$(win 202)"
+assert_eq "dismiss: no longer waiting" "" "$(ls "$QD/waiting")"
+assert_eq "dismiss: unknown session" "Unknown session: nope" "$("$Q" dismiss nope)"
+
+# single mode (kaching open: a live pid in terminal/open): one agent on the main display at a time
+reset "211 2000 100 800 500 ttys210" "212 2100 600 800 400 ttys211" "213 2900 100 800 400 ttys212"
+mkdir -p "$AGENT_HOME/terminal"
+printf 'pid=%s\nself_tty=ttys999\nsid=\ntty=\n' "$$" >"$AGENT_HOME/terminal/open"
+QUEUE_SID=s210 QUEUE_TTY=ttys210 "$Q" park a
+sleep 1
+QUEUE_SID=s211 QUEUE_TTY=ttys211 "$Q" park b
+assert_eq "single: the oldest comes over" "40 70 800 500" "$(win 211)"
+assert_eq "single: the next one stays in its cell" "2100 600 800 400" "$(win 212)"
+QUEUE_SID=s210 QUEUE_TTY=ttys210 "$Q" back
+assert_eq "single: answered, it goes back" "2000 100 800 500" "$(win 211)"
+assert_eq "single: and the next one comes" "40 70 800 400" "$(win 212)"
+# the selection in the open file wins; show re-reads it, show SID picks that agent
+QUEUE_SID=s212 QUEUE_NAME=c QUEUE_TTY=ttys212 "$Q" retile
+printf 'pid=%s\nself_tty=ttys999\nsid=s212\ntty=ttys212\n' "$$" >"$AGENT_HOME/terminal/open"
+assert_eq "show: done" "Shown" "$("$Q" show)"
+assert_eq "show: the selected agent is on the main display" "40 70 800 400" "$(win 213)"
+assert_eq "show: the one it replaced is back in its cell" "2100 600 800 400" "$(win 212)"
+assert_eq "show SID: that agent" "Shown" "$("$Q" show s211)"
+assert_eq "show SID: on the main display" "40 70 800 400" "$(win 212)"
+assert_eq "show SID: the other back" "2900 100 800 400" "$(win 213)"
+# kaching closed (a dead pid): every waiting window comes over again on the next change
+printf 'pid=999999\ntty=ttys212\n' >"$AGENT_HOME/terminal/open"
+QUEUE_SID=s212 QUEUE_TTY=ttys212 "$Q" park c
+assert_eq "closed: the waiting one is still over" "40 70 800 400" "$(win 212)"
+assert_eq "closed: the newly waiting one comes too" "72 102 800 400" "$(win 213)"
+rm -f "$AGENT_HOME/terminal/open"
 exit 0
