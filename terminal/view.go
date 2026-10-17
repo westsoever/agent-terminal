@@ -737,7 +737,7 @@ func (m model) helpView(h int) []string {
 		row2(K.Reply, "write a message (keys below); esc keeps it as a draft; sending it sends a window on monitor 1 back"),
 		row2(K.Open+" then a-i", "open that file"),
 		row2(K.Goto, "show the agent's own Terminal window, where it is"),
-		row2(K.Here, "bring its window to monitor 1 and into focus, to type in it"),
+		row2(K.Here, "bring its window to monitor 1 and into focus, to type in it; a prompt sends it back"),
 		row2(K.Dismiss, "remove a waiting agent from the list, no answer"),
 		row2(K.Refresh, "read all data again"),
 		"",

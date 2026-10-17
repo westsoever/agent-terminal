@@ -2,6 +2,12 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D43 (2026-10-17): A prompt sends a window back, wherever it was prompted (amends D38, D42)
+
+**Decision (user):** "If I drag it over or bring it over manually with H, it should stay here for sure, but once I have prompted it either within its own session or through kaching, it should be moved back."
+
+**Built:** `queue.sh back` (the UserPromptSubmit hook) now sends the window home too when it was brought over by hand (a drag, `show` / `h`), and it does so while kaching is open. Before, only a window the queue had parked itself went back, and with kaching open nothing moved. Other sessions' prompts and events still leave it alone, and it stays while another tab of the same window waits. kaching's `queue.sh return` after an answer (D42) stays, for menu answers, which fire no prompt hook. Shared code: `send_back` in queue.sh.
+
 ## D42 (2026-10-17): Answering an agent from kaching sends its window back to monitor 2 (amends D38)
 
 **Decision (user):** "once I kick off the session here within kaching, even though it's on monitor 1, it doesn't get moved back to monitor 2 after I hit confirm. Please fix that." D38 kept a window that was dragged (or brought with `h`) on monitor 1 until it was dragged back, and with kaching open nothing moves at all (D37).
