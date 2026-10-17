@@ -110,6 +110,7 @@ type execDone struct{ err error }
 func newModel() model {
 	cfg, ct, err := loadConfig()
 	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}}
+	m.ed.drafts = loadDrafts()
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
 	}

@@ -153,3 +153,38 @@ func TestSlashProjectCommands(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+// A draft survives a restart: typing saves it (even with the box still open), a new kaching loads it, Esc keeps
+// it, sending forgets it, and an emptied draft is no draft.
+func TestDraftsSurviveRestart(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	e := newEditor()
+	e.drafts = loadDrafts()
+	e.open("s1", "/tmp", 40)
+	for _, r := range "half a reply" {
+		e.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}, 40)
+	}
+	if got := loadDrafts()["s1"]; got != "half a reply" {
+		t.Fatalf("box still open, restart: draft %q", got)
+	}
+	e.close()
+	e2 := newEditor()
+	e2.drafts = loadDrafts()
+	e2.open("s1", "/tmp", 40)
+	if got := e2.ta.Value(); got != "half a reply" {
+		t.Fatalf("after a restart the box opens with %q", got)
+	}
+	e2.sent()
+	if _, ok := loadDrafts()["s1"]; ok {
+		t.Fatal("a sent draft is still saved")
+	}
+	if _, err := os.Stat(draftsPath()); !os.IsNotExist(err) {
+		t.Fatalf("no drafts left but the file stays: %v", err)
+	}
+	e2.open("s2", "/tmp", 40)
+	e2.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}, 40)
+	e2.key(tea.KeyMsg{Type: tea.KeyBackspace}, 40)
+	if _, ok := loadDrafts()["s2"]; ok {
+		t.Fatal("an emptied draft is still saved")
+	}
+}
