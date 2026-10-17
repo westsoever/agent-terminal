@@ -8,7 +8,7 @@ Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are rec
 
 **Why now:** quitting kaching called `queue.sh show`, which put the queue back in normal mode; every idle session counts as waiting, so five agent windows jumped onto monitor 1 into the same park frame at once and monitor 2 emptied, which looked like the sessions had closed (they hadn't; no session ended). Separately, in single mode the agent selected in kaching stayed on monitor 1 after the owner answered it, because the rule kept "selected" windows regardless of waiting.
 
-**Done:** kaching no longer calls `queue.sh show` on selection or quit. The owner turns the automatic queue off with `queue=off` in `~/.agent/config` (sessions may not edit that file) until the queue implements this decision.
+**Done:** kaching no longer calls `queue.sh show` on selection or quit. While kaching is open, `queue.sh` reconcile wants no window on the main display: nothing comes over, the selection moves nothing, and a window parked before kaching opened goes back to its cell (tests/t_queue.sh). Still open: resizing a window the owner drags between displays (chingSorter), and whether the queue should move windows at all while kaching is closed.
 
 ## D36 (2026-10-17): A larger park frame (amends D32)
 

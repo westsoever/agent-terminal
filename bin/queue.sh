@@ -208,18 +208,16 @@ single_mode() {
 
 # reconcile: move windows so the main display holds what it should now, then flush (the grid comes along).
 #   normal: every window with a waiting tab.
-#   single (kaching open): one window: the agent kaching has selected (SHOW_TTY, else tty= in its open file)
-#           when that tab exists, else the oldest waiting one. The others wait in their cells.
+#   kaching open (D37, amends D34): nothing. kaching's list is the inbox, so no window comes over, selecting an
+#           agent in kaching moves nothing, and a window parked before kaching opened goes back to its cell.
 # A window that is wanted and not parked is parked; a parked window that is not wanted goes back to its cell.
 SHOW_TTY=""
 reconcile() {
-  local want="" sel win f id target
+  local want="" win f id target
   [ -n "$(main_display)" ] || return 0
   prune
   if single_mode; then
-    sel=${SHOW_TTY:-$(open_get tty)}
-    if [ -n "$sel" ]; then win=$(window_of "$sel"); if [ -n "$win" ] && ! yours "$win"; then want=${win%% *}; fi; fi
-    [ -n "$want" ] || want=$(waiting_windows | head -n 1)
+    want=""
   else
     want=$(waiting_windows)
     if [ -n "$SHOW_TTY" ]; then win=$(window_of "$SHOW_TTY"); if [ -n "$win" ] && ! yours "$win"; then want="$want ${win%% *}"; fi; fi
@@ -313,7 +311,7 @@ case "$CMD" in
   show|dismiss)
     # show [SESSION_ID]: put that agent's window on the main display now (kaching calls it when its selection
     #   changes; with no id it just re-reads the selection). dismiss SESSION_ID: take the agent out of the queue
-    #   without an answer; its window goes back and, with kaching open, the next one comes.
+    #   without an answer; its window goes back to its cell.
     SID_ARG=$NAME_ARG
     tty=""
     if [ -n "$SID_ARG" ]; then
