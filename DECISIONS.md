@@ -2,6 +2,12 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D45 (2026-10-18): A pull request opens on the right in kaching, and a comment on it starts an agent (amends D44)
+
+**Decision (user):** "When I press K, I would want the side panel to open that holds the content of the pull request … I can press again on the side panel, and then I can comment on this … once I hit Enter, it gets sent off to a new session that works through this pull request."
+
+**Built:** in `PR`, `k` opens the selected pull request on the right (`gh pr view`: branches, size, conflicts, checks, review state, description, files, comments and reviews), starting at the top; `j`/`l` keep moving and the panel follows; `↑`/`↓` scroll. `k` again opens the comment box: Enter starts a background agent (`claude --bg`, as `/NW`) in the repo's local clone (found by its origin under `~/bbq` and `~`; home when there is none) with the pull request, its branch and the comment as the task. The agent works in its own worktree and reports back; it comments on GitHub only when asked. `1` review it and `2` merge it are ready-made comments. Approving is left to the agent's report and the owner: GitHub does not let the owner approve their own pull requests, which most of these are. Number keys in `PR` never answer an agent's menu. `esc` closes the box, then the panel, then goes to the desk.
+
 ## D44 (2026-10-18): kaching gets a PR view for pull requests; proposals move to PO; the AG tab goes (amends D33)
 
 **Decision (user):** "Create the PR section here for pull requests. Make me access it with /pr, call it Pull Requests, and rename the Proposals one. Maybe make it PO instead. For now, you can remove or hide the AG Agents section. I'm not using it, and it's not really helpful because it does exactly the same as the inbox."
