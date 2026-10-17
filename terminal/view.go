@@ -311,8 +311,9 @@ func (m model) queueRow(in, i int, a Agent) string {
 }
 
 // chatLines is the conversation as panel rows, oldest first: the owner's prompts in white after "› ", the agent's
-// texts in grey, a blank row between messages. Only the last message when the tail has no conversation.
-func chatLines(l Last, in int) []string {
+// texts in grey (their tables drawn as tables, in the tables style), a blank row between messages. Only the last
+// message when the tail has no conversation.
+func chatLines(l Last, in int, tables string) []string {
 	chat := l.Chat
 	if len(chat) == 0 {
 		text := l.Text
@@ -336,9 +337,7 @@ func chatLines(l Last, in int) []string {
 			}
 			continue
 		}
-		for _, ml := range collapse(wrap(plain(t.Text), in)) {
-			out = append(out, row(in, s(ml, cText)))
-		}
+		out = append(out, textRows(t.Text, in, tables)...)
 	}
 	return out
 }
@@ -448,7 +447,7 @@ func (m model) agentPanel(w, h int) []string {
 	if avail < 1 {
 		avail = 1
 	}
-	msg := chatLines(l, in)
+	msg := chatLines(l, in, m.cfg.Tables)
 	// bottom-anchored: off lines back from the newest; the scroll keys move off, this drawing sets its limits
 	most := max(0, len(msg)-avail)
 	off := 0
@@ -558,11 +557,11 @@ func (m model) tile(i, w, h int) []string {
 	}
 	title := []seg{s(fmt.Sprint(i+1), cOrange), s(" "+a.Name, cWhite), s("  "+a.Label(), st)}
 	var body []string
-	text := plain(l.Text)
+	text := l.Text
 	if text == "" {
 		text = "(no message yet)"
 	}
-	lines := collapse(wrap(text, in))
+	lines := textRows(text, in, m.cfg.Tables)
 	avail := h - 3
 	if len(l.Options) > 0 {
 		avail--
@@ -571,7 +570,7 @@ func (m model) tile(i, w, h int) []string {
 		lines = lines[len(lines)-avail:]
 	}
 	for _, t := range lines {
-		body = append(body, " "+row(in, s(t, cText))+" ")
+		body = append(body, " "+t+" ")
 	}
 	for len(body) < avail {
 		body = append(body, "")
@@ -758,7 +757,7 @@ func (m model) helpView(h int) []string {
 		lines = append(lines, row2(r.Key, fmt.Sprintf("%q", r.Text)))
 	}
 	lines = append(lines, "",
-		"Change keys and messages in "+tildify(configPath())+". Save: kaching reloads it.",
+		"Change keys, messages and how tables show (tables = auto, rule, grid or records) in "+tildify(configPath())+". Save: kaching reloads it.",
 		"Full manual: ~/.claude/kaching/docs/kaching-manual.md")
 	return m.textView("help", lines, h)
 }

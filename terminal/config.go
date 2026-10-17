@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ type Keys struct {
 
 type Config struct {
 	OpenCmd string  `toml:"open_cmd"` // run with the file path as its only argument
+	Tables  string  `toml:"tables"`   // how agents' markdown tables are drawn: auto, grid, rule or records
 	Keys    Keys    `toml:"keys"`
 	Replies []Reply `toml:"reply"`
 }
@@ -46,6 +48,10 @@ const defaultConfig = `# Kaching agent terminal: keys and pre-written replies.
 
 # How a file an agent mentioned is opened (gets the path as its only argument).
 open_cmd = "open"
+
+# How tables in an agent's messages are drawn: "auto" (columns under a rule; each row as a small block when the
+# columns would get too narrow), "rule", "grid" (every cell framed) or "records" (always blocks).
+tables = "auto"
 
 [keys]
 next = "l"            # next agent (down the list)
@@ -131,6 +137,9 @@ func loadConfig() (Config, time.Time, error) {
 	}
 	if c.OpenCmd == "" {
 		c.OpenCmd = def.OpenCmd
+	}
+	if !slices.Contains(tableStyles, c.Tables) {
+		c.Tables = "auto"
 	}
 	fill := func(v *string, d string) {
 		if *v == "" {

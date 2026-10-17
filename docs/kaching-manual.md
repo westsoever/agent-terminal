@@ -187,7 +187,7 @@ A dark name shows an agent that is not in Terminal.app. You can read its message
 The agent panel shows the selected agent:
 
 - The top line shows its name, its folder and its git branch. On the right it shows the model and effort of its last reply, for example `[Opus 5.5] high`. The wall tiles show it too; a narrow tile shows only the model.
-- The text is the end of its last message.
+- The text is the end of its last message. Tables in it show as tables (see 7.5).
 - The numbered lines are the answers that it asks you to select from.
 - `FILES IT MENTIONED` shows the files that its last message names. Each file has a letter.
 - The `reply` line shows the text that you write.
@@ -397,6 +397,22 @@ If you remove a line, Kaching uses the default key.
 
 1. Open `~/.agent/terminal/keys.toml`.
 2. Change the `open_cmd` line, for example `open_cmd = "code"` for VS Code.
+3. Save the file.
+
+### 7.5 Change how tables show
+
+Kaching draws the markdown tables in an agent's messages as tables.
+
+1. Open `~/.agent/terminal/keys.toml`.
+2. Change the `tables` line. The line must be above `[keys]`.
+
+   | Value | Tables show as |
+   |---|---|
+   | `auto` | Columns under a rule. When a column gets narrower than 10 characters (a small tile or window), each row shows as a small block. This is the default. |
+   | `rule` | Always columns under a rule. |
+   | `grid` | Every cell in a frame. |
+   | `records` | Always blocks: the first cell on top, then each other column as its header and value. |
+
 3. Save the file.
 
 ## 8. Kaching and the Terminal windows
