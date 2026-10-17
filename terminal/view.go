@@ -35,6 +35,8 @@ func (m model) View() string {
 		body = m.textView("repos", m.sync, bodyH)
 	case vProposals:
 		body = m.proposalsView(bodyH)
+	case vPulls:
+		body = m.pullsView(bodyH)
 	case vRecaps:
 		body = m.recapsView(bodyH)
 	case vPaperclip:
@@ -73,7 +75,7 @@ func (m model) tabBar() []string {
 		}
 	}
 	nums := map[view]string{vDesk: fmt.Sprint(need), vWall: fmt.Sprint(len(m.agents)),
-		vProposals: fmt.Sprint(len(m.props)), vPaperclip: fmt.Sprint(pcNeeds)}
+		vProposals: fmt.Sprint(len(m.props)), vPulls: fmt.Sprint(len(m.pulls.Items)), vPaperclip: fmt.Sprint(pcNeeds)}
 	// a view with work that waits for the owner is filled orange: open proposals, Paperclip issues that need you
 	alert := map[view]bool{vProposals: len(m.props) > 0, vPaperclip: pcNeeds > 0}
 	var cells []cell
@@ -114,7 +116,11 @@ func (m model) tabBar() []string {
 			bot += bar + "┘"
 		}
 		tw := segsWidth(c.segs)
-		if tw > cw-2 { // too narrow: code only
+		if tw > cw-2 && len(c.segs) == 3 { // too narrow: code and count
+			c.segs = []seg{c.segs[0], c.segs[2]}
+			tw = segsWidth(c.segs)
+		}
+		if tw > cw-2 { // still too narrow: code only
 			c.segs = c.segs[:1]
 			tw = segsWidth(c.segs)
 		}
@@ -701,6 +707,23 @@ func (m model) proposalsView(h int) []string {
 	return m.listBox("PROPOSALS   enter show · a approve · x reject · z snooze 7d", items, h, "no open proposals")
 }
 
+// pullsView: the open pull requests that involve the owner, the last updated first.
+func (m model) pullsView(h int) []string {
+	if m.pulls.Err != "" {
+		return m.listBox("PULL REQUESTS", nil, h, m.pulls.Err)
+	}
+	var items [][]seg
+	for _, pr := range m.pulls.Items {
+		ref := fmt.Sprintf("%s#%d", pr.Repo, pr.Number)
+		tt := cWhite
+		if pr.Draft {
+			ref, tt = ref+" draft", cGrey
+		}
+		items = append(items, []seg{s(padTo(ref, 34), cGrey), s(" "+padTo(age(pr.Updated), 4), cDark), s(" "+pr.Title, tt)})
+	}
+	return m.listBox("PULL REQUESTS   open, that involve you · enter opens it in the browser", items, h, "no open pull requests")
+}
+
 // pcWidths: the PC view's issue list and side panel outer widths for a screen w wide.
 func pcWidths(w int) (lw, rw int) {
 	lw = min(max(w*40/100, 40), 72)
@@ -929,11 +952,11 @@ func (m model) helpView(h int) []string {
 	lines := []string{
 		"## Go to a view: push " + K.Command + ", write the code, push enter. esc goes back to the desk.",
 		row2("IN", "inbox (the desk): all agents and the selected agent"),
-		row2("AG or "+K.Wall, "agents (the wall): all agents as tiles"),
 		row2("FL", "the last 30 files the agents wrote about, newest first (enter opens)"),
 		row2("RP", "repos with work that you can lose"),
 		row2("RC", "recaps: what each agent summed up while you were away (enter goes to it)"),
-		row2("PR", "proposals: enter shows, a approve, x reject, z hide 7 days (the tab is orange while some are open)"),
+		row2("PR", "pull requests: the open ones that involve you on GitHub, the last updated first (enter opens it in the browser)"),
+		row2("PO", "proposals: enter shows, a approve, x reject, z hide 7 days (the tab is orange while some are open)"),
 		row2("PC", "Paperclip issues, the selected one's thread on the right: 1-9 answer what it asks (approve, decline, …), "+K.Reply+" comment, enter opens it in the browser (orange while one needs you)"),
 		row2("NW [folder]", "start a background agent: write its first message, enter starts it (folder: a path, a folder in ~/bbq, an agent's name; none: the selected agent's)"),
 		row2("STOP", "stop the selected background agent (its conversation stays)"),
@@ -961,7 +984,7 @@ func (m model) helpView(h int) []string {
 		row2("ctrl+v", "paste a clipboard image (saved, its path goes in); cmd+v pastes text"),
 		row2("option+arrows", "move by word   ·   option+backspace: delete a word"),
 		"",
-		"## Wall",
+		"## Wall (push " + K.Wall + ")",
 		row2("1-9", "select that tile"),
 		row2(K.Zoom, "tile on the full screen, again to go back (then 1-9 answer)"),
 		"",
@@ -1009,6 +1032,11 @@ func (m model) footer() []string {
 		add(&r1, K.Reply, "comment")
 		add(&r1, "enter", "in browser")
 		add(&r1, "esc", "desk")
+	case vPulls:
+		add(&r1, K.Next+" "+K.Prev, "move")
+		add(&r1, "enter", "in browser")
+		add(&r1, "esc", "desk")
+		add(&r1, K.Command, "command")
 	case vFiles, vProposals, vRecaps, vRepos:
 		add(&r1, K.Next+" "+K.Prev, "move")
 		add(&r1, "enter", "open")

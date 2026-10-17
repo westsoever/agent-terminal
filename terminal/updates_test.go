@@ -102,7 +102,7 @@ func TestFilesViewKeepsGoneAgents(t *testing.T) {
 	}
 }
 
-// The PR and PC tabs fill orange while something waits for the owner there, and show how many.
+// The PO and PC tabs fill orange while something waits for the owner there, and show how many.
 func TestTabAlerts(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	m := newModel()

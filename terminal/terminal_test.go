@@ -136,8 +136,9 @@ func TestViewGeometry(t *testing.T) {
 	m.usage = Usage{OK: true, Five: Limit{Pct: 54, Reset: now.Add(97 * time.Minute), OK: true}, Week: Limit{Pct: 88, Reset: now.Add(50 * time.Hour), OK: true}}
 	m.pc = PCState{Items: []PCItem{{Ref: "COS-5", Status: "blocked", Title: "t", Detail: "why", Needs: true}}}
 	m.props = []string{"skill x: something"}
+	m.pulls = PullsState{Items: []PullReq{{Repo: "westsoever/cos", Number: 12, Title: "t", Draft: true, Updated: now.Add(-time.Hour)}}}
 	m.sync = []string{"## repo", "needs: 1 stash"}
-	for _, v := range []view{vDesk, vWall, vFiles, vRepos, vRecaps, vProposals, vPaperclip, vHelp} {
+	for _, v := range []view{vDesk, vWall, vFiles, vRepos, vRecaps, vProposals, vPulls, vPaperclip, vHelp} {
 		for _, sz := range [][2]int{{80, 24}, {120, 40}, {200, 60}} {
 			m.view, m.w, m.h = v, sz[0], sz[1]
 			lines := strings.Split(m.View(), "\n")
