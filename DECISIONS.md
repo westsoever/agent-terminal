@@ -2,6 +2,10 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D39 (2026-10-17): Global hotkeys from the menu bar dot instead of Raycast
+
+**Decision (user):** "make it work". The Raycast 2.8 script folder could not be added by the owner, and it cannot be added from outside either: Raycast keeps its settings in an encrypted database, and driving its settings window by synthetic clicks would type into whatever the owner is writing. So KachingBar registers the hotkeys itself, with Carbon's RegisterEventHotKey, which needs no Accessibility or Input Monitoring permission. Defaults: Ctrl+Option+N next waiting agent, Ctrl+Option+T tile, Ctrl+Option+K kaching. Each runs the same ui/raycast script, and the bindings live in one file, `~/.agent/hotkeys`. The scripts still work from Raycast. This amends agent.terminal's "Raycast stays the global hotkey layer"; kaching's in-terminal keys.toml is unchanged. build.sh now compiles every ui/menubar/*.swift and links Carbon. Info.plist carries NSAppleEventsUsageDescription for the one-time "control Terminal" prompt.
+
 ## D38 (2026-10-17): Windows move on their own only when kaching is closed, and you can drag them (closes D37's open part)
 
 **Decisions (user):**

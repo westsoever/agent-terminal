@@ -78,6 +78,19 @@ assert_eq "second build leaves the binary alone" "$m1 $i1" "$(stat -f %m "$EXE")
 assert_eq "no staging dirs left behind" "" "$(find "$OUT" -maxdepth 1 -name '.KachingBar.build.*')"
 assert_fails "an unknown CLI argument is refused" "$EXE" --bogus
 
+# ---------- hotkeys (D39): KachingBar --hotkeys-check ----------
+H_AH="$WORK/hk-agent"; mkdir -p "$H_AH"
+hk() { AGENT_HOME="$H_AH" "$EXE" --hotkeys-check 2>&1; }
+out=$(hk)
+assert_contains "hotkeys: default ctrl+option+n runs next" "$out" "key=45 mods=6144 script=ui/raycast/kaching-next.sh"
+assert_contains "hotkeys: default ctrl+option+t runs tile" "$out" "key=17 mods=6144 script=ui/raycast/kaching-tile.sh"
+assert_contains "hotkeys: default ctrl+option+k opens kaching" "$out" "key=40 mods=6144 script=ui/raycast/kaching-open.sh"
+printf '# mine\ncmd+shift+1  ~/bin/x.sh   # a comment\nctrl+q\nhyper+n  y.sh\n\n' >"$H_AH/hotkeys"
+out=$(hk)
+assert_eq "hotkeys: the file replaces the defaults" "key=18 mods=768 script=~/bin/x.sh
+bad=ctrl+q
+bad=hyper+n" "$out"
+
 # ---------- the dot's state: KachingBar --status-once on fixtures ----------
 S_AH="$WORK/st-agent"; S_LA="$WORK/st-launchagents"; mkdir -p "$S_AH/sessions" "$S_LA"
 status() { AGENT_HOME="$S_AH" LAUNCH_AGENTS_DIR="$S_LA" KACHING_DIR="$KIT" "$EXE" --status-once 2>&1; }
