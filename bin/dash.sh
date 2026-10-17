@@ -199,7 +199,7 @@ route_list() {
     TTYS="$TTYS$p=${t#/dev/} "
   done < <(if [ -n "${DASH_PS_TTY_CMD:-}" ]; then "$DASH_PS_TTY_CMD" "$pids"; else ps -o pid=,tty= -p "$pids"; fi 2>/dev/null || true)
 
-  # the focus file: "<tty> <epoch>"; fresh when the epoch (else the file's mtime) is at most DASH_FOCUS_MAX_AGE old
+  # the focus file: "<tty> <epoch>"; fresh when the epoch (else the mtime) is at most DASH_FOCUS_MAX_AGE old and at most 60 s ahead
   local ffile="$AGENT_HOME/dispatcher/focus" ftty="" fep="" fage max=${DASH_FOCUS_MAX_AGE:-600} focus_tty=""
   case "$max" in ''|*[!0-9]*) max=600 ;; esac
   if [ -f "$ffile" ]; then
@@ -207,7 +207,7 @@ route_list() {
     ftty=${ftty#/dev/}
     case "$fep" in ''|*[!0-9]*) fep=$(file_mtime "$ffile") ;; esac
     fage=$((NOW - fep))
-    if [ "$fage" -le "$max" ] && [ -n "$ftty" ] && [ "$ftty" != "??" ]; then focus_tty=$ftty; fi
+    if [ "$fage" -le "$max" ] && [ "$fage" -ge -60 ] && [ -n "$ftty" ] && [ "$ftty" != "??" ]; then focus_tty=$ftty; fi
   fi
 
   # git lookups (only for what the meta lacks), cached per cwd: many sessions share a folder
