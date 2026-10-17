@@ -335,13 +335,17 @@ If you remove a line, Kaching uses the default key.
 2. Change the `open_cmd` line, for example `open_cmd = "code"` for VS Code.
 3. Save the file.
 
-## 8. The main display when Kaching operates
+## 8. Kaching and the Terminal windows
 
-When Kaching operates, the main display shows Kaching and one agent window only. This agent window is the window of the selected agent. It is behind Kaching. All other agent windows stay on the second display.
+Kaching does not move, resize or close Terminal windows. When you start, stop or reload Kaching, all Terminal windows stay where they are. The agent sessions continue.
 
-When you select a different agent, its window moves to the main display. The previous window goes back to its position.
+Kaching only does these things to an agent window:
 
-When you stop Kaching, the usual behaviour starts again: each agent window that waits moves to the main display.
+- It writes your text into the window.
+- It pushes `Enter` or a number key in the window. For this, the window comes to the front for approximately 0.1 seconds.
+- When you push `g`, it brings the window to the front.
+
+Kaching does not start new agent sessions.
 
 ## 9. How Kaching sends text
 

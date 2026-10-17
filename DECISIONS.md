@@ -2,6 +2,14 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D37 (2026-10-17): kaching never moves windows; the queue stops moving them while kaching runs (amends D34)
+
+**Decision (user):** while kaching is open, Terminal windows don't move: kaching's waiting list is the inbox, so the "one window comes over to say it needs input" idea (D29, D34) is redundant there. Windows should only resize when the owner moves one between displays by hand (snap into the grid on monitor 2, the park frame on monitor 1); that part belongs to the monitor queue (chingSorter) and isn't built yet. Opening, quitting or reloading kaching must never touch a Terminal window or a session. kaching never starts or closes sessions.
+
+**Why now:** quitting kaching called `queue.sh show`, which put the queue back in normal mode; every idle session counts as waiting, so five agent windows jumped onto monitor 1 into the same park frame at once and monitor 2 emptied, which looked like the sessions had closed (they hadn't; no session ended). Separately, in single mode the agent selected in kaching stayed on monitor 1 after the owner answered it, because the rule kept "selected" windows regardless of waiting.
+
+**Done:** kaching no longer calls `queue.sh show` on selection or quit. The owner turns the automatic queue off with `queue=off` in `~/.agent/config` (sessions may not edit that file) until the queue implements this decision.
+
 ## D36 (2026-10-17): A larger park frame (amends D32)
 
 **Decision (user):** the frame for a waiting window on the main display is about 50% wider and 20% taller: 690 x 948, top-left still at 320,70 (`queue_park_frame` default 320,70,690,948). It ends at y 1018, inside the main display's usable area above the Dock.

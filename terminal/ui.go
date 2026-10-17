@@ -165,34 +165,6 @@ func (m *model) writeState() {
 	_ = os.MkdirAll(filepath.Dir(p), 0o755)
 	_ = os.WriteFile(p+".tmp", []byte(want), 0o644)
 	_ = os.Rename(p+".tmp", p)
-	queueShow()
-}
-
-// queueShow asks the monitor queue (D34) to put the selected agent's window behind kaching on the main display.
-// Debounced: walking the list with j/k only moves a window for where the selection settles.
-var showSeq = make(chan struct{}, 1)
-
-func init() {
-	go func() {
-		for range showSeq {
-			for {
-				select {
-				case <-showSeq:
-					continue
-				case <-time.After(350 * time.Millisecond):
-				}
-				break
-			}
-			_ = exec.Command(queueBin(), "show").Run()
-		}
-	}()
-}
-
-func queueShow() {
-	select {
-	case showSeq <- struct{}{}:
-	default:
-	}
 }
 
 func queueBin() string {
@@ -205,11 +177,11 @@ func transcriptAfter(path string, t time.Time) bool {
 	return err == nil && st.ModTime().After(t.Add(500*time.Millisecond))
 }
 
-// removeState: kaching closed. Without the open file the queue is in normal mode again; show reconciles now so
-// every waiting window comes to the main display.
+// removeState: kaching closed. It only removes its own open file: opening, quitting or reloading kaching
+// never moves, resizes or closes a Terminal window (owner, 2026-10-17). kaching reads the agents and types
+// what the owner chose; window placement is the monitor queue's job, on its own events.
 func removeState() {
 	_ = os.Remove(filepath.Join(agentHome(), "terminal", "open"))
-	_ = exec.Command(queueBin(), "show").Run()
 }
 
 func (m *model) sel() *Agent {
