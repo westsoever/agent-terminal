@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The menu bar dot (ui/menubar): the watcher's heartbeat and dash.sh --counts (no swiftc needed), then, with swiftc,
-# the app bundle, the dot's state from fixture files (ChingBar --status-once), and install.sh --install-menubar in the
+# the app bundle, the dot's state from fixture files (KachingBar --status-once), and install.sh --install-menubar in the
 # sandbox HOME: plist content, dry run, idempotence, uninstall. Without swiftc the build half is skipped with a note.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -39,12 +39,12 @@ assert_eq "counts: open proposals only" "1" "$(kv "$("$BIN/dash.sh" --counts)" p
 
 # ---------- the watcher's heartbeat ----------
 HB_AH="$WORK/hb-agent"; mkdir -p "$HB_AH"
-AGENT_HOME="$HB_AH" SYNC_CHECK_INTERVAL_H=0 "$BIN/ching-watch.sh" >/dev/null 2>&1
+AGENT_HOME="$HB_AH" SYNC_CHECK_INTERVAL_H=0 "$BIN/kaching-watch.sh" >/dev/null 2>&1
 assert_file "watcher tick writes watch.heartbeat" "$HB_AH/watch.heartbeat"
 hb=$(cat "$HB_AH/watch.heartbeat" 2>/dev/null || echo 0)
 if [ $((NOW - hb)) -le 60 ] && [ $((hb - NOW)) -le 60 ]; then pass "heartbeat holds the current time"; else fail "heartbeat holds the current time" "  got $hb, now $NOW"; fi
 mkdir "$HB_AH/watch.lock"; touch -t "$(date -r $((NOW - 3600)) +%Y%m%d%H%M.%S)" "$HB_AH/watch.heartbeat"
-AGENT_HOME="$HB_AH" SYNC_CHECK_INTERVAL_H=0 "$BIN/ching-watch.sh" >/dev/null 2>&1
+AGENT_HOME="$HB_AH" SYNC_CHECK_INTERVAL_H=0 "$BIN/kaching-watch.sh" >/dev/null 2>&1
 if [ $(( $(date +%s) - $(stat -f %m "$HB_AH/watch.heartbeat") )) -le 60 ]; then pass "heartbeat is written even while the previous tick holds the lock"; else fail "heartbeat is written even while the previous tick holds the lock"; fi
 rmdir "$HB_AH/watch.lock"
 
@@ -60,35 +60,35 @@ BUILD="$KIT/ui/menubar/build.sh"
 OUT="$WORK/build"
 out=$("$BUILD" "$OUT" 2>&1); rc=$?
 assert_eq "build exits 0" "0" "$rc"
-APP="$OUT/ChingBar.app"; EXE="$APP/Contents/MacOS/ChingBar"; PL="$APP/Contents/Info.plist"
+APP="$OUT/KachingBar.app"; EXE="$APP/Contents/MacOS/KachingBar"; PL="$APP/Contents/Info.plist"
 if [ "$rc" -ne 0 ]; then fail "build output" "$out"; exit 0; fi
 assert_contains "build says where" "$out" "built: "
 if [ -x "$EXE" ]; then pass "bundle has an executable"; else fail "bundle has an executable" "  missing $EXE"; fi
 pget() { /usr/bin/plutil -extract "$1" raw "$PL" 2>/dev/null; }
-assert_eq "Info.plist: bundle id" "org.ching.menubar" "$(pget CFBundleIdentifier)"
+assert_eq "Info.plist: bundle id" "org.kaching.menubar" "$(pget CFBundleIdentifier)"
 assert_eq "Info.plist: LSUIElement (no Dock icon)" "true" "$(pget LSUIElement)"
-assert_eq "Info.plist: executable name" "ChingBar" "$(pget CFBundleExecutable)"
+assert_eq "Info.plist: executable name" "KachingBar" "$(pget CFBundleExecutable)"
 assert_eq "Info.plist: package type" "APPL" "$(pget CFBundlePackageType)"
-assert_eq "Info.plist: source hash matches build.sh --hash" "$("$BUILD" --hash)" "$(pget ChingSourceHash)"
+assert_eq "Info.plist: source hash matches build.sh --hash" "$("$BUILD" --hash)" "$(pget KachingSourceHash)"
 assert_contains "the binary is arm64" "$(file "$EXE")" "arm64"
 m1=$(stat -f %m "$EXE"); i1=$(stat -f %i "$EXE")
 out=$("$BUILD" "$OUT" 2>&1)
 assert_contains "second build is a no-op" "$out" "up to date"
 assert_eq "second build leaves the binary alone" "$m1 $i1" "$(stat -f %m "$EXE") $(stat -f %i "$EXE")"
-assert_eq "no staging dirs left behind" "" "$(find "$OUT" -maxdepth 1 -name '.ChingBar.build.*')"
+assert_eq "no staging dirs left behind" "" "$(find "$OUT" -maxdepth 1 -name '.KachingBar.build.*')"
 assert_fails "an unknown CLI argument is refused" "$EXE" --bogus
 
-# ---------- the dot's state: ChingBar --status-once on fixtures ----------
+# ---------- the dot's state: KachingBar --status-once on fixtures ----------
 S_AH="$WORK/st-agent"; S_LA="$WORK/st-launchagents"; mkdir -p "$S_AH/sessions" "$S_LA"
-status() { AGENT_HOME="$S_AH" LAUNCH_AGENTS_DIR="$S_LA" CHING_DIR="$KIT" "$EXE" --status-once 2>&1; }
+status() { AGENT_HOME="$S_AH" LAUNCH_AGENTS_DIR="$S_LA" KACHING_DIR="$KIT" "$EXE" --status-once 2>&1; }
 st_sess() { mkdir -p "$S_AH/sessions/$1"; printf 'cwd=%s\nstate=%s\nupdated=%s\n' "$WORK/plain" "$2" "$(date +%s)" >"$S_AH/sessions/$1/meta"; }
 ago() { touch -t "$(date -r $(( $(date +%s) - $2 )) +%Y%m%d%H%M.%S)" "$1"; }
 
 out=$(status)
 assert_eq "status: nothing installed -> grey" "grey" "$(kv "$out" state)"
 assert_eq "status: watcher not installed" "no" "$(kv "$out" watcher_installed)"
-assert_contains "status: menu says the watcher is not installed" "$out" "menu=Watcher not installed (org.ching.watch) [info]"
-: >"$S_LA/org.ching.watch.plist"
+assert_contains "status: menu says the watcher is not installed" "$out" "menu=Watcher not installed (org.kaching.watch) [info]"
+: >"$S_LA/org.kaching.watch.plist"
 out=$(status)
 assert_eq "status: plist but no heartbeat -> grey" "grey" "$(kv "$out" state)"
 assert_eq "status: no heartbeat age" "none" "$(kv "$out" heartbeat_age)"
@@ -97,16 +97,16 @@ st_sess a working
 out=$(status)
 assert_eq "status: fresh heartbeat, nobody waiting -> green" "green" "$(kv "$out" state)"
 assert_eq "status: running" "yes" "$(kv "$out" running)"
-assert_eq "status: status line" "Ching running · 1 session · 0 need you" "$(kv "$out" status)"
+assert_eq "status: status line" "Kaching running · 1 session · 0 need you" "$(kv "$out" status)"
 assert_contains "status: Open inbox in the menu" "$out" "menu=Open inbox"
 assert_contains "status: transcripts placeholder is disabled" "$out" "menu=Transcripts (coming soon) [disabled]"
-assert_contains "status: Quit in the menu" "$out" "menu=Quit ChingBar"
+assert_contains "status: Quit in the menu" "$out" "menu=Quit KachingBar"
 assert_not_contains "status: no proposals line without proposals" "$out" "Proposals waiting"
 st_sess b input
 out=$(status)
 assert_eq "status: a session waiting for input -> amber" "amber" "$(kv "$out" state)"
 assert_eq "status: needs 1" "1" "$(kv "$out" needs)"
-assert_eq "status: status line with one waiting" "Ching running · 2 sessions · 1 needs you" "$(kv "$out" status)"
+assert_eq "status: status line with one waiting" "Kaching running · 2 sessions · 1 needs you" "$(kv "$out" status)"
 st_sess c blocked
 assert_eq "status: blocked counts as needing you" "2" "$(kv "$(status)" needs)"
 mkdir -p "$S_AH/proposals"
@@ -118,22 +118,22 @@ assert_eq "status: heartbeat 10 min old is still running (two ticks)" "amber" "$
 ago "$S_AH/watch.heartbeat" 1800
 out=$(status)
 assert_eq "status: stale heartbeat -> grey even with sessions waiting" "grey" "$(kv "$out" state)"
-assert_contains "status: stale says not running" "$(kv "$out" status)" "Ching not running"
+assert_contains "status: stale says not running" "$(kv "$out" status)" "Kaching not running"
 assert_contains "status: stale says since when" "$out" "Watcher silent since 30m ago"
-assert_eq "status: CHING_BAR_STALE_SECS widens the window" "amber" "$(kv "$(CHING_BAR_STALE_SECS=3600 status)" state)"
+assert_eq "status: KACHING_BAR_STALE_SECS widens the window" "amber" "$(kv "$(KACHING_BAR_STALE_SECS=3600 status)" state)"
 : >"$S_AH/watch.log"
 assert_eq "status: a fresh watch.log counts as a heartbeat too" "amber" "$(kv "$(status)" state)"
 ago "$S_AH/watch.log" 1800
-rm -f "$S_LA/org.ching.watch.plist"; date +%s >"$S_AH/watch.heartbeat"
+rm -f "$S_LA/org.kaching.watch.plist"; date +%s >"$S_AH/watch.heartbeat"
 assert_eq "status: fresh heartbeat but no watcher plist -> grey" "grey" "$(kv "$(status)" state)"
-: >"$S_LA/org.ching.watch.plist"
-out=$(AGENT_HOME="$S_AH" LAUNCH_AGENTS_DIR="$S_LA" CHING_DIR="$WORK/no-kit" "$EXE" --status-once 2>&1)
+: >"$S_LA/org.kaching.watch.plist"
+out=$(AGENT_HOME="$S_AH" LAUNCH_AGENTS_DIR="$S_LA" KACHING_DIR="$WORK/no-kit" "$EXE" --status-once 2>&1)
 assert_eq "status: no dash.sh -> still green/amber/grey from the heartbeat, counts unavailable" "unavailable" "$(kv "$out" counts)"
-assert_eq "status: without counts a running Ching is green" "green" "$(kv "$out" state)"
+assert_eq "status: without counts a running Kaching is green" "green" "$(kv "$out" state)"
 
 # ---------- install.sh --install-menubar in the sandbox HOME ----------
-export CHING_APPS_DIR="$HOME/Applications"
-IAPP="$CHING_APPS_DIR/ChingBar.app"; MBP="$LAUNCH_AGENTS_DIR/org.ching.menubar.plist"
+export KACHING_APPS_DIR="$HOME/Applications"
+IAPP="$KACHING_APPS_DIR/KachingBar.app"; MBP="$LAUNCH_AGENTS_DIR/org.kaching.menubar.plist"
 inst() { "$KIT/install.sh" "$@" </dev/null 2>&1; }
 lc_lines() { if [ -f "$WORK/launchctl.log" ]; then wc -l <"$WORK/launchctl.log" | tr -d ' '; else echo 0; fi; }
 
@@ -152,37 +152,45 @@ assert_contains "menubar refusal says why" "$out" "not a terminal"
 assert_no_file "menubar refusal: no app" "$IAPP"
 assert_no_file "menubar refusal: no plist" "$MBP"
 
+# the dot under its name before D35 (ChingBar.app, org.ching.menubar) is replaced by this install
+OAPP="$KACHING_APPS_DIR/ChingBar.app"; OMBP="$LAUNCH_AGENTS_DIR/org.ching.menubar.plist"
+mkdir -p "$OAPP/Contents" "$LAUNCH_AGENTS_DIR"
+printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>org.ching.menubar</string></dict></plist>\n' >"$OAPP/Contents/Info.plist"
+printf '<plist>old dot</plist>\n' >"$OMBP"
 out=$(inst --install-menubar --yes); rc=$?
 assert_eq "menubar install exits 0" "0" "$rc"
 [ "$rc" -eq 0 ] || fail "menubar install output" "$out"
-assert_file "menubar install builds the app" "$IAPP/Contents/MacOS/ChingBar"
+assert_no_file "rename: the old dot's job is removed" "$OMBP"
+assert_no_file "rename: the old ChingBar.app is removed" "$OAPP"
+assert_contains "rename: the old dot was booted out" "$(cat "$WORK/launchctl.log")" "bootout gui/$(id -u)/org.ching.menubar"
+assert_file "menubar install builds the app" "$IAPP/Contents/MacOS/KachingBar"
 assert_file "menubar install writes the plist" "$MBP"
 assert_ok "menubar plist is valid" /usr/bin/plutil -lint "$MBP"
 mget() { /usr/bin/plutil -extract "$1" raw "$MBP" 2>/dev/null; }
-assert_eq "menubar plist: label" "org.ching.menubar" "$(mget Label)"
-assert_eq "menubar plist: runs the app's executable" "$IAPP/Contents/MacOS/ChingBar" "$(mget ProgramArguments.0)"
+assert_eq "menubar plist: label" "org.kaching.menubar" "$(mget Label)"
+assert_eq "menubar plist: runs the app's executable" "$IAPP/Contents/MacOS/KachingBar" "$(mget ProgramArguments.0)"
 assert_eq "menubar plist: RunAtLoad" "true" "$(mget RunAtLoad)"
 assert_eq "menubar plist: KeepAlive restarts it unless it quit cleanly" "false" "$(mget KeepAlive.SuccessfulExit)"
 assert_eq "menubar plist: GUI sessions only" "Aqua" "$(mget LimitLoadToSessionType)"
 assert_eq "menubar plist: AGENT_HOME" "$AGENT_HOME" "$(mget EnvironmentVariables.AGENT_HOME)"
-assert_eq "menubar plist: CHING_DIR is the kit link" "$CLAUDE_DIR/ching" "$(mget EnvironmentVariables.CHING_DIR)"
+assert_eq "menubar plist: KACHING_DIR is the kit link" "$CLAUDE_DIR/kaching" "$(mget EnvironmentVariables.KACHING_DIR)"
 assert_contains "menubar install bootstraps the job" "$(cat "$WORK/launchctl.log")" "bootstrap gui/$(id -u) $MBP"
 assert_contains "menubar install warns when the kit link is missing" "$out" "is not the kit's symlink yet"
 assert_no_file "menubar install never writes the settings file" "$CLAUDE_DIR/settings.json"
 
-n=$(lc_lines); m1=$(stat -f %m "$IAPP/Contents/MacOS/ChingBar")
+n=$(lc_lines); m1=$(stat -f %m "$IAPP/Contents/MacOS/KachingBar")
 out=$(inst --install-menubar --yes); rc=$?
 assert_eq "menubar second run exits 0" "0" "$rc"
 assert_contains "menubar second run: nothing to do" "$out" "nothing to do"
 assert_eq "menubar second run: launchctl not called" "$n" "$(lc_lines)"
-assert_eq "menubar second run: app not rebuilt" "$m1" "$(stat -f %m "$IAPP/Contents/MacOS/ChingBar")"
+assert_eq "menubar second run: app not rebuilt" "$m1" "$(stat -f %m "$IAPP/Contents/MacOS/KachingBar")"
 
 # a stale app (other source hash) with an unchanged plist: rebuilt, then restarted with kickstart
-/usr/bin/plutil -replace ChingSourceHash -string stale "$IAPP/Contents/Info.plist"
+/usr/bin/plutil -replace KachingSourceHash -string stale "$IAPP/Contents/Info.plist"
 out=$(inst --install-menubar --yes)
 assert_contains "stale app: shows the hash change" "$out" "installed: stale"
-assert_eq "stale app: rebuilt with the current hash" "$("$KIT/ui/menubar/build.sh" --hash)" "$(/usr/bin/plutil -extract ChingSourceHash raw "$IAPP/Contents/Info.plist")"
-assert_contains "stale app: restarted, not re-bootstrapped" "$(tail -1 "$WORK/launchctl.log")" "kickstart -k gui/$(id -u)/org.ching.menubar"
+assert_eq "stale app: rebuilt with the current hash" "$("$KIT/ui/menubar/build.sh" --hash)" "$(/usr/bin/plutil -extract KachingSourceHash raw "$IAPP/Contents/Info.plist")"
+assert_contains "stale app: restarted, not re-bootstrapped" "$(tail -1 "$WORK/launchctl.log")" "kickstart -k gui/$(id -u)/org.kaching.menubar"
 
 # a changed plist is shown as a diff and replaced
 sed -i '' 's#<key>RunAtLoad</key><true/>#<key>RunAtLoad</key><false/>#' "$MBP"
@@ -202,17 +210,17 @@ out=$(inst --uninstall --yes); rc=$?
 assert_eq "uninstall exits 0" "0" "$rc"
 assert_no_file "uninstall removes the menubar plist" "$MBP"
 assert_no_file "uninstall removes the app" "$IAPP"
-assert_contains "uninstall boots the menubar job out" "$(cat "$WORK/launchctl.log")" "bootout gui/$(id -u)/org.ching.menubar"
+assert_contains "uninstall boots the menubar job out" "$(cat "$WORK/launchctl.log")" "bootout gui/$(id -u)/org.kaching.menubar"
 out=$(inst --uninstall --yes)
 assert_contains "second uninstall: nothing to do" "$out" "nothing to do"
 
-# somebody else's ChingBar.app is never replaced or removed
+# somebody else's KachingBar.app is never replaced or removed
 mkdir -p "$IAPP/Contents"
 printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.other</string></dict></plist>\n' >"$IAPP/Contents/Info.plist"
 out=$(inst --install-menubar --yes); rc=$?
 assert_eq "foreign app: install refuses" "1" "$rc"
-assert_contains "foreign app: says why" "$out" "is not ChingBar"
+assert_contains "foreign app: says why" "$out" "is not KachingBar"
 out=$(inst --uninstall --yes)
 assert_file "foreign app: uninstall leaves it" "$IAPP/Contents/Info.plist"
-assert_contains "foreign app: uninstall warns" "$out" "is not ChingBar"
+assert_contains "foreign app: uninstall warns" "$out" "is not KachingBar"
 exit 0

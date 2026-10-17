@@ -230,7 +230,7 @@ else
 fi
 
 # 4. tests
-OUT=$(mktemp "${TMPDIR:-/tmp}/ching-gate.XXXXXX")
+OUT=$(mktemp "${TMPDIR:-/tmp}/kaching-gate.XXXXXX")
 trap 'rm -f "$OUT"' EXIT
 rc=0
 (cd "$ROOT" && perl -e 'alarm shift @ARGV; exec @ARGV' "${RELEASE_GATE_TIMEOUT:-1800}" bash -c "$TEST_CMD") >"$OUT" 2>&1 </dev/null || rc=$?

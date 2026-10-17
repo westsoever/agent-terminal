@@ -25,9 +25,9 @@
 # --dry-run prints every ranked candidate as one JSON line {sequence, sessions, days, length, score, folders,
 #   prompts, evidence} and stops: no model call, no proposal, no event.
 # Exit: 0 ok, nothing-new, truncated, capped or disabled (LEARN_SKILL_MAX=0) | 1 error (logged) | 64 usage.
-# Env: AGENT_HOME CLAUDE_DIR CHING_CLAUDE_BIN LEARN_* (learn_setting)
-#      CHING_SKILL_DIRS    colon-separated directories whose <name>/SKILL.md are installed skills ($CLAUDE_DIR/skills)
-#      CHING_PLUGINS_FILE  plugin list ($CLAUDE_DIR/plugins/installed_plugins.json); <installPath>/skills/<name>/SKILL.md
+# Env: AGENT_HOME CLAUDE_DIR KACHING_CLAUDE_BIN LEARN_* (learn_setting)
+#      KACHING_SKILL_DIRS    colon-separated directories whose <name>/SKILL.md are installed skills ($CLAUDE_DIR/skills)
+#      KACHING_PLUGINS_FILE  plugin list ($CLAUDE_DIR/plugins/installed_plugins.json); <installPath>/skills/<name>/SKILL.md
 #                          of each plugin is the installed skill <plugin>:<name>
 set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -79,8 +79,8 @@ skill_desc() { # SKILL.md -> its front-matter description on one line (a | or > 
                          print v; exit }' "$1" 2>/dev/null | tr '\t' ' ' | cut -c1-200
 }
 installed_skills() {
-  local dirs d f plugin path pf=${CHING_PLUGINS_FILE:-$CLAUDE_DIR/plugins/installed_plugins.json}
-  IFS=: read -r -a dirs <<<"${CHING_SKILL_DIRS:-$CLAUDE_DIR/skills}"
+  local dirs d f plugin path pf=${KACHING_PLUGINS_FILE:-$CLAUDE_DIR/plugins/installed_plugins.json}
+  IFS=: read -r -a dirs <<<"${KACHING_SKILL_DIRS:-$CLAUDE_DIR/skills}"
   for d in ${dirs[@]+"${dirs[@]}"}; do
     for f in "$d"/*/SKILL.md; do
       [ -f "$f" ] || continue

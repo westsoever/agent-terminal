@@ -5,7 +5,7 @@
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 # shellcheck source=../bin/lib.sh
 . "$BIN/lib.sh"
-export CHING_INCLUDE_SANDBOX=1   # the fixtures live under /tmp, which the real run excludes
+export KACHING_INCLUDE_SANDBOX=1   # the fixtures live under /tmp, which the real run excludes
 export SYNC_NO_FETCH=1           # offline unless a test uses scf (fetch on)
 S="$BIN/sync-check.sh"
 NOW=$(date +%s)
@@ -254,13 +254,13 @@ assert_ok "no repos file: runs" sc --quiet
 R=$(mk disc-self); dirty "$R"; new_ah disc_self; repos "$R"
 sc --quiet; rm -f "$RF"; sc --quiet
 assert_eq "discovery: a repo is not re-discovered from its own sync event" "0" "$(nsec)"
-# sandbox paths are skipped unless CHING_INCLUDE_SANDBOX is set (the fixtures live in /tmp)
+# sandbox paths are skipped unless KACHING_INCLUDE_SANDBOX is set (the fixtures live in /tmp)
 R=$(mk disc-sbx); dirty "$R"; new_ah disc_sbx; repos "$R"; put_event "$R"
-env -u CHING_INCLUDE_SANDBOX AGENT_HOME="$AH" AGENT_REPOS_FILE="$RF" "$S" --quiet
-assert_eq "sandbox: a repo under /tmp is skipped without CHING_INCLUDE_SANDBOX" "0" "$(nsec)"
+env -u KACHING_INCLUDE_SANDBOX AGENT_HOME="$AH" AGENT_REPOS_FILE="$RF" "$S" --quiet
+assert_eq "sandbox: a repo under /tmp is skipped without KACHING_INCLUDE_SANDBOX" "0" "$(nsec)"
 assert_eq "sandbox: ... and gives no event" "0" "$(nev)"
 sc --quiet
-assert_eq "sandbox: CHING_INCLUDE_SANDBOX=1 includes it" "1" "$(nsec)"
+assert_eq "sandbox: KACHING_INCLUDE_SANDBOX=1 includes it" "1" "$(nsec)"
 
 # ---------- fetch trouble ----------
 R=$(mk ff1); dirty "$R"; new_ah ff; repos "$R"; rm -rf "$WORK/ff1.git"

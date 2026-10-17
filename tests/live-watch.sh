@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# live-watch.sh - SILENT, read-only check that the real launchd watcher (org.ching.watch) is alive (PLAN 1.6.5,
+# live-watch.sh - SILENT, read-only check that the real launchd watcher (org.kaching.watch) is alive (PLAN 1.6.5,
 # the real-machine check without ears). It speaks nothing, writes nothing and changes no job. Reports:
 #   loaded, state, launchd's run counter and last exit code; the script launchd runs exists and parses;
 #   watch.log (empty is normal: the watcher prints nothing on success, errors land there);
@@ -9,11 +9,11 @@
 # An idle machine has no sessions and so no watcher events: an old or missing event is a warning, not a failure.
 # Not covered, needs a human in the daytime: that the spoken note works from launchd (audio, ioreg, quiet hours).
 # Exit: 0 when nothing failed (warnings allowed), 1 on a failure, 2 on bad usage.
-# Env: LAUNCHCTL (launchctl) WATCH_LABEL (org.ching.watch) AGENT_HOME (~/.agent) LIVE_WATCH_MAX_AGE_H (6)
+# Env: LAUNCHCTL (launchctl) WATCH_LABEL (org.kaching.watch) AGENT_HOME (~/.agent) LIVE_WATCH_MAX_AGE_H (6)
 #      LIVE_WATCH_KICK_WAIT (seconds to wait for the counter after --kick, default 15)
 set -euo pipefail
 LAUNCHCTL=${LAUNCHCTL:-launchctl}
-LABEL=${WATCH_LABEL:-org.ching.watch}
+LABEL=${WATCH_LABEL:-org.kaching.watch}
 AGENT_HOME=${AGENT_HOME:-$HOME/.agent}
 num_or() { case "$1" in ''|*[!0-9]*|0) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
 MAX_AGE_H=$(num_or "${LIVE_WATCH_MAX_AGE_H:-}" 6)

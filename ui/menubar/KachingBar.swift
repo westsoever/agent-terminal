@@ -1,50 +1,52 @@
-// ChingBar.swift - the Ching menu bar dot. A status-bar-only app (LSUIElement, no Dock icon).
+// KachingBar.swift - the Kaching menu bar dot. A status-bar-only app (LSUIElement, no Dock icon).
 //
-//   green  Ching is running: the org.ching.watch plist is installed and the watcher's heartbeat is fresh
-//   amber  Ching is running and at least one session needs the owner (blocked or waiting for input, as dash.sh decides)
-//   grey   hollow: Ching is not running, or its heartbeat is stale
+//   green  Kaching is running: the org.kaching.watch plist is installed and the watcher's heartbeat is fresh
+//   amber  Kaching is running and at least one session needs the owner (blocked or waiting for input, as dash.sh decides)
+//   grey   hollow: Kaching is not running, or its heartbeat is stale
 //
 // Layers, so transcripts and notifications can be added later without touching the drawing code:
-//   ChingPaths        where everything lives (environment overrides, for tests and a non-default install)
-//   ChingSnapshot     the model: one computed reading of Ching's state, plus the menu it implies (MenuEntry list)
-//   ChingStatusProvider  reads the files and runs `dash.sh --counts` (cheap, read-only); no UI code
+//   KachingPaths        where everything lives (environment overrides, for tests and a non-default install)
+//   KachingSnapshot     the model: one computed reading of Kaching's state, plus the menu it implies (MenuEntry list)
+//   KachingStatusProvider  reads the files and runs `dash.sh --counts` (cheap, read-only); no UI code
 //   StatusBarController  draws the dot and the menu from a snapshot; actions open Terminal
-// A later TranscriptProvider / notification poster plugs in next to ChingStatusProvider and adds MenuEntry cases.
+// A later TranscriptProvider / notification poster plugs in next to KachingStatusProvider and adds MenuEntry cases.
 //
 // Signals (no launchctl calls):
-//   running  $LAUNCH_AGENTS_DIR/org.ching.watch.plist exists AND the newest mtime of $AGENT_HOME/watch.heartbeat
-//            (rewritten by every ching-watch.sh tick, every 300 s) or $AGENT_HOME/watch.log is at most
-//            CHING_BAR_STALE_SECS old (default 660: two ticks plus a minute).
+//   running  $LAUNCH_AGENTS_DIR/org.kaching.watch.plist exists AND the newest mtime of $AGENT_HOME/watch.heartbeat
+//            (rewritten by every kaching-watch.sh tick, every 300 s) or $AGENT_HOME/watch.log is at most
+//            KACHING_BAR_STALE_SECS old (default 660: two ticks plus a minute).
 //   needs    `dash.sh --counts` (needs = blocked + input over the session registry), run with a 5 s ceiling.
 //
-// CLI: ChingBar --status-once  prints the computed state as key=value lines and exits (used by tests/t_menubar.sh).
-// Env: AGENT_HOME (~/.agent) CHING_DIR (~/.claude/ching) LAUNCH_AGENTS_DIR (~/Library/LaunchAgents)
-//      CHING_BAR_STALE_SECS (660) CHING_BAR_POLL_SECS (12)
+// CLI: KachingBar --status-once  prints the computed state as key=value lines and exits (used by tests/t_menubar.sh).
+// Env: AGENT_HOME (~/.agent) KACHING_DIR (~/.claude/kaching) LAUNCH_AGENTS_DIR (~/Library/LaunchAgents)
+//      KACHING_BAR_STALE_SECS (660) KACHING_BAR_POLL_SECS (12); the CHING_* names from before D35 still count.
+//      The watcher counts as installed under its old label org.ching.watch too, until install.sh replaces it.
 
 import AppKit
 import Foundation
 
 // MARK: - Paths
 
-struct ChingPaths: Sendable {
+struct KachingPaths: Sendable {
     let agentHome: URL
-    let chingDir: URL
+    let kachingDir: URL
     let launchAgentsDir: URL
 
     var heartbeat: URL { agentHome.appendingPathComponent("watch.heartbeat") }
     var watchLog: URL { agentHome.appendingPathComponent("watch.log") }
-    var watchPlist: URL { launchAgentsDir.appendingPathComponent("org.ching.watch.plist") }
-    var dash: URL { chingDir.appendingPathComponent("bin/dash.sh") }
-    var proposalsTool: URL { chingDir.appendingPathComponent("bin/ching-proposals") }
+    var watchPlist: URL { launchAgentsDir.appendingPathComponent("org.kaching.watch.plist") }
+    var oldWatchPlist: URL { launchAgentsDir.appendingPathComponent("org.ching.watch.plist") }   // before D35
+    var dash: URL { kachingDir.appendingPathComponent("bin/dash.sh") }
+    var proposalsTool: URL { kachingDir.appendingPathComponent("bin/kaching-proposals") }
 
-    static func fromEnvironment(_ env: [String: String] = ProcessInfo.processInfo.environment) -> ChingPaths {
+    static func fromEnvironment(_ env: [String: String] = ProcessInfo.processInfo.environment) -> KachingPaths {
         let home = FileManager.default.homeDirectoryForCurrentUser
         func dir(_ key: String, _ fallback: String) -> URL {
             if let v = env[key], !v.isEmpty { return URL(fileURLWithPath: v, isDirectory: true) }
             return home.appendingPathComponent(fallback, isDirectory: true)
         }
-        return ChingPaths(agentHome: dir("AGENT_HOME", ".agent"),
-                          chingDir: dir("CHING_DIR", ".claude/ching"),
+        return KachingPaths(agentHome: dir("AGENT_HOME", ".agent"),
+                          kachingDir: dir("KACHING_DIR", ".claude/kaching"),
                           launchAgentsDir: dir("LAUNCH_AGENTS_DIR", "Library/LaunchAgents"))
     }
 }
@@ -53,12 +55,12 @@ struct ChingPaths: Sendable {
 
 enum DotState: String, Sendable { case green, amber, grey }
 
-struct ChingCounts: Sendable, Equatable {
+struct KachingCounts: Sendable, Equatable {
     var sessions = 0, active = 0, blocked = 0, input = 0, needs = 0, proposals = 0
 
     /// Parses dash.sh --counts output (key=value lines). nil when no known key is present.
-    static func parse(_ text: String) -> ChingCounts? {
-        var c = ChingCounts(), seen = false
+    static func parse(_ text: String) -> KachingCounts? {
+        var c = KachingCounts(), seen = false
         for line in text.split(whereSeparator: \.isNewline) {
             let kv = line.split(separator: "=", maxSplits: 1)
             guard kv.count == 2, let n = Int(kv[1].trimmingCharacters(in: .whitespaces)) else { continue }
@@ -86,11 +88,11 @@ enum MenuEntry: Sendable, Equatable {
     case separator
 }
 
-struct ChingSnapshot: Sendable {
+struct KachingSnapshot: Sendable {
     let watcherInstalled: Bool
     let heartbeatAge: Int?                 // seconds since the watcher last wrote; nil = never
     let staleAfter: Int
-    let counts: ChingCounts?               // nil when dash.sh failed or timed out
+    let counts: KachingCounts?               // nil when dash.sh failed or timed out
 
     var running: Bool { watcherInstalled && (heartbeatAge.map { $0 <= staleAfter } ?? false) }
 
@@ -100,7 +102,7 @@ struct ChingSnapshot: Sendable {
     }
 
     var statusLine: String {
-        let head = running ? "Ching running" : "Ching not running"
+        let head = running ? "Kaching running" : "Kaching not running"
         guard let c = counts else { return "\(head) · counts unavailable" }
         let s = c.sessions == 1 ? "1 session" : "\(c.sessions) sessions"
         let n = c.needs == 1 ? "1 needs you" : "\(c.needs) need you"
@@ -108,7 +110,7 @@ struct ChingSnapshot: Sendable {
     }
 
     var detailLine: String {
-        if !watcherInstalled { return "Watcher not installed (org.ching.watch)" }
+        if !watcherInstalled { return "Watcher not installed (org.kaching.watch)" }
         guard let age = heartbeatAge else { return "No watcher heartbeat yet" }
         let when = Self.ago(age)
         return running ? "Watcher last ran \(when)" : "Watcher silent since \(when)"
@@ -118,7 +120,7 @@ struct ChingSnapshot: Sendable {
         var m: [MenuEntry] = [.info(statusLine), .info(detailLine), .separator, .action("Open inbox", .openInbox)]
         if let p = counts?.proposals, p > 0 { m.append(.action("Proposals waiting: \(p)", .openProposals)) }
         m.append(.placeholder("Transcripts (coming soon)"))
-        m += [.separator, .action("Quit ChingBar", .quit)]
+        m += [.separator, .action("Quit KachingBar", .quit)]
         return m
     }
 
@@ -159,21 +161,22 @@ struct ChingSnapshot: Sendable {
 // MARK: - Provider
 
 protocol StatusProvider: Sendable {
-    func snapshot() -> ChingSnapshot
+    func snapshot() -> KachingSnapshot
 }
 
-final class ChingStatusProvider: StatusProvider {
-    let paths: ChingPaths
+final class KachingStatusProvider: StatusProvider {
+    let paths: KachingPaths
     let staleAfter: Int
     let dashTimeout: TimeInterval
 
-    init(paths: ChingPaths, staleAfter: Int, dashTimeout: TimeInterval = 5) {
+    init(paths: KachingPaths, staleAfter: Int, dashTimeout: TimeInterval = 5) {
         self.paths = paths; self.staleAfter = staleAfter; self.dashTimeout = dashTimeout
     }
 
-    func snapshot() -> ChingSnapshot {
+    func snapshot() -> KachingSnapshot {
         let fm = FileManager.default
-        return ChingSnapshot(watcherInstalled: fm.fileExists(atPath: paths.watchPlist.path),
+        return KachingSnapshot(watcherInstalled: fm.fileExists(atPath: paths.watchPlist.path)
+                                 || fm.fileExists(atPath: paths.oldWatchPlist.path),
                              heartbeatAge: heartbeatAge(now: Date()),
                              staleAfter: staleAfter,
                              counts: readCounts())
@@ -189,7 +192,7 @@ final class ChingStatusProvider: StatusProvider {
     }
 
     /// Runs `dash.sh --counts` with AGENT_HOME pinned to ours; nil on any failure or after dashTimeout.
-    func readCounts() -> ChingCounts? {
+    func readCounts() -> KachingCounts? {
         guard FileManager.default.fileExists(atPath: paths.dash.path) else { return nil }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -207,7 +210,7 @@ final class ChingStatusProvider: StatusProvider {
         if p.isRunning { p.terminate(); p.waitUntilExit(); return nil }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         guard p.terminationStatus == 0 else { return nil }
-        return ChingCounts.parse(String(decoding: data, as: UTF8.self))
+        return KachingCounts.parse(String(decoding: data, as: UTF8.self))
     }
 }
 
@@ -216,10 +219,10 @@ final class ChingStatusProvider: StatusProvider {
 enum TerminalLauncher {
     /// Opens a Terminal window running a script (a .command file: no Apple Events permission needed).
     static func run(name: String, body: String) {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ching-bar", isDirectory: true)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kaching-bar", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = dir.appendingPathComponent("\(name).command")
-        let script = "#!/bin/bash\nclear\n\(body)\necho\necho '(ChingBar: you can close this window)'\n"
+        let script = "#!/bin/bash\nclear\n\(body)\necho\necho '(KachingBar: you can close this window)'\n"
         do {
             try script.write(to: file, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
@@ -237,14 +240,14 @@ enum TerminalLauncher {
 
 @MainActor
 final class StatusBarController: NSObject {
-    private let provider: ChingStatusProvider
+    private let provider: KachingStatusProvider
     private let pollSecs: TimeInterval
     private var statusItem: NSStatusItem?
     private var timer: Timer?
     private var inFlight = false
-    private var snapshot: ChingSnapshot?
+    private var snapshot: KachingSnapshot?
 
-    init(provider: ChingStatusProvider, pollSecs: TimeInterval) {
+    init(provider: KachingStatusProvider, pollSecs: TimeInterval) {
         self.provider = provider; self.pollSecs = pollSecs
     }
 
@@ -252,7 +255,7 @@ final class StatusBarController: NSObject {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
         item.button?.image = Self.dot(.grey)
-        item.button?.toolTip = "Ching: checking..."
+        item.button?.toolTip = "Kaching: checking..."
         item.menu = NSMenu()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: pollSecs, repeats: true) { [weak self] _ in
@@ -271,7 +274,7 @@ final class StatusBarController: NSObject {
         }
     }
 
-    private func apply(_ snap: ChingSnapshot) {
+    private func apply(_ snap: KachingSnapshot) {
         inFlight = false
         snapshot = snap
         guard let item = statusItem else { return }
@@ -335,7 +338,7 @@ final class StatusBarController: NSObject {
             return true
         }
         img.isTemplate = (state == .grey)
-        img.accessibilityDescription = "Ching \(state.rawValue)"
+        img.accessibilityDescription = "Kaching \(state.rawValue)"
         return img
     }
 }
@@ -359,28 +362,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 // MARK: - Entry
 
+/// The environment, with a variable under its pre-D35 CHING_* name counting when the KACHING_* one is unset.
+func kachingEnvironment() -> [String: String] {
+    var env = ProcessInfo.processInfo.environment
+    for (k, v) in env where k.hasPrefix("CHING_") && env["KA" + k] == nil { env["KA" + k] = v }
+    return env
+}
+
 @main
-struct ChingBarMain {
+struct KachingBarMain {
     static func main() {
-        let env = ProcessInfo.processInfo.environment
+        let env = kachingEnvironment()
         func num(_ key: String, _ fallback: Int) -> Int {
             if let v = env[key], let n = Int(v), n > 0 { return n }
             return fallback
         }
-        let provider = ChingStatusProvider(paths: .fromEnvironment(env), staleAfter: num("CHING_BAR_STALE_SECS", 660))
+        let provider = KachingStatusProvider(paths: .fromEnvironment(env), staleAfter: num("KACHING_BAR_STALE_SECS", 660))
         let args = CommandLine.arguments.dropFirst()
         if args.contains("--status-once") {
             print(provider.snapshot().report)
             exit(0)
         }
         if let bad = args.first(where: { !$0.hasPrefix("-psn_") }) {
-            FileHandle.standardError.write(Data("ChingBar: unknown argument \(bad) (only --status-once)\n".utf8))
+            FileHandle.standardError.write(Data("KachingBar: unknown argument \(bad) (only --status-once)\n".utf8))
             exit(64)
         }
         MainActor.assumeIsolated {
             let app = NSApplication.shared
             let delegate = AppDelegate(controller: StatusBarController(provider: provider,
-                                                                       pollSecs: TimeInterval(num("CHING_BAR_POLL_SECS", 12))))
+                                                                       pollSecs: TimeInterval(num("KACHING_BAR_POLL_SECS", 12))))
             app.delegate = delegate
             app.setActivationPolicy(.accessory)
             app.run()

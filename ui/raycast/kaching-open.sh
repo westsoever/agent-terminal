@@ -9,7 +9,7 @@
 
 # Optional parameters:
 # @raycast.icon 🟠
-# @raycast.packageName Ching
+# @raycast.packageName Kaching
 # @raycast.description Brings the kaching agent terminal to the front, or starts it.
 
 STATE="${AGENT_HOME:-$HOME/.agent}/terminal/open"
@@ -26,7 +26,8 @@ wid=$(osascript -e 'tell application "Terminal"
   set background color of t to {2827, 2827, 2827}
   return id of front window
 end tell')
-QT="$HOME/.claude/ching/bin/queue-term.js"
+K="$HOME/.claude/kaching"; [ -d "$K" ] || K="$HOME/.claude/ching"   # before install.sh ran since the rename (D35)
+QT="$K/bin/queue-term.js"
 want=$(sed -n 's/^queue_main_display=//p' "${AGENT_HOME:-$HOME/.agent}/config" 2>/dev/null | tail -1)
 screens=$(osascript -l JavaScript "$QT" screens 2>/dev/null)
 frame=$(printf '%s\n' "$screens" | awk -v w="$want" 'w != "" && index(tolower($5), tolower(w)) { print $1, $2, $3, $4; exit }')

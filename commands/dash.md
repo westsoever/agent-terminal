@@ -1,7 +1,7 @@
 ---
 description: Machine-wide status of every Claude session, from dash.sh. Says the spoken summary aloud by default; --text, --inbox, --next, --all print instead
 argument-hint: [--text | --inbox | --next | --all]
-allowed-tools: Bash(~/.claude/ching/bin/dash.sh:*), mcp__voicemode__converse, mcp__plugin_voicemode_voicemode__converse
+allowed-tools: Bash(~/.claude/kaching/bin/dash.sh:*), mcp__voicemode__converse, mcp__plugin_voicemode_voicemode__converse
 ---
 
 Show the state of the Claude sessions on this machine. Arguments: `$ARGUMENTS`
@@ -13,7 +13,7 @@ Show the state of the Claude sessions on this machine. Arguments: `$ARGUMENTS`
    - `--next`: the top sessions to look at next.
    - `--all`: the table of every session seen in the last 30 days.
    Anything else: say which flags exist and stop.
-2. Run `~/.claude/ching/bin/dash.sh <flag>` with Bash.
+2. Run `~/.claude/kaching/bin/dash.sh <flag>` with Bash.
 3. Default and `--speak` only: say the output aloud with the `converse` tool (VoiceMode, either tool name above): `message` is the output verbatim, `wait_for_response` is `false` (speak, never listen). If converse says another session currently holds the voice channel, or the tool is missing, do not retry or wait: the printed text is the answer.
 4. Print the output as it is. Add nothing: no paths, no ids, no commentary.
 

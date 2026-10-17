@@ -10,9 +10,9 @@ FX="$KIT/tests/fixtures/learn"
 SK="$FX/skills"
 MINER="$BIN/learn-skills.sh"
 export TZ=UTC
-export CHING_CLAUDE_BIN="$FX/claude-stub"
-export CHING_PLUGINS_FILE="$WORK/no-plugins.json"   # never the real plugin list
-unset CHING_SKILL_DIRS LEARN_SKILL_MAX LEARN_MAX_SNIPPETS LEARN_TOKEN_CAP LEARN_MODEL_DRAFT LEARN_DISABLE
+export KACHING_CLAUDE_BIN="$FX/claude-stub"
+export KACHING_PLUGINS_FILE="$WORK/no-plugins.json"   # never the real plugin list
+unset KACHING_SKILL_DIRS LEARN_SKILL_MAX LEARN_MAX_SNIPPETS LEARN_TOKEN_CAP LEARN_MODEL_DRAFT LEARN_DISABLE
 GOLDEN_SEQ="git fetch > git rebase > bun test > git push"
 
 # fresh AGENT_HOME per case: setup NAME TOOLSEQ [PROMPTS]
@@ -154,10 +154,10 @@ assert_eq "skills: a sequence using an installed skill (~/.claude/skills) is dro
 mkdir -p "$WORK/plug/skills/ship-it"
 printf -- '---\nname: ship-it\ndescription: |\n  Ship it.\n---\n' >"$WORK/plug/skills/ship-it/SKILL.md"
 jq -n --arg p "$WORK/plug" '{version:2, plugins:{"myplug@market":[{scope:"user", installPath:$p}]}}' >"$WORK/plugins.json"
-CHING_PLUGINS_FILE="$WORK/plugins.json" run_miner --dry-run >/dev/null
+KACHING_PLUGINS_FILE="$WORK/plugins.json" run_miner --dry-run >/dev/null
 assert_eq "skills: a sequence using an installed plugin skill is dropped" "" "$(seqs)"
-CHING_SKILL_DIRS="$WORK/elsewhere" CHING_PLUGINS_FILE="$WORK/plugins.json" run_miner --dry-run >/dev/null
-assert_eq "skills: CHING_SKILL_DIRS replaces the skill directories" "Skill:deploy-check > bun test > git push" "$(seqs)"
+KACHING_SKILL_DIRS="$WORK/elsewhere" KACHING_PLUGINS_FILE="$WORK/plugins.json" run_miner --dry-run >/dev/null
+assert_eq "skills: KACHING_SKILL_DIRS replaces the skill directories" "Skill:deploy-check > bun test > git push" "$(seqs)"
 
 # ---------- ranking, the shortlist and LEARN_SKILL_MAX ----------
 setup cap "$SK/toolseq.jsonl" "$SK/prompts.jsonl"

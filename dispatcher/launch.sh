@@ -23,7 +23,7 @@ CLAUDE_BIN=${CLAUDE_BIN:-claude}
 SETTINGS=$DIR/.claude/settings.json
 
 if [ ! -f "$SETTINGS" ] || [ ! -f "$DIR/mcp.json" ]; then
-  echo "launch: the dispatcher is not installed in $DIR. Run: ~/.claude/ching/install.sh --install-dispatcher" >&2
+  echo "launch: the dispatcher is not installed in $DIR. Run: ~/.claude/kaching/install.sh --install-dispatcher" >&2
   exit 1
 fi
 command -v jq >/dev/null 2>&1 || { echo "launch: jq is required" >&2; exit 1; }

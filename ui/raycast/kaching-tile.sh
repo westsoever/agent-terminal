@@ -9,7 +9,8 @@
 
 # Optional parameters:
 # @raycast.icon ▦
-# @raycast.packageName Ching
+# @raycast.packageName Kaching
 # @raycast.description Lays out the Terminal windows of each display in a grid: 2 side by side, 3 in columns, 4 as 2x2.
 
-exec "$HOME/.claude/ching/bin/queue.sh" tile
+K="$HOME/.claude/kaching"; [ -d "$K" ] || K="$HOME/.claude/ching"   # before install.sh ran since the rename (D35)
+exec "$K/bin/queue.sh" tile
