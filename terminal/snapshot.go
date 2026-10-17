@@ -102,11 +102,14 @@ type claudeSession struct {
 	Status    string `json:"status"`
 	UpdatedAt int64  `json:"statusUpdatedAt"`
 	JobID     string `json:"jobId"`
+
+	Entrypoint string `json:"entrypoint"` // "cli" for an interactive session, "sdk-cli" for a claude -p call
 }
 
-// hidden sessions are machinery, not agents the owner manages.
+// hidden sessions are machinery, not agents the owner manages: claude-mem's observers, and a `claude -p` call
+// (the FIND view's AI search), which Claude Code lists as an interactive session while it runs.
 func hidden(cs claudeSession) bool {
-	return strings.Contains(cs.Cwd, "/.claude-mem/observer-sessions")
+	return strings.Contains(cs.Cwd, "/.claude-mem/observer-sessions") || cs.Entrypoint == "sdk-cli"
 }
 
 // loadAgents builds the agent list. tabs maps the ttys of Terminal.app tabs to their window and tab (nil when

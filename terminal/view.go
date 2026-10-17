@@ -41,6 +41,8 @@ func (m model) View() string {
 		body = m.recapsView(bodyH)
 	case vPaperclip:
 		body = m.paperclipView(bodyH)
+	case vFind:
+		body = m.findView(bodyH)
 	case vHelp:
 		body = m.helpView(bodyH)
 	}
@@ -172,6 +174,9 @@ func (m model) commandLine() string {
 			if t.v == m.view {
 				code = t.code
 			}
+		}
+		if m.view == vFind {
+			code = "FIND"
 		}
 		left = []seg{s(" > ", cOrange), s(code, cWhite), s(" <GO>", cGrey)}
 		if m.leader {
@@ -959,6 +964,7 @@ func (m model) helpView(h int) []string {
 		row2("PO", "proposals: enter shows, a approve, x reject, z hide 7 days (the tab is orange while some are open)"),
 		row2("PC", "Paperclip issues, the selected one's thread on the right: 1-9 answer what it asks (approve, decline, …), "+K.Reply+" comment, enter opens it in the browser (orange while one needs you)"),
 		row2("NW [folder]", "start a background agent: write its first message, enter starts it (folder: a path, a folder in ~/bbq, an agent's name; none: the selected agent's)"),
+		row2("FIND words", "find a session: by its name, then by what was said in it (one message with all the words), then Claude picks (s). See Find below"),
 		row2("STOP", "stop the selected background agent (its conversation stays)"),
 		row2("A3, or a name", "select agent 3, or the first agent whose name starts so"),
 		row2("HELP, QUIT", "this page; stop kaching (ctrl+c also stops it)"),
@@ -983,6 +989,12 @@ func (m model) helpView(h int) []string {
 		row2("@ / /", "suggest the agent's files / commands; tab or enter takes one"),
 		row2("ctrl+v", "paste a clipboard image (saved, its path goes in); cmd+v pastes text"),
 		row2("option+arrows", "move by word   ·   option+backspace: delete a word"),
+		"",
+		"## Find (/FIND words)",
+		row2(k(K.Next)+" / "+k(K.Prev), "next / previous result"),
+		row2("enter", "a live session: go to it on the desk. An ended one: read the messages that match, with the message before and after (esc closes)"),
+		row2("s", "ask Claude which sessions fit (it runs by itself when names and text find nothing)"),
+		row2("r", "resume an ended session in a new Terminal window: cd to its folder, claude --resume"),
 		"",
 		"## Wall (push " + K.Wall + ")",
 		row2("1-9", "select that tile"),
@@ -1032,6 +1044,10 @@ func (m model) footer() []string {
 		add(&r1, K.Reply, "comment")
 		add(&r1, "enter", "in browser")
 		add(&r1, "esc", "desk")
+	case vFind:
+		for _, h := range m.findHints() {
+			add(&r1, h[0], h[1])
+		}
 	case vPulls:
 		add(&r1, K.Next+" "+K.Prev, "move")
 		add(&r1, "enter", "in browser")
