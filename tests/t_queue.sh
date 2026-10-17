@@ -156,14 +156,14 @@ assert_eq "grow to 5: bottom left stays bottom left" "1920 473 960 540" "$(win 1
 assert_eq "grow to 5: bottom right stays bottom right" "2880 473 960 540" "$(win 154)"
 assert_eq "grow to 5: the new one takes the free cell" "2560 -67 640 540" "$(win 155)"
 
-# the park frame (default 320,70,460,790 from the main display's corner): every parked window gets it, a stack;
+# the park frame (default 320,70,690,948 from the main display's corner): every parked window gets it, a stack;
 # back restores each one's exact cell
 printf '%s\n' "" >"$AGENT_HOME/config"
 reset "161 1920 -67 960 1080 ttys150" "162 2880 -67 960 1080 ttys151"
 QUEUE_TTY=ttys150 "$Q" park a
 QUEUE_TTY=ttys151 "$Q" park b
-assert_eq "park frame: first window" "320 70 460 790" "$(win 161)"
-assert_eq "park frame: second window stacks on it" "320 70 460 790" "$(win 162)"
+assert_eq "park frame: first window" "320 70 690 948" "$(win 161)"
+assert_eq "park frame: second window stacks on it" "320 70 690 948" "$(win 162)"
 QUEUE_TTY=ttys151 "$Q" back
 assert_eq "park frame: back to its exact cell" "2880 -67 960 1080" "$(win 162)"
 setcfg queue_tile=off queue_park_frame=100,0,3000,2000

@@ -2,6 +2,10 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D36 (2026-10-17): A larger park frame (amends D32)
+
+**Decision (user):** the frame for a waiting window on the main display is about 50% wider and 20% taller: 690 x 948, top-left still at 320,70 (`queue_park_frame` default 320,70,690,948). It ends at y 1018, inside the main display's usable area above the Dock.
+
 ## D35 (2026-10-17): Ching is renamed Kaching
 
 **Decision (user):** the kit is called Kaching, like an old cash register closing. The agent terminal (D33) already carried the name; now the whole kit does.
