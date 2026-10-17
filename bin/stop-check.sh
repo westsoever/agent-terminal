@@ -244,16 +244,21 @@ checkpoint_gate() {
   exit 0
 }
 
-# A turn that ends with a question to the user is "needs input"; anything else is "done".
+# A turn that asks the owner something (ask-check.sh: a question, or a request to do or decide something) is
+# "needs input", and meta ask= holds what it asks for the agent terminal; anything else is "done" (ask= empty).
 finish_ok() {
   checkpoint_gate
-  local last snippet kind="done"
-  last=$(printf '%s' "$LAST_MSG" | awk 'NF { l = $0 } END { print l }')
-  if printf '%s' "$last" | grep -Eq '\?[[:space:]]*[)"*_]*$'; then kind=input; fi
+  local snippet kind="done" ask="" res
+  if res=$(printf '%s' "$LAST_MSG" | "$SELF_DIR/ask-check.sh" 2>/dev/null); then
+    kind=$(printf '%s\n' "$res" | sed -n 1p)
+    ask=$(printf '%s\n' "$res" | sed -n 2p)
+  fi
+  [ "$kind" = input ] || { kind="done"; ask=""; }
   snippet=$(printf '%s' "$LAST_MSG" | tr '\n' ' ' | cut -c1-140)
   ev stop_ok "$(jq -nc --arg k "$kind" '{outcome:$k}')"
+  meta_set ask "$ask"
   set_state "$kind"
-  notify "$kind" "${snippet:-Session finished.}"
+  notify "$kind" "${ask:-${snippet:-Session finished.}}"
   exit 0
 }
 

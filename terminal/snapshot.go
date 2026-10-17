@@ -26,7 +26,8 @@ type Agent struct {
 	InTerminal             bool   // the tty is a Terminal.app tab, so the terminal can type into it
 	Transcript             string
 	CtxPct                 string
-	Asking                 bool // its screen shows a menu now (a question, an approval): it waits for the owner
+	Asking                 bool   // its screen shows a menu now (a question, an approval): it waits for the owner
+	Ask                    string // what a "needs input" turn asks the owner (meta ask=), '' when none
 }
 
 // Group is where an agent sits in the queue.
@@ -53,6 +54,12 @@ func (a Agent) waiting() bool {
 		return true
 	}
 	return false
+}
+
+// needsYou: a waiting agent that asks the owner something (a menu on its screen, or its last turn asked) or is
+// stuck; the rest of the waiting ones are done.
+func (a Agent) needsYou() bool {
+	return a.Asking || (a.waiting() && (a.State == "input" || a.State == "blocked"))
 }
 
 // Label is the short state word on the desk.
@@ -121,6 +128,7 @@ func loadAgents(terminalTTYs map[string]bool) []Agent {
 		a.Branch = meta["branch"]
 		a.Transcript = meta["transcript"]
 		a.CtxPct = meta["ctx_pct"]
+		a.Ask = meta["ask"]
 		if u, err := strconv.ParseInt(meta["updated"], 10, 64); err == nil && !a.Busy {
 			a.Since = time.Unix(u, 0)
 		}
@@ -142,7 +150,8 @@ func loadAgents(terminalTTYs map[string]bool) []Agent {
 	return out
 }
 
-// sortAgents: waiting first (oldest first, it has waited longest), then working, then idle (newest first).
+// sortAgents: waiting first (the ones that need the owner, then the done ones; oldest first, it has waited
+// longest), then working, then idle (newest first).
 func sortAgents(a []Agent) {
 	sort.SliceStable(a, func(i, j int) bool {
 		gi, gj := a[i].Group(), a[j].Group()
@@ -150,6 +159,9 @@ func sortAgents(a []Agent) {
 			return gi < gj
 		}
 		if gi == 0 {
+			if ni, nj := a[i].needsYou(), a[j].needsYou(); ni != nj {
+				return ni
+			}
 			return a[i].Since.Before(a[j].Since)
 		}
 		return a[i].Since.After(a[j].Since)

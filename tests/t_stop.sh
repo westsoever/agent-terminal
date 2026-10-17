@@ -43,6 +43,15 @@ assert_contains "green: meta state done" "$(cat "$AGENT_HOME/sessions/sess-B/met
 : >"$AGENT_HOME/notify.log"; rm -f "$AGENT_HOME/notify/"*.last
 stop "$R" sess-C "I changed X. Which colour do you want?" >/dev/null
 assert_contains "question -> Needs input" "$(notify_log)" "Needs input"
+assert_contains "question -> meta state input" "$(cat "$AGENT_HOME/sessions/sess-C/meta")" "state=input"
+assert_contains "question -> meta ask holds it" "$(cat "$AGENT_HOME/sessions/sess-C/meta")" "ask=Which colour do you want?"
+# a request with no question mark is "needs input" too
+stop "$R" sess-C "Merged. If it doesn't snap, tell me and I'll check the logs." >/dev/null
+assert_contains "request -> meta state input" "$(cat "$AGENT_HOME/sessions/sess-C/meta")" "state=input"
+# the next done turn clears the ask
+stop "$R" sess-C "All merged and installed." >/dev/null
+assert_contains "done -> meta state done" "$(cat "$AGENT_HOME/sessions/sess-C/meta")" "state=done"
+assert_eq "done -> meta ask empty" "ask=" "$(grep '^ask=' "$AGENT_HOME/sessions/sess-C/meta")"
 
 # unchanged tree after a green run: the test command is not run again
 CNT="$WORK/runs"; : >"$CNT"

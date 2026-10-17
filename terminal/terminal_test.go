@@ -126,6 +126,7 @@ func TestViewGeometry(t *testing.T) {
 		m.agents = append(m.agents, Agent{SID: string(rune('a' + i)), Name: "agent-" + st + "-with-a-long-name", Cwd: "/tmp",
 			State: st, Busy: st == "working", Since: now.Add(-time.Duration(i) * time.Hour), InTerminal: i != 4})
 	}
+	m.agents[0].Ask = strings.Repeat("should the first batch be the roasters you buy from, or all of them? ", 4)
 	sortAgents(m.agents)
 	m.selSID = m.agents[0].SID
 	long := strings.Replace(recapLine, "We fixed the queue.", strings.Repeat("A long recap line. ", 40), 1)
@@ -149,5 +150,43 @@ func TestViewGeometry(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// The queue lists INPUT (asked the owner, or blocked) above WAITING (done), then WORKING and IDLE; an INPUT row
+// shows what it asks under it.
+func TestQueueSections(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	cfg, _, _ := loadConfig()
+	now := time.Now()
+	m := model{cfg: cfg, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}}
+	m.agents = []Agent{
+		{SID: "d", Name: "old-done", State: "done", Since: now.Add(-3 * time.Hour)},
+		{SID: "w", Name: "busy", State: "working", Busy: true, Since: now},
+		{SID: "i", Name: "asks", State: "input", Ask: "Want me to merge?", Since: now.Add(-time.Minute)},
+		{SID: "z", Name: "fresh", State: "idle", Since: now},
+		{SID: "b", Name: "stuck", State: "blocked", Since: now.Add(-2 * time.Hour)},
+		{SID: "m", Name: "menu", State: "working", Busy: true, Asking: true, Ask: "stale", Since: now.Add(-30 * time.Minute)},
+	}
+	sortAgents(m.agents)
+	var order []string
+	for _, a := range m.agents {
+		order = append(order, a.Name)
+	}
+	if got, want := strings.Join(order, " "), "stuck menu asks old-done busy fresh"; got != want {
+		t.Errorf("order: got %q want %q", got, want)
+	}
+	m.selSID = "z"
+	out := ansiRe.ReplaceAllString(strings.Join(m.queuePanel(60, 30), "\n"), "")
+	last := -1
+	for _, h := range []string{" INPUT", "stuck", "menu", "asks", "↳ Want me to merge?", " WAITING", "old-done", " WORKING", "busy", " IDLE", "fresh"} {
+		at := strings.Index(out, h)
+		if at < 0 || at < last {
+			t.Fatalf("%q missing or out of order in:\n%s", h, out)
+		}
+		last = at
+	}
+	if strings.Contains(out, "stale") {
+		t.Errorf("an ask from an earlier turn is shown:\n%s", out)
 	}
 }
