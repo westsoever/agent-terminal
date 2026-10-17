@@ -560,6 +560,7 @@ func (m model) helpView(h int) []string {
 		"1-9   pick its numbered option (a menu gets the key, a list in its message gets the number + enter)",
 		fmt.Sprintf("%s   type a free reply, enter sends, esc cancels", K.Reply),
 		fmt.Sprintf("%s + letter   open a file it mentioned        %s   go to its own Terminal window", K.Open, K.Goto),
+		fmt.Sprintf("%s   dismiss: out of the queue without an answer (its window goes back)", K.Dismiss),
 		"",
 		"## Pre-written replies (" + tildify(configPath()) + ")",
 	}
@@ -602,6 +603,7 @@ func (m model) footer() []string {
 		add(&r1, key(K.Waiting), "next waiting")
 		add(&r1, K.Open+" a-i", "open file")
 		add(&r1, K.Goto, "go to window")
+		add(&r1, K.Dismiss, "dismiss")
 		add(&r1, K.Reply, "type reply")
 		add(&r1, K.Command, "command")
 		add(&r1, "?", "help")

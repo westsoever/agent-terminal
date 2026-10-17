@@ -82,6 +82,7 @@ type sentMsg struct {
 	sid, name, what, res string
 }
 type leaderTimeout int
+type statusMsg string
 type pcMsg PCState
 type execDone struct{ err error }
 
@@ -144,7 +145,13 @@ var selfTTY = pidTTYs([]string{fmt.Sprint(os.Getpid())})[os.Getpid()]
 
 // writeState tells the rest of Kaching (the monitor queue, the open hotkey) that the terminal is open and
 // which agent is selected: ~/.agent/terminal/open holds pid=, self_tty=, sid= and tty= lines.
+// readOnly: a --render run must not tell the queue that kaching is open.
+var readOnly bool
+
 func (m *model) writeState() {
+	if readOnly {
+		return
+	}
 	a := m.sel()
 	sid, tty := "", ""
 	if a != nil {
@@ -158,6 +165,38 @@ func (m *model) writeState() {
 	_ = os.MkdirAll(filepath.Dir(p), 0o755)
 	_ = os.WriteFile(p+".tmp", []byte(want), 0o644)
 	_ = os.Rename(p+".tmp", p)
+	queueShow()
+}
+
+// queueShow asks the monitor queue (D34) to put the selected agent's window behind kaching on the main display.
+// Debounced: walking the list with j/k only moves a window for where the selection settles.
+var showSeq = make(chan struct{}, 1)
+
+func init() {
+	go func() {
+		for range showSeq {
+			for {
+				select {
+				case <-showSeq:
+					continue
+				case <-time.After(350 * time.Millisecond):
+				}
+				break
+			}
+			_ = exec.Command(queueBin(), "show").Run()
+		}
+	}()
+}
+
+func queueShow() {
+	select {
+	case showSeq <- struct{}{}:
+	default:
+	}
+}
+
+func queueBin() string {
+	return filepath.Join(os.Getenv("HOME"), ".claude", "ching", "bin", "queue.sh")
 }
 
 // transcriptAfter: the session wrote to its transcript after t (it reacted to what we sent).
@@ -166,7 +205,12 @@ func transcriptAfter(path string, t time.Time) bool {
 	return err == nil && st.ModTime().After(t.Add(500*time.Millisecond))
 }
 
-func removeState() { _ = os.Remove(filepath.Join(agentHome(), "terminal", "open")) }
+// removeState: kaching closed. Without the open file the queue is in normal mode again; show reconciles now so
+// every waiting window comes to the main display.
+func removeState() {
+	_ = os.Remove(filepath.Join(agentHome(), "terminal", "open"))
+	_ = exec.Command(queueBin(), "show").Run()
+}
 
 func (m *model) sel() *Agent {
 	for i := range m.agents {
@@ -314,6 +358,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setErr(msg.name + ": " + msg.res)
 		}
+		return m, nil
+	case statusMsg:
+		m.setStatus(string(msg))
+		m.refresh()
 		return m, nil
 	case leaderTimeout:
 		if m.leader && int(msg) == m.leaderSeq {
@@ -478,6 +526,21 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.setErr("no Terminal window for this agent")
+	case ks == K.Dismiss && (m.view == vDesk || m.view == vWall):
+		a := m.sel()
+		if a == nil || a.Group() != 0 {
+			m.setErr("only a waiting agent can be dismissed")
+			return m, nil
+		}
+		sid := a.SID
+		return m, func() tea.Msg {
+			out, err := exec.Command(queueBin(), "dismiss", sid).CombinedOutput()
+			res := strings.TrimSpace(string(out))
+			if err != nil || strings.HasPrefix(res, "Unknown") {
+				return sentMsg{"", a.Name, "dismiss", "error: " + res}
+			}
+			return statusMsg(res)
+		}
 	case ks == K.Zoom && m.view == vWall:
 		m.zoom = !m.zoom
 	default:
