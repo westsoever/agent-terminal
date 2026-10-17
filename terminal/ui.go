@@ -72,6 +72,7 @@ type model struct {
 	pc         PCState
 	pcDet      map[string]PCDetail // issue id -> its side panel (PC view)
 	pcScroll   *chatScroll         // how far the PC side panel is scrolled back
+	pcForms    *pcFormSet          // what the owner chose so far in the requests with a form (pcform.go)
 	pcAt       time.Time
 	pulls      PullsState // the PR view: open GitHub pull requests
 	badgeAt    time.Time  // when the proposals, pull requests and Paperclip were last read for the tab bar
@@ -129,7 +130,7 @@ type execDone struct{ err error }
 
 func newModel() model {
 	cfg, ct, err := loadConfig()
-	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}}
+	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, pcForms: &pcFormSet{}}
 	m.ed.drafts = loadDrafts()
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
@@ -838,24 +839,8 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return bgStartedMsg{job, dir}
 			}
 		}
-		if id, ok := strings.CutPrefix(target, "pcno:"); ok { // a decline with its reason
-			d := m.pcDet[id]
-			n := 0
-			if d.Ask != nil {
-				for i, o := range d.Ask.Options {
-					if o.Action == "reason" {
-						n = i + 1
-					}
-				}
-			}
-			ref, ask := d.Ref, d.Ask
-			m.setStatus("declining " + ref + "…")
-			return m, func() tea.Msg {
-				if err := pcAct(id, ask, n, text); err != nil {
-					return pcActedMsg{ref, "declined", err.Error()}
-				}
-				return pcActedMsg{ref, "declined", ""}
-			}
+		if strings.HasPrefix(target, "pcno:") { // a note on an answer: a decline's reason, an approval's note, a form's text
+			return m, m.pcNoteSend(target, text)
 		}
 		if strings.HasPrefix(target, "pc:") {
 			id := strings.TrimPrefix(target, "pc:")
@@ -947,9 +932,9 @@ func (m *model) pcAnswer(n int) tea.Cmd {
 	o := d.Ask.Options[n-1]
 	if o.Action == "reason" {
 		m.mode = mTyping
-		return m.ed.open("pcno:"+it.ID, "", m.editorWidth())
+		return m.ed.open("pcno:"+it.ID+pcNoteSlot(o, n), "", m.editorWidth())
 	}
-	id, ref, ask := it.ID, it.Ref, d.Ask
+	id, ref, ask := it.ID, pcRef(*it), d.Ask
 	m.setStatus(o.Label + " → " + ref + "…")
 	return func() tea.Msg {
 		if err := pcAct(id, ask, n, ""); err != nil {
@@ -1003,6 +988,9 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 		n = len(m.pc.Items)
 		if m.pcScrollKey(ks) {
 			return true, nil
+		}
+		if cmd, ok := m.pcAskKey(ks); ok { // a request with a form: ticks, several questions, verdicts (pcform.go)
+			return true, cmd
 		}
 		if len(ks) == 1 && ks[0] >= '1' && ks[0] <= '9' {
 			return true, m.pcAnswer(int(ks[0] - '0'))

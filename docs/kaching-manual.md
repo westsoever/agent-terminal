@@ -16,7 +16,7 @@ Push `/`, write the code, then push `Enter`.
 | `RC` | Recaps | The last recap of each agent. Claude Code writes a recap when you come back to a session after some time. The desk also shows the recap of the selected agent above its last message. |
 | `PR` | Pull requests | The open GitHub pull requests that involve you (yours, assigned to you, or that ask your review), the last updated first. The number in the tab is how many. |
 | `PO` | Proposals | The changes that the learner proposes. The tab is orange when proposals are open. |
-| `PC` | Paperclip | Paperclip issues that need you, and issues in progress. The selected issue shows on the right, with what it asks you. The tab is orange when an issue needs you. |
+| `PC` | Paperclip | Paperclip issues and company approvals that need you, and issues in progress. The selected row shows on the right, with what it asks you. The tab is orange when a row needs you. |
 | `NW` | New agent | Start a background agent. Refer to section 6.15. |
 | `STOP` | – | Stop the selected background agent. Its conversation stays. |
 | `A3` | Agent 3 | The desk, with agent 3 selected. Use a number from 1 to 9. |
@@ -106,10 +106,17 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | `PO` | `a` | Approve the proposal. The screen asks you to write a code. |
 | `PO` | `x` | Reject the proposal. |
 | `PO` | `z` | Hide the proposal for 7 days. |
-| `PC` | `1` to `9` | Give that answer to what the issue asks: for example approve, decline, or decline with a reason. |
-| `PC` | `↑`, `↓` | Scroll the issue on the right: its description, its thread and the full request. |
-| `PC` | `Enter` | Open the issue in Paperclip in your browser. |
-| `PC` | `k` | Write a comment on the issue. `Enter` sends it. |
+| `PC` | `1` to `9` | Give that answer to what the row asks: for example approve, reject, or decline with a reason. In a list, tick or untick the item with that number. In a question, pick that option. With verdicts, give the current item that verdict. |
+| `PC` | `s` | Send what you ticked, picked or judged. |
+| `PC` | `x` | Decline a list of choices or of suggested tasks. |
+| `PC` | `r` | Decline it with a reason. The box opens. |
+| `PC` | `←`, `→` | Go to the previous or next question, or item. |
+| `PC` | `o` | Write your own answer to a question. |
+| `PC` | `a` | Give the recommended answer to every question and send. Kaching refuses if one question has none. |
+| `PC` | `n`, `p` | Show the next or previous page of a long list. |
+| `PC` | `↑`, `↓` | Scroll the row on the right: its description, its thread and the full request. |
+| `PC` | `Enter` | Open the row in Paperclip in your browser. |
+| `PC` | `k` | Write a comment on the row. `Enter` sends it. |
 
 ## 2. Introduction
 
@@ -355,22 +362,62 @@ Only a person can approve a proposal. An agent cannot approve it.
 ### 6.14 Do work on Paperclip issues
 
 1. Push `/`, write `PC`, push `Enter`.
-2. Push `l` (down) or `j` (up) to select an issue. Orange issues need you. The issue shows on the right: its title, its description, its thread (your comments have a lighter background) and the full request, for example the pull request that it asks you to review.
-3. Push `↑` or `↓` to read more of the issue.
-4. At the bottom, `IT ASKS YOU` shows the question and the numbered answers:
+2. Push `l` (down) or `j` (up) to select a row. Orange rows need you. A row is an issue, or a company approval (`APPROVAL`). The row shows on the right: its title, its description, its thread (your comments have a lighter background) and the full request, for example the pull request that it asks you to review.
+3. Push `↑` or `↓` to read more of the row.
+4. At the bottom, `IT ASKS YOU` shows the question. Below it, a key line shows what each key does. Find the request in this table:
 
-   | What it asks | Answers |
+   | What it asks | Keys |
    |---|---|
    | A confirmation (for example "Review the PR") | `1` approve, `2` decline, `3` decline with a reason |
    | A question with one answer | `1` to `9`: the options |
    | A recovery action (`RECOVERY WAITS FOR YOU`) | `1` retry: hand it back to the agent, `2` done: mark the issue done, `3` blocked: keep it blocked |
+   | A company approval (`APPROVAL`) | `1` approve, `2` reject, `3` request revision (a note is a must), `4` approve with a note, `5` reject with a note |
+   | A list to tick (choices, or suggested tasks) | `1` to `9` tick or untick, `s` send, `x` decline, `r` decline with a reason |
+   | Questions with more parts, several answers, or your own answer | `1` to `9` pick, `←` `→` other question, `o` your own answer, `s` send, `a` recommended answers |
+   | Items that wait for a verdict | `1` to `3` give the verdict, `←` `→` other item, `s` send |
+   | A connection request, or a request that Kaching does not know | None. Push `Enter` to open it in your browser. |
 
-5. Push the number of your answer. Make sure that the command line shows `✓ <answer> · <issue>`.
-6. For `3` (decline with a reason), the box opens. Write the reason. Push `Enter`.
-7. To write a comment, push `k`. Write the comment. Push `Enter`.
-8. To open the issue in your browser, push `Enter`.
+5. Push the keys of your request. Make sure that the command line shows `✓ <answer> · <row>`.
+6. For a decline with a reason, or an answer with a note, the box opens. Write the text. Push `Enter`.
+7. To write a comment, push `k`. Write the comment. Push `Enter`. This also works on an approval.
+8. To open the row in your browser, push `Enter`.
 
-When Kaching cannot answer a request (a question with more parts, a list of choices), the panel tells you to open it in the browser. If Paperclip does not operate, the view shows `Paperclip isn't running (localhost:3100)`.
+**Company approval.** The panel shows the payload: for example the name, the role and the monthly budget of an agent to hire. It also shows the issue that the approval belongs to.
+
+- Push `1` to approve or `2` to reject. Kaching sends the answer at once.
+- To add a note, push `4` (approve) or `5` (reject). Write the note. Push `Enter`.
+- To send the approval back for changes, push `3`. Write what to change. Push `Enter`.
+- A `board ask` (a request to the board) has no keys. Paperclip wants you to review its action in the browser first. Push `Enter` to open it.
+
+**List to tick.** A list of choices starts with the choices that the request ticked. A list of suggested tasks starts with all tasks ticked.
+
+- Push the number of an item to tick it. Push it again to untick it. `[x]` shows a ticked item.
+- A task needs its parent. When you tick a task, its parent is ticked too. When you untick a parent, its tasks are unticked too.
+- When the list is longer than the panel, push `n` for the next page and `p` for the previous page.
+- Push `s` to send. For tasks, Kaching accepts the ticked tasks. When all tasks are ticked, it accepts all.
+- Push `x` to decline. To decline with a reason, push `r`, write the reason, push `Enter`.
+- When Paperclip refuses (for example, you ticked too many items), the command line shows its message. Change the ticks. Push `s` again.
+
+**Questions with more parts.** Kaching shows one question at a time, for example `question 2 of 3`. A `✓` after it marks each question that has an answer.
+
+- Push the number of an option. For a question with one answer, Kaching then goes to the next question.
+- For a question with several answers, push the number of each option. Then push `→`.
+- To write your own answer, push `o`. Write the answer. Push `Enter`. Some questions take only a written answer.
+- To go back to a question, push `←`.
+- Push `s` to send all answers at once. When a question needs an answer and has none, Kaching names it and sends nothing.
+- A star (`★`) marks the answer that the request recommends. A label that ends in `(Recommended)` has the same mark.
+- When every question has a star, push `a`. Kaching takes the starred answers and sends them at once.
+- When a question has no star, `a` sends nothing. The command line shows which question it is. Kaching does not guess.
+
+**Items that wait for a verdict.** The list shows each item and its verdict. `>` marks the current item. Its full text shows above `IT ASKS YOU`.
+
+- Push `1`, `2` or `3` to give the current item that verdict. The key line shows the verdicts. Kaching then goes to the next item.
+- A verdict can need a reason, usually `reject`. Then the box opens. Write the reason. Push `Enter`.
+- To go to another item, push `←` or `→`.
+- Push `s` to send the verdicts. You can send some items now and the others later. The command line shows how many are left.
+- An item that has a verdict already stays as it is.
+
+When Kaching cannot answer a request (a connection request, or a kind that a later Paperclip adds), the panel tells you to open it in the browser. Kaching never sends an answer that it does not understand. If Paperclip does not operate, the view shows `Paperclip isn't running (localhost:3100)`.
 
 ### 6.15 Start a background agent
 
@@ -492,6 +539,8 @@ A background agent has no window. Kaching opens `claude attach <id>` out of sigh
 | `Option` + a key writes a wrong character. | Terminal sends `Option` as Meta, and Kaching reads your layout when it starts. | Stop and start Kaching after you change the keyboard layout. |
 | The screen shows `kaching needs at least 60x16`. | The window is too small. | Make the window larger. |
 | The PC view shows `Paperclip isn't running`. | The Paperclip service does not operate. | Start Paperclip. Then go to `PC` again. |
+| The command line shows `Paperclip refused`. | Paperclip does not accept the answer. The text after it says why. | Read the text. Change your answer, or open the row in the browser. |
+| The command line shows `no recommended answer for question`. | The question has no `★`. Kaching does not guess. | Pick an answer for each question. Push `s`. |
 
 ## 11. Files
 
