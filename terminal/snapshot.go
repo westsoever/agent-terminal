@@ -153,9 +153,7 @@ func loadAgents(tabs map[string]tabPos, groups [][]string) []Agent {
 		if a.Name == "" {
 			a.Name = filepath.Base(a.Cwd) + " " + short(a.SID)
 		}
-		if a.Transcript == "" {
-			a.Transcript = guessTranscript(a.Cwd, a.SID)
-		}
+		a.Transcript = findTranscript(a.Transcript, a.Cwd, a.SID)
 		out = append(out, a)
 		pids = append(pids, strconv.Itoa(cs.PID))
 	}
@@ -344,6 +342,28 @@ func readMeta(path string) map[string]string {
 		}
 	}
 	return m
+}
+
+// findTranscript: the transcript file of a session. The path in meta is the one from the session's start; when
+// the session changed folder since (EnterWorktree, cd), Claude Code keeps writing under the new folder's project
+// dir and the recorded file is stale. Then try the current cwd's project dir, then any project dir.
+func findTranscript(recorded, cwd, sid string) string {
+	if recorded != "" {
+		if _, err := os.Stat(recorded); err == nil {
+			return recorded
+		}
+	}
+	guess := guessTranscript(cwd, sid)
+	if _, err := os.Stat(guess); err == nil {
+		return guess
+	}
+	if hits, _ := filepath.Glob(filepath.Join(os.Getenv("HOME"), ".claude", "projects", "*", sid+".jsonl")); len(hits) > 0 {
+		return hits[0]
+	}
+	if recorded != "" {
+		return recorded
+	}
+	return guess
 }
 
 // guessTranscript: Claude Code's project folder is the cwd with every non-alphanumeric char as '-'.

@@ -8,6 +8,14 @@ Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are rec
 
 **Built:** the queue has five sections: INPUT, WAITING, WORKING, IDLE, DONE. A session whose turn ended as `done` is DONE when its checkpoint (`STATE.md`, in the repo's `.agent` with a GOAL.md, else the session folder) has no `next_action` and no `blocker` (empty, `none`, `(none)` and `none.` count as empty) and its `NEXT.md` is empty or missing. That is the test `kaching-watch.sh` already uses to leave a finished session alone. A finished session with something open stays in WAITING. DONE is last and newest first, so what the owner can ignore stays out of the way; a family sits in its most urgent member's section. `Group()` is unchanged, so DONE agents still count as waiting in the tab badge and `x` can dismiss them.
 
+## D47 (2026-10-18): the terminal finds a transcript that moved with its session
+
+**Decision (user):** "I don't see any messages of the background agent ... Maybe fix that first to actually have the text of the chat from this background agent show up here as well."
+
+**Why:** meta `transcript=` is written when the session starts. A session that changes folder (EnterWorktree, cd) gets its transcript under the new folder's project dir, so the recorded file was gone and the right panel showed an empty chat. Every background session that works in a worktree was affected.
+
+**Built:** `findTranscript` keeps the recorded path while the file exists, else tries the current cwd's project dir, else any `~/.claude/projects/*/<sid>.jsonl`. The bash hooks still record the start path; only the terminal resolves it.
+
 ## D45 (2026-10-18): A pull request opens on the right in kaching, and a comment on it starts an agent (amends D44)
 
 **Decision (user):** "When I press K, I would want the side panel to open that holds the content of the pull request … I can press again on the side panel, and then I can comment on this … once I hit Enter, it gets sent off to a new session that works through this pull request."

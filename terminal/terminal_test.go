@@ -157,6 +157,33 @@ func TestViewGeometry(t *testing.T) {
 	}
 }
 
+// A session that changed folder (EnterWorktree, cd) keeps its meta transcript path from its start, but Claude
+// Code writes under the new folder's project dir: the stale path must not hide the chat.
+func TestFindTranscriptAfterFolderChange(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	write := func(dir string) string {
+		p := filepath.Join(home, ".claude", "projects", dir, "sid1.jsonl")
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte("{}\n"), 0o644)
+		return p
+	}
+	stale := filepath.Join(home, ".claude", "projects", "-Users-me", "sid1.jsonl")
+	moved := write("-Users-me-repo--claude-worktrees-wt")
+	if got := findTranscript(stale, "/Users/me/repo/.claude/worktrees/wt", "sid1"); got != moved {
+		t.Errorf("cwd's project dir: got %q want %q", got, moved)
+	}
+	if got := findTranscript(stale, "/somewhere/else", "sid1"); got != moved {
+		t.Errorf("any project dir: got %q want %q", got, moved)
+	}
+	if got := findTranscript(moved, "/x", "sid1"); got != moved {
+		t.Errorf("a valid recorded path is kept: got %q", got)
+	}
+	if got := findTranscript(stale, "/x", "none"); got != stale {
+		t.Errorf("nothing found keeps the recorded path: got %q", got)
+	}
+}
+
 // A finished turn is DONE only when nothing is left: no next action, no blocker, no NEXT.md. The checkpoint is
 // read from the repo's .agent (with a GOAL.md) or the session's own folder, and "none" counts as empty.
 func TestNothingLeft(t *testing.T) {
