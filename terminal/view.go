@@ -318,7 +318,7 @@ func (m model) agentPanel(w, h int) []string {
 	case m.mode == mTyping && m.ed.target == a.SID:
 		tail = append(tail, m.ed.lines(in)...)
 	default:
-		tail = append(tail, row(in, s("> ", cOrange), s("r to type", cDark)))
+		tail = append(tail, row(in, s("> ", cOrange), s(m.cfg.Keys.Reply+" to write", cDark)))
 	}
 	avail := h - 2 - len(tail)
 	var msg []string
@@ -535,10 +535,10 @@ func (m model) paperclipView(h int) []string {
 		for _, l := range ed {
 			body = append(body, " "+l+" ")
 		}
-		list := m.listBox("PAPERCLIP   r comment · enter open in browser", items, h-eh, "loading…", details...)
+		list := m.listBox("PAPERCLIP   "+m.cfg.Keys.Reply+" comment · enter open in browser", items, h-eh, "loading…", details...)
 		return append(list, indent(box(m.w-2, eh, []seg{s("COMMENT ON "+m.pc.Items[m.listSel].Ref, cWhite)}, cOrange, body))...)
 	}
-	return m.listBox("PAPERCLIP   r comment · enter open in browser", items, h, "loading…", details...)
+	return m.listBox("PAPERCLIP   "+m.cfg.Keys.Reply+" comment · enter open in browser", items, h, "loading…", details...)
 }
 
 func (m model) textView(title string, lines []string, h int) []string {
@@ -577,7 +577,7 @@ func (m model) helpView(h int) []string {
 		row2("FL", "files the agents wrote about (enter opens)"),
 		row2("RP", "repos with work that you can lose"),
 		row2("PR", "proposals: enter shows, a approve, x reject, z hide 7 days"),
-		row2("PC", "Paperclip issues: r comment, enter opens in the browser"),
+		row2("PC", "Paperclip issues: "+K.Reply+" comment, enter opens in the browser"),
 		row2("A3, or a name", "select agent 3, or the first agent whose name starts so"),
 		row2("HELP, QUIT", "this page; stop kaching (ctrl+c also stops it)"),
 		"",
@@ -596,7 +596,7 @@ func (m model) helpView(h int) []string {
 		row2("option+key", "your layout's character: option+l @, option+5 [, option+8 {, option+7 |"),
 		row2("@ / /", "suggest the agent's files / commands; tab or enter takes one"),
 		row2("ctrl+v", "paste a clipboard image (saved, its path goes in); cmd+v pastes text"),
-		row2("ctrl+g", "edit in $EDITOR   ·   option+arrows: by word   ·   option+backspace: word"),
+		row2("option+arrows", "move by word   ·   option+backspace: delete a word"),
 		"",
 		"## Wall",
 		row2("1-9", "select that tile"),

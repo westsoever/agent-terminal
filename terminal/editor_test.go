@@ -116,7 +116,7 @@ func TestTypingNotInCommandLine(t *testing.T) {
 	m := model{cfg: cfg, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), w: 120, h: 40}
 	m.agents = []Agent{{SID: "s1", Name: "agent", Cwd: "/tmp", InTerminal: true, State: "input"}}
 	m.selSID = "s1"
-	mm, _ := m.key(runes("r"))
+	mm, _ := m.key(runes("k"))
 	m = mm.(model)
 	long := strings.Repeat("word ", 60)
 	for _, r := range long {

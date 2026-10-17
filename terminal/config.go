@@ -45,10 +45,10 @@ const defaultConfig = `# Kaching agent terminal: keys and pre-written replies.
 open_cmd = "open"
 
 [keys]
-next = "k"            # next agent (down the list)
+next = "l"            # next agent (down the list)
 prev = "j"            # previous agent (up the list)
 next_waiting = " "    # space alone: next agent that waits for you
-type_reply = "r"      # type a free reply (enter sends, esc cancels)
+type_reply = "k"      # write a reply (enter sends, esc keeps a draft)
 open_file = "o"       # then a letter: open that mentioned file
 go_to_window = "g"    # bring the agent's own Terminal window forward
 command = "/"         # command line: IN AG FL RP PR PC A<n> HELP QUIT

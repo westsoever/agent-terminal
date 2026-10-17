@@ -25,13 +25,16 @@ Push `Esc` to go back to the desk from any view.
 
 ### 1.2 Keys on the desk
 
+The right hand does the most frequent work: `j` goes up, `l` goes down, `k` opens the message box.
+
+
 | Key | Result |
 |---|---|
-| `k` or `↓` | Select the next agent (down the list). |
+| `l` or `↓` | Select the next agent (down the list). |
 | `j` or `↑` | Select the previous agent (up the list). |
 | `Space` | Select the next agent that waits for you. |
 | `1` to `9` | Send the answer with that number to the selected agent. |
-| `r` | Write a message to the selected agent. `Enter` sends it. `Esc` keeps it as a draft. Refer to section 1.4. |
+| `k` | Write a message to the selected agent. `Enter` sends it. `Esc` keeps it as a draft. Refer to section 1.4. |
 | `o`, then `a` to `i` | Open the file with that letter. |
 | `g` | Show the Terminal window of the selected agent. |
 | `x` | Remove the selected agent from the waiting list. You do not send an answer. |
@@ -67,12 +70,11 @@ You can change these keys and messages. Refer to section 7.
 | `↑`, `↓` | Select a suggestion. When there are no suggestions, move between lines. |
 | `Ctrl+V` | Paste an image from the clipboard. Kaching saves it as a file and writes its path. The agent opens the file. If the clipboard has no image, Kaching pastes the text. |
 | `Cmd+V` | Paste text. Line breaks stay. |
-| `Ctrl+G` | Open the message in your text editor (`$VISUAL`, `$EDITOR`, or nano). When you close the editor, the text comes back. |
 | `←`, `→`, `Option+←`, `Option+→` | Move by one letter or by one word. |
 | `Ctrl+A`, `Ctrl+E` | Go to the start or the end of the line. |
 | `Option+Backspace`, `Ctrl+W` | Remove the word before the cursor. |
 | `Ctrl+K`, `Ctrl+U` | Remove the text after or before the cursor. |
-| `Esc` or `Ctrl+C` | Close the box. Kaching keeps the text as a draft for this agent. Push `r` to open it again. |
+| `Esc` or `Ctrl+C` | Close the box. Kaching keeps the text as a draft for this agent. Push `k` to open it again. |
 
 The top line does not show your message. It shows only the name of the agent that gets the message.
 
@@ -82,7 +84,7 @@ The top line does not show your message. It shows only the name of the agent tha
 |---|---|
 | `1` to `9` | Select the tile with that number. |
 | `z` | Show the selected tile on the full screen. Push `z` again to go back. |
-| `k`, `j`, `Space` | Select the next, previous or next waiting agent. |
+| `l`, `j`, `Space` | Select the next, previous or next waiting agent. |
 | `Esc` | Go back to the desk. |
 
 When a tile shows on the full screen, the number keys send answers, as on the desk.
@@ -91,14 +93,14 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 
 | View | Key | Result |
 |---|---|---|
-| All lists | `k`, `j` | Select the next or previous line. |
+| All lists | `l`, `j` | Select the next or previous line. |
 | `FL` | `Enter` | Open the selected file. |
 | `PR` | `Enter` | Show the full proposal. Push `q` to close it. |
 | `PR` | `a` | Approve the proposal. The screen asks you to write a code. |
 | `PR` | `x` | Reject the proposal. |
 | `PR` | `z` | Hide the proposal for 7 days. |
 | `PC` | `Enter` | Open the issue in Paperclip in your browser. |
-| `PC` | `r` | Write a comment on the issue. `Enter` sends it. |
+| `PC` | `k` | Write a comment on the issue. `Enter` sends it. |
 
 ## 2. Introduction
 
@@ -201,7 +203,7 @@ Kaching has four modes. The command line shows the current mode.
 |---|---|---|---|
 | Key mode | This is the normal mode. | Each key does an action. | – |
 | Command mode | Push `/`. | You write a code. | `Enter` does the code. `Esc` cancels. |
-| Write mode | Push `r`. | You write a message. Refer to section 1.4. | `Enter` sends it. `Esc` keeps it as a draft. |
+| Write mode | Push `k`. | You write a message. Refer to section 1.4. | `Enter` sends it. `Esc` keeps it as a draft. |
 | File mode | Push `o`. | You select a file. | Push the letter of the file. Any other key cancels. |
 
 In command mode and write mode:
@@ -239,12 +241,12 @@ When the agent shows a menu, Kaching pushes only the number key in the agent win
 ### 6.4 Write a message
 
 1. Select the agent.
-2. Push `r`. The message box opens below the text of the agent.
+2. Push `k`. The message box opens below the text of the agent.
 3. Write your message. To start a new line, push `Option+Enter`.
 4. Push `Enter`.
 5. Make sure that the command line shows `✓ <name> is on it`.
 
-To stop before step 4, push `Esc`. Kaching keeps your text as a draft. When you push `r` again for this agent, the draft comes back.
+To stop before step 4, push `Esc`. Kaching keeps your text as a draft. When you push `k` again for this agent, the draft comes back.
 
 ### 6.5 Refer to a file or a command in a message
 
@@ -258,7 +260,7 @@ For a command, write `/` at the start of the message, then some letters. Select 
 ### 6.6 Send an image
 
 1. Copy the image, for example with `Cmd+Ctrl+Shift+4` for a part of the screen.
-2. Push `r` to open the message box.
+2. Push `k` to open the message box.
 3. Push `Ctrl+V`. Kaching saves the image in `~/.agent/terminal/images/` and writes its path.
 4. Write your question about the image.
 5. Push `Enter`. The agent opens the image file.
@@ -311,7 +313,7 @@ The tiles change size with the window. A wide window shows more tiles in each li
 ### 6.12 Do a proposal of the learner
 
 1. Push `/`, write `PR`, push `Enter`.
-2. Push `k` (down) or `j` (up) to select a proposal.
+2. Push `l` (down) or `j` (up) to select a proposal.
 3. Push `Enter` to read the full proposal. Push `q` to close it.
 4. Do one of these steps:
    - To approve it, push `a`. Write the code that shows on the screen. Push `Enter`.
@@ -323,8 +325,8 @@ Only a person can approve a proposal. An agent cannot approve it.
 ### 6.13 Do work on Paperclip issues
 
 1. Push `/`, write `PC`, push `Enter`.
-2. Push `k` (down) or `j` (up) to select an issue. The lines below the issue show why it waits.
-3. To write a comment, push `r`. Write the comment. Push `Enter`.
+2. Push `l` (down) or `j` (up) to select an issue. The lines below the issue show why it waits.
+3. To write a comment, push `k`. Write the comment. Push `Enter`.
 4. To open the issue in your browser, push `Enter`.
 
 Orange issues need you. If Paperclip does not operate, the view shows `Paperclip isn't running (localhost:3100)`.
@@ -357,7 +359,7 @@ All keys and fixed messages are in the file `~/.agent/terminal/keys.toml`. Kachi
 3. For a key on the space bar, write `key = "space e"`.
 4. Save the file.
 
-Do not use a key that Kaching uses for an action (for example `k`, `j`, `r`, `o`, `g`, `x`, `W`, `z`, `/`). The action has priority.
+Do not use a key that Kaching uses for an action (for example `l`, `j`, `k`, `o`, `g`, `x`, `W`, `z`, `/`). The action has priority.
 
 ### 7.3 Change an action key
 
@@ -399,7 +401,7 @@ Kaching examines the agent window after it pushes `Enter`. If the text did not g
 | Problem | Cause | Solution |
 |---|---|---|
 | The command line shows `isn't in a Terminal tab: look only`. | The agent is not in Terminal.app. | Push `g` to go to the agent. Write your answer there. |
-| The command line shows `has no option 2`. | The agent did not give numbered answers, or Kaching did not read them yet. | Wait 2 seconds. Push `R`. Try again. Or push `r` and write the answer. |
+| The command line shows `has no option 2`. | The agent did not give numbered answers, or Kaching did not read them yet. | Wait 2 seconds. Push `R`. Try again. Or push `k` and write the answer. |
 | The command line shows `typed but not submitted`. | The agent window did not accept `Enter`. | Push `g`. Push `Enter` in the agent window. |
 | An agent is not in the list. | The agent stopped, or it is a background process. | Push `R`. If it does not show, look in Terminal. |
 | A fixed message key does nothing. | You are not on the desk or on the wall. | Push `Esc`. Push the key again. |
