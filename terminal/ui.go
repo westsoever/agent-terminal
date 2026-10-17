@@ -47,7 +47,8 @@ const (
 	mKeys mode = iota
 	mTyping
 	mCommand
-	mOpen // waiting for the letter of a file to open
+	mOpen    // waiting for the letter of a file to open
+	mConfirm // a yes/no question in the command line: enter or y says yes
 )
 
 type model struct {
@@ -79,6 +80,11 @@ type model struct {
 	pendingJob string     // a background agent /NW started: selected once it shows in the list
 	props      []string
 	sync       []string
+	repoLocal  []Repo    // RP: the clones on this Mac
+	repoGH     GHRepos   // RP: the owners' GitHub repos
+	repos      []Repo    // RP: both, as listed
+	tree       *repoTree // RP side panel: the selected repo's folders; nil when closed
+	confirmURL string    // mConfirm: what yes opens
 	ed         *editor
 	prompts    map[string]Prompt  // sid -> the menu its screen shows (selected waiting agents only)
 	scroll     *chatScroll        // shared by every copy of the model: View records the limits it drew
@@ -559,8 +565,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setErr(msg.err.Error())
 		}
 		return m, nil
+	case ghReposMsg, treeMsg:
+		return m.repoMsg(msg)
 	case tea.KeyMsg:
 		return m.key(msg)
+	}
+	if m.view == vRepos && m.mode == mKeys && isShiftEnter(msg) {
+		m.repoGitHub()
 	}
 	return m, nil
 }
@@ -625,6 +636,8 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.setErr("no such file")
 		return m, nil
+	case mConfirm:
+		return m.confirmKey(ks)
 	}
 
 	// key mode
@@ -641,7 +654,9 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode, m.buf = mCommand, ""
 		return m, nil
 	case ks == "esc":
-		if m.zoom {
+		if m.view == vRepos && m.tree != nil { // the folder panel closes first
+			m.tree = nil
+		} else if m.zoom {
 			m.zoom = false
 		} else {
 			m.view = vDesk
@@ -1025,7 +1040,7 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 			return true, m.pcAnswer(int(ks[0] - '0'))
 		}
 	case vRepos:
-		return ks == K.Next || ks == K.Prev, nil
+		return m.repoKey(ks)
 	}
 	switch ks {
 	case K.Next, "down":
@@ -1111,7 +1126,7 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 			m.view, m.zoom, m.listSel = t.v, false, 0
 			switch t.v {
 			case vRepos:
-				m.loadSync()
+				return m, m.openRepos()
 			case vProposals:
 				m.loadProposals()
 			case vPulls:

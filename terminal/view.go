@@ -32,7 +32,7 @@ func (m model) View() string {
 	case vFiles:
 		body = m.filesView(bodyH)
 	case vRepos:
-		body = m.textView("repos", m.sync, bodyH)
+		body = m.reposView(bodyH)
 	case vProposals:
 		body = m.proposalsView(bodyH)
 	case vPulls:
@@ -166,6 +166,8 @@ func (m model) commandLine() string {
 		}
 	case mOpen:
 		left = []seg{s(" open file: press its letter", cOrange)}
+	case mConfirm:
+		left = []seg{s(" No local folder. Open it on GitHub? ", cOrange), s("enter/y yes · esc no", cGrey)}
 	default:
 		code := tabs[0].code
 		for _, t := range tabs {
@@ -961,7 +963,7 @@ func (m model) helpView(h int) []string {
 		"## Go to a view: push " + K.Command + ", write the code, push enter. esc goes back to the desk.",
 		row2("IN", "inbox (the desk): all agents and the selected agent"),
 		row2("FL", "the last 30 files the agents wrote about, newest first (enter opens)"),
-		row2("RP", "repos with work that you can lose"),
+		row2("RP", "repos: the clones here and your GitHub repos, with the sync check's notes (work you can lose) first"),
 		row2("RC", "recaps: what each agent summed up while you were away (enter goes to it)"),
 		row2("PR", "pull requests: the open ones that involve you on GitHub, the last updated first (enter opens it in the browser)"),
 		row2("PO", "proposals: enter shows, a approve, x reject, z hide 7 days (the tab is orange while some are open)"),
@@ -991,6 +993,12 @@ func (m model) helpView(h int) []string {
 		row2("@ / /", "suggest the agent's files / commands; tab or enter takes one"),
 		row2("ctrl+v", "paste a clipboard image (saved, its path goes in); cmd+v pastes text"),
 		row2("option+arrows", "move by word   ·   option+backspace: delete a word"),
+		"",
+		"## Repos (RP)",
+		row2(k(K.Next)+" / "+k(K.Prev), "next / previous repo"),
+		row2("enter", "open its folder; on GitHub only: asks, then enter or y opens it on GitHub"),
+		row2("b, option+enter", "open it on GitHub (shift+enter too, where the terminal tells it from enter)"),
+		row2(K.Reply, "its folders on the right: "+K.Reply+" goes into a folder or opens a file, h (or backspace) up, enter shows it in Finder, esc closes"),
 		"",
 		"## Wall (push " + K.Wall + ")",
 		row2("1-9", "select that tile"),
@@ -1045,7 +1053,22 @@ func (m model) footer() []string {
 		add(&r1, "enter", "in browser")
 		add(&r1, "esc", "desk")
 		add(&r1, K.Command, "command")
-	case vFiles, vProposals, vRecaps, vRepos:
+	case vRepos:
+		add(&r1, K.Next+" "+K.Prev, "move")
+		if m.tree != nil {
+			add(&r1, K.Reply, "open")
+			add(&r1, "h", "up")
+			add(&r1, "enter", "in Finder")
+			add(&r1, "b", "on GitHub")
+			add(&r1, "esc", "close")
+			break
+		}
+		add(&r1, "enter", "open folder")
+		add(&r1, "b", "on GitHub")
+		add(&r1, K.Reply, "folders")
+		add(&r1, "esc", "desk")
+		add(&r1, K.Command, "command")
+	case vFiles, vProposals, vRecaps:
 		add(&r1, K.Next+" "+K.Prev, "move")
 		add(&r1, "enter", "open")
 		add(&r1, "esc", "desk")
