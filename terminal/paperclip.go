@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -42,13 +41,14 @@ type PCItem struct {
 type PCState struct {
 	Err   string
 	Items []PCItem
+	Names map[string]string // agent id -> name, for the side panel's thread
 }
 
 // pcBase is Paperclip's address; a variable so tests can point it at an httptest server.
 var pcBase = "http://localhost:3100"
 
 const (
-	pcTimeout  = 1500 * time.Millisecond
+	pcTimeout  = 4 * time.Second // it loads in the background; a busy Mac makes Paperclip slow
 	pcMaxItems = 30
 	pcRuns     = 50
 )
@@ -144,6 +144,7 @@ func loadPaperclip() PCState {
 	}
 	type result struct {
 		items []PCItem
+		names map[string]string
 		err   error
 	}
 	results := make([]result, len(companies))
@@ -155,14 +156,18 @@ func loadPaperclip() PCState {
 		wg.Add(1)
 		go func(i int, c pcCompany) {
 			defer wg.Done()
-			items, err := loadCompany(ctx, c)
-			results[i] = result{items, err}
+			items, names, err := loadCompany(ctx, c)
+			results[i] = result{items, names, err}
 		}(i, c)
 	}
 	wg.Wait()
 	var needs, rest []PCItem
 	var firstErr error
+	names := map[string]string{}
 	for _, r := range results {
+		for id, n := range r.names {
+			names[id] = n
+		}
 		if r.err != nil && firstErr == nil {
 			firstErr = r.err
 		}
@@ -178,7 +183,7 @@ func loadPaperclip() PCState {
 	if len(items) > pcMaxItems {
 		items = items[:pcMaxItems]
 	}
-	st := PCState{Items: items}
+	st := PCState{Items: items, Names: names}
 	if firstErr != nil && len(items) == 0 {
 		st.Err = pcErr(firstErr)
 	}
@@ -186,8 +191,8 @@ func loadPaperclip() PCState {
 }
 
 // loadCompany returns the company's rows: attention items first (in the feed's order), then open issues newest
-// first. Each issue appears once.
-func loadCompany(ctx context.Context, c pcCompany) ([]PCItem, error) {
+// first. Each issue appears once. names maps its agents' ids to their names.
+func loadCompany(ctx context.Context, c pcCompany) ([]PCItem, map[string]string, error) {
 	esc := url.PathEscape(c.ID)
 	var (
 		att    pcAttention
@@ -210,7 +215,7 @@ func loadCompany(ctx context.Context, c pcCompany) ([]PCItem, error) {
 	}()
 	wg.Wait()
 	if errs[0] != nil && errs[1] != nil {
-		return nil, errs[0]
+		return nil, nil, errs[0]
 	}
 	// agents and runs are extras: without them rows just lack the name or cost.
 
@@ -301,7 +306,7 @@ func loadCompany(ctx context.Context, c pcCompany) ([]PCItem, error) {
 		}
 		out = append(out, it)
 	}
-	return out, nil
+	return out, names, nil
 }
 
 func fillFromIssue(it *PCItem, is pcIssue, names map[string]string) {
@@ -377,20 +382,7 @@ func pcComment(id, text string) error {
 	if res.StatusCode/100 == 2 {
 		return nil
 	}
-	b, _ := io.ReadAll(io.LimitReader(res.Body, 2048))
-	var e struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
-	}
-	msg := strings.TrimSpace(string(b))
-	if json.Unmarshal(b, &e) == nil {
-		if e.Error != "" {
-			msg = e.Error
-		} else if e.Message != "" {
-			msg = e.Message
-		}
-	}
-	return fmt.Errorf("Paperclip refused the comment (HTTP %d): %s", res.StatusCode, msg)
+	return fmt.Errorf("Paperclip refused the comment (HTTP %d): %s", res.StatusCode, pcRefusal(res.Body))
 }
 
 // newUUID returns a random version 4 UUID (Paperclip wants one per comment for safe retries).

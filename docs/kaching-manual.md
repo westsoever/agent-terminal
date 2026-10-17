@@ -16,7 +16,7 @@ Push `/`, write the code, then push `Enter`.
 | `RP` | Repos | The git sync check: repos with work that you can lose. |
 | `RC` | Recaps | The last recap of each agent. Claude Code writes a recap when you come back to a session after some time. The desk also shows the recap of the selected agent above its last message. |
 | `PR` | Proposals | The changes that the learner proposes. The tab is orange when proposals are open. |
-| `PC` | Paperclip | Paperclip issues that need you, and issues in progress. The tab is orange when an issue needs you. |
+| `PC` | Paperclip | Paperclip issues that need you, and issues in progress. The selected issue shows on the right, with what it asks you. The tab is orange when an issue needs you. |
 | `NW` | New agent | Start a background agent. Refer to section 6.15. |
 | `STOP` | – | Stop the selected background agent. Its conversation stays. |
 | `A3` | Agent 3 | The desk, with agent 3 selected. Use a number from 1 to 9. |
@@ -105,6 +105,8 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | `PR` | `a` | Approve the proposal. The screen asks you to write a code. |
 | `PR` | `x` | Reject the proposal. |
 | `PR` | `z` | Hide the proposal for 7 days. |
+| `PC` | `1` to `9` | Give that answer to what the issue asks: for example approve, decline, or decline with a reason. |
+| `PC` | `↑`, `↓` | Scroll the issue on the right: its description, its thread and the full request. |
 | `PC` | `Enter` | Open the issue in Paperclip in your browser. |
 | `PC` | `k` | Write a comment on the issue. `Enter` sends it. |
 
@@ -352,11 +354,22 @@ Only a person can approve a proposal. An agent cannot approve it.
 ### 6.14 Do work on Paperclip issues
 
 1. Push `/`, write `PC`, push `Enter`.
-2. Push `l` (down) or `j` (up) to select an issue. The lines below the issue show why it waits.
-3. To write a comment, push `k`. Write the comment. Push `Enter`.
-4. To open the issue in your browser, push `Enter`.
+2. Push `l` (down) or `j` (up) to select an issue. Orange issues need you. The issue shows on the right: its title, its description, its thread (your comments have a lighter background) and the full request, for example the pull request that it asks you to review.
+3. Push `↑` or `↓` to read more of the issue.
+4. At the bottom, `IT ASKS YOU` shows the question and the numbered answers:
 
-Orange issues need you. If Paperclip does not operate, the view shows `Paperclip isn't running (localhost:3100)`.
+   | What it asks | Answers |
+   |---|---|
+   | A confirmation (for example "Review the PR") | `1` approve, `2` decline, `3` decline with a reason |
+   | A question with one answer | `1` to `9`: the options |
+   | A recovery action (`RECOVERY WAITS FOR YOU`) | `1` retry: hand it back to the agent, `2` done: mark the issue done, `3` blocked: keep it blocked |
+
+5. Push the number of your answer. Make sure that the command line shows `✓ <answer> · <issue>`.
+6. For `3` (decline with a reason), the box opens. Write the reason. Push `Enter`.
+7. To write a comment, push `k`. Write the comment. Push `Enter`.
+8. To open the issue in your browser, push `Enter`.
+
+When Kaching cannot answer a request (a question with more parts, a list of choices), the panel tells you to open it in the browser. If Paperclip does not operate, the view shows `Paperclip isn't running (localhost:3100)`.
 
 ### 6.15 Start a background agent
 

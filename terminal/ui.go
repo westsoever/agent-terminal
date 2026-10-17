@@ -69,6 +69,8 @@ type model struct {
 	expect     map[string]time.Time // sid -> when we sent; cleared when it turns busy
 	lastCache  map[string]cachedLast
 	pc         PCState
+	pcDet      map[string]PCDetail // issue id -> its side panel (PC view)
+	pcScroll   *chatScroll         // how far the PC side panel is scrolled back
 	pcAt       time.Time
 	badgeAt    time.Time // when the proposals and Paperclip were last read for the tab bar
 	pendingJob string    // a background agent /NW started: selected once it shows in the list
@@ -118,12 +120,14 @@ type promptMsg struct {
 }
 type pcMsg PCState
 type propsMsg []string
+type pcDetailMsg PCDetail
+type pcActedMsg struct{ ref, what, err string }
 type bgStartedMsg struct{ job, dir string }
 type execDone struct{ err error }
 
 func newModel() model {
 	cfg, ct, err := loadConfig()
-	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory()}
+	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}}
 	m.ed.drafts = loadDrafts()
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
@@ -475,7 +479,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.listSel >= len(m.pc.Items) && m.view == vPaperclip {
 			m.listSel = max(0, len(m.pc.Items)-1)
 		}
+		return m, m.pcDetailCmd(5 * time.Second)
+	case pcDetailMsg:
+		m.pcDet[msg.ID] = PCDetail(msg)
 		return m, nil
+	case pcActedMsg:
+		if msg.err != "" {
+			m.setErr(msg.ref + ": " + msg.err)
+		} else {
+			m.setStatus("✓ " + msg.what + " · " + msg.ref)
+		}
+		m.pcAt = time.Now()
+		for id := range m.pcDet { // read the panels again: the request is answered
+			delete(m.pcDet, id)
+		}
+		return m, func() tea.Msg { return pcMsg(loadPaperclip()) }
 	case bgStartedMsg:
 		m.setStatus("✓ background agent " + msg.job + " started in " + tildify(msg.dir) + " · g attaches a window")
 		m.pendingJob = msg.job
@@ -812,6 +830,25 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return bgStartedMsg{job, dir}
 			}
 		}
+		if id, ok := strings.CutPrefix(target, "pcno:"); ok { // a decline with its reason
+			d := m.pcDet[id]
+			n := 0
+			if d.Ask != nil {
+				for i, o := range d.Ask.Options {
+					if o.Action == "reason" {
+						n = i + 1
+					}
+				}
+			}
+			ref, ask := d.Ref, d.Ask
+			m.setStatus("declining " + ref + "…")
+			return m, func() tea.Msg {
+				if err := pcAct(id, ask, n, text); err != nil {
+					return pcActedMsg{ref, "declined", err.Error()}
+				}
+				return pcActedMsg{ref, "declined", ""}
+			}
+		}
 		if strings.HasPrefix(target, "pc:") {
 			id := strings.TrimPrefix(target, "pc:")
 			ref := id
@@ -854,12 +891,91 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) editorWidth() int {
 	switch {
 	case m.view == vPaperclip:
-		return m.w - 6
+		_, rw := pcWidths(m.w)
+		return rw - 4
 	case m.view == vWall:
 		return m.w - 4
 	}
 	_, rw := deskWidths(m.w)
 	return rw - 4
+}
+
+// pcSelected: the selected Paperclip row, nil when none.
+func (m *model) pcSelected() *PCItem {
+	if m.view != vPaperclip || m.listSel >= len(m.pc.Items) {
+		return nil
+	}
+	return &m.pc.Items[m.listSel]
+}
+
+// pcDetailCmd reads the selected issue's side panel when it has none or it is older than stale.
+func (m *model) pcDetailCmd(stale time.Duration) tea.Cmd {
+	it := m.pcSelected()
+	if it == nil || it.ID == "" {
+		return nil
+	}
+	if d, ok := m.pcDet[it.ID]; ok && time.Since(d.At) < stale {
+		return nil
+	}
+	id, names := it.ID, m.pc.Names
+	return func() tea.Msg { return pcDetailMsg(loadPCDetail(id, names)) }
+}
+
+// pcAnswer gives answer n to the selected issue's open request. "decline with a reason" opens the box first.
+func (m *model) pcAnswer(n int) tea.Cmd {
+	it := m.pcSelected()
+	if it == nil {
+		return nil
+	}
+	d, ok := m.pcDet[it.ID]
+	if !ok || d.Ask == nil || len(d.Ask.Options) == 0 {
+		m.setErr(it.Ref + " asks nothing that kaching can answer: enter opens it in Paperclip")
+		return nil
+	}
+	if n > len(d.Ask.Options) {
+		m.setErr(fmt.Sprintf("%s has no answer %d", it.Ref, n))
+		return nil
+	}
+	o := d.Ask.Options[n-1]
+	if o.Action == "reason" {
+		m.mode = mTyping
+		return m.ed.open("pcno:"+it.ID, "", m.editorWidth())
+	}
+	id, ref, ask := it.ID, it.Ref, d.Ask
+	m.setStatus(o.Label + " → " + ref + "…")
+	return func() tea.Msg {
+		if err := pcAct(id, ask, n, ""); err != nil {
+			return pcActedMsg{ref, o.Label, err.Error()}
+		}
+		return pcActedMsg{ref, o.Label, ""}
+	}
+}
+
+// pcScrollKey scrolls the PC side panel for the scroll keys; false for any other key.
+func (m *model) pcScrollKey(ks string) bool {
+	c := m.pcScroll
+	if c == nil {
+		return false
+	}
+	step := 0
+	switch ks {
+	case m.cfg.Keys.Older:
+		step = 3
+	case m.cfg.Keys.Newer:
+		step = -3
+	case "pgup":
+		step = max(1, c.page-1)
+	case "pgdown":
+		step = -max(1, c.page-1)
+	case "home":
+		step = c.max
+	case "end":
+		step = -c.off
+	default:
+		return false
+	}
+	c.off = min(max(0, c.off+step), c.max)
+	return true
 }
 
 // listKey handles j/k/enter and the view's own keys in the list views. done=false lets the key fall through.
@@ -875,6 +991,12 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 		n = len(m.recaps())
 	case vPaperclip:
 		n = len(m.pc.Items)
+		if m.pcScrollKey(ks) {
+			return true, nil
+		}
+		if len(ks) == 1 && ks[0] >= '1' && ks[0] <= '9' {
+			return true, m.pcAnswer(int(ks[0] - '0'))
+		}
 	case vRepos:
 		return ks == K.Next || ks == K.Prev, nil
 	}
@@ -883,12 +1005,12 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 		if m.listSel < n-1 {
 			m.listSel++
 		}
-		return true, nil
+		return true, m.pcDetailCmd(5 * time.Second)
 	case K.Prev, "up":
 		if m.listSel > 0 {
 			m.listSel--
 		}
-		return true, nil
+		return true, m.pcDetailCmd(5 * time.Second)
 	case "enter":
 		switch m.view {
 		case vFiles:
