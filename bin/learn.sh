@@ -107,7 +107,12 @@ run_component() { # name script
   CHILD=""; CUR=""
   secs=$(( $(date +%s) - start ))
   if [ "$rc" -eq 0 ]; then
-    log "$name: ok (${secs}s)"; SUMMARY="$SUMMARY $name=ok"
+    # a component can exit 0 and still log a failed model call: take its own learn_run outcome from this run
+    local own
+    own=$(tail -n 200 "$AGENT_HOME/events.jsonl" 2>/dev/null | jq -r --arg c "$name" --argjson t "$start" \
+      'select(.kind == "learn_run" and .data.component == $c and ((.ts | sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch 0) >= $t)) | .data.outcome' 2>/dev/null | tail -1 || true)
+    case "$own" in ''|ok|nothing-new) own=ok ;; esac
+    log "$name: $own (${secs}s)"; SUMMARY="$SUMMARY $name=$own"
   else
     [ "$rc" -ne 142 ] || log "$name: stopped after ${TMO}s (LEARN_COMPONENT_TIMEOUT)"
     log "$name: failed, exit $rc (${secs}s)"

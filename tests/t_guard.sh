@@ -1280,6 +1280,10 @@ gallow "shell code quoting a case arm is no CLI call" "$R" "python3 - <<'EOF'
 s='''case \"\$rest\" in */*) ;; *) echo x ;; esac'''
 EOF"
 gallow "a bare star segment is no CLI call" "$R" 'echo a; * ; echo b'
+gallow "a case arm with a bracket class is no CLI call" "$R" "python3 - <<'EOF'
+s=\"case \\\"\$lim\\\" in ''|*[!0-9]*) lim=300 ;; esac\"
+EOF"
+gallow "an all-pattern word is no CLI call" "$R" 'x=1; *[!0-9]* ; echo b'
 gdeny "bypass: find -exec" "$R" 'find bin -name ching-proposals -exec {} approve rule-x ;'
 gdeny "bypass: python" "$R" "python3 -c 'import os; os.execvp(\"ching-proposals\", [\"ching-proposals\", \"approve\", \"rule-x\"])'"
 gdeny "bypass: a copy of the CLI" "$R" 'cp bin/ching-proposals /tmp/cp2'

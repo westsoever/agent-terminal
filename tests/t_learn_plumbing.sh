@@ -82,6 +82,15 @@ assert_eq "learn: a failing component still exits 0" "0" "$rc"
 assert_eq "learn: ... the components after it still run" "4" "$(wc -l <"$WORK/order.log" | tr -d ' ')"
 assert_eq "learn: ... learn_run error with its exit code" '{"component":"corrections","scanned":0,"candidates":0,"proposals":0,"outcome":"error","rc":3}' "$(evs)"
 assert_contains "learn: ... the summary says so" "$out" "corrections=error"
+# a component that exits 0 but logged its own failed run (a model call cut by LEARN_CALL_TIMEOUT): the summary and
+# the log show its own outcome, not "ok" (2026-10-17: the first nightly run said corrections=ok after a cut call)
+cat >"$CD/learn-corrections.sh" <<EOS
+printf '{"ts":"%s","sid":"","kind":"learn_run","data":{"component":"corrections","outcome":"error"}}\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"\$AGENT_HOME/events.jsonl"
+exit 0
+EOS
+out=$(lrun --nightly)
+assert_contains "learn: a component's own error outcome reaches the summary" "$out" "corrections=error"
+assert_contains "learn: ... and the log" "$(cat "$P/.work/learn.log")" "corrections: error ("
 mkcomp corrections
 mkcomp skills 0 5
 reset_ev; out=$(LEARN_COMPONENT_TIMEOUT=1 lrun --weekly)

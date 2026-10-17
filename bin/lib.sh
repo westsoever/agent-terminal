@@ -177,8 +177,8 @@ learn_setting() {
     LEARN_MODEL_DRAFT) def=sonnet ;;
     LEARN_TOKEN_CAP) def=200000 ;;
     LEARN_SKILL_MAX) def=3 ;;
-    LEARN_MAX_SNIPPETS) def=200 ;;
-    LEARN_CALL_TIMEOUT) def=300 ;;
+    LEARN_MAX_SNIPPETS) def=100 ;;
+    LEARN_CALL_TIMEOUT) def=900 ;;
     LEARN_CALL_OVERHEAD) def=4000 ;;
   esac
   if [ -n "${!1:-}" ]; then printf '%s' "${!1}"; else config_get "$1" "$def"; fi
@@ -551,7 +551,7 @@ learn_model_call() {
   lockf=$(proposal_safe_path .work/tokens.lock) || return 3
   work=${tokf%/*}
   cap=$(learn_setting LEARN_TOKEN_CAP); case "$cap" in ''|*[!0-9]*) cap=200000 ;; esac
-  lim=$(learn_setting LEARN_CALL_TIMEOUT); case "$lim" in ''|*[!0-9]*) lim=300 ;; esac
+  lim=$(learn_setting LEARN_CALL_TIMEOUT); case "$lim" in ''|*[!0-9]*) lim=900 ;; esac
   pf=$(umask 077; mktemp "$work/.prompt.XXXXXX") || return 3
   cat >"$pf" || { rm -f "$pf"; return 3; }
   est=$(learn_estimate_tokens <"$pf")

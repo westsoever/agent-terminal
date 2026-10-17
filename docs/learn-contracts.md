@@ -34,8 +34,8 @@ $AGENT_HOME/proposals/            mode 0700, made by proposals_root
 | `LEARN_MODEL_DRAFT` | `sonnet` | B stage 3, C (D26) |
 | `LEARN_TOKEN_CAP` | `200000` | `learn_model_call`, per local day (D26) |
 | `LEARN_SKILL_MAX` | `3` | C, proposals per run (D26) |
-| `LEARN_MAX_SNIPPETS` | `200` | B and C input cap; hitting it logs `learn_run{outcome: truncated}`. B sends its stage-1 hits oldest first (by `ts`), and when `lib.sh` has `learn_budget_left` it also cuts the batch to about (tokens left today) / 450 snippets, at least 5 |
-| `LEARN_CALL_TIMEOUT` | `300` | `learn_model_call`, seconds per call |
+| `LEARN_MAX_SNIPPETS` | `100` | B and C input cap; hitting it logs `learn_run{outcome: truncated}`. B sends its stage-1 hits oldest first (by `ts`), and when `lib.sh` has `learn_budget_left` it also cuts the batch to about (tokens left today) / 450 snippets, at least 5 |
+| `LEARN_CALL_TIMEOUT` | `900` | `learn_model_call`, seconds per call |
 | `LEARN_CALL_OVERHEAD` | `4000` | `learn_estimate_tokens`: tokens a call costs beyond its prompt's estimate (bytes / 2.4, plus a quarter for the answer) (about 2.7k fixed prompt, measured 2026-10-17, and an allowance for the answer) |
 | `LEARN_DISABLE` | empty | D: component names to skip, separated by commas or spaces |
 
@@ -334,4 +334,4 @@ Everything here is synthetic. The user is `/Users/fixture`, and the test fails i
 - The `after_interrupt` and `prompts` fields and the `Skill:` token prefix are additions (section 6).
 - The `sdk-cli` exclusion is exactly `sdk-cli`. Other entrypoints, including other SDK ones, still count.
 - `learn_model_call` is in `lib.sh` so that B, C and D share one token cap and one call path.
-- `LEARN_MAX_SNIPPETS` defaults to 200 (about 160 stage-1 hits today) and `LEARN_CALL_TIMEOUT` to 300 s. The spec gave neither value.
+- `LEARN_MAX_SNIPPETS` defaults to 100 and `LEARN_CALL_TIMEOUT` to 900 s (2026-10-17: the first nightly run's 200-snippet Haiku classify call passed the old 300 s limit and was cut; smaller batches take more nights to clear the backlog, about 4 for the 377 stage-1 hits, but each call stays well inside the limit). The spec gave neither value.

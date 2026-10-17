@@ -666,12 +666,16 @@ check_proposals_call() { # TOKS is the segment
   [ "$k" -lt "$NT" ] || return 0
   base_of "${TOKS[$k]}"; b=$BASE
   case "$b" in *[[:upper:]]*) b=$(printf '%s' "$b" | LC_ALL=C tr 'A-Z' 'a-z') ;; esac   # macOS: CHING-PROPOSALS runs it too
-  # $b is a glob on purpose: would the shell expand this command word to ching-proposals? Exempt only a lone `*` and
-  # a word ending in `)`: that is what the splitter leaves of a `case` arm or a heredoc line, not a command anyone
-  # types, and treating it as the CLI denied any command quoting shell code. Short globs (bin/c*s, bin/*s, ????)
-  # still count. (A lone `*` run inside bin/ would start the CLI with a file name as its subcommand: it refuses.)
+  # $b is a glob on purpose: would the shell expand this command word to ching-proposals? Exempt a word ending in
+  # `)` and a word that is all pattern: no letter, digit or `/` outside its [...] classes (`*`, `*[!0-9]*`, `??`).
+  # That is what the splitter leaves of a `case` arm or a heredoc line, not a command anyone types, and treating it
+  # as the CLI denied any command quoting shell code. A glob with a letter or a path (bin/c*s, bin/*s,
+  # bin/???????????????) still counts. Run inside bin/, an all-pattern word could still start the CLI; the CLI's own
+  # checks refuse approve there.
+  local rawpat
+  rawpat=$(printf '%s' "${TOKS[$k]}" | sed 's/\[[^]]*\]//g')
   # shellcheck disable=SC2053
-  if [[ "$b" == *[\*\?\[]* ]] && [ "$b" != '*' ] && [[ "$b" != *')' ]] && [[ ching-proposals == $b ]]; then b=ching-proposals; fi
+  if [[ "$b" == *[\*\?\[]* ]] && [[ "$b" != *')' ]] && [[ "$rawpat" == *[A-Za-z0-9/]* ]] && [[ ching-proposals == $b ]]; then b=ching-proposals; fi
   if [ "$b" = ching-proposals ]; then
     j=$((k + 1))
     while [ "$j" -lt "$NT" ]; do case "${TOKS[$j]}" in -h|--help) break ;; -*) j=$((j + 1)) ;; *) break ;; esac; done
