@@ -1,22 +1,36 @@
 #!/usr/bin/env bash
-# queue.sh park|back|forget [NAME] | retile | tile | next | status
+# queue.sh park|back|forget [NAME] | retile | tile | dragged ID X Y W H | show SESSION_ID | dismiss SESSION_ID |
+#          next | status
 # The monitor queue: a Terminal window whose session waits for you moves to the main display; when you prompt
 # it again it goes back to where it was. The main display holds only your own work plus what waits for you, so
 # nothing there but your own windows means every agent is busy. `next` (bind it to a hotkey) brings the waiting
 # windows to the front one at a time, oldest first, with the waiting tab selected.
-#   park    a session waits (called by notify.sh for done, input, blocked, ready, idle): remember its tab;
-#           when its window sits on another display, save the window's frame and move it to the main display
-#           into the park frame (queue_park_frame; all parked windows share it, a stack). A window on the main
-#           display is never moved (it is one of yours).
+#   park    a session waits (called by notify.sh for done, input, blocked, ready, idle): remember its tab.
+#           When kaching is closed and the kind is not idle, its window comes over: the window's frame is saved
+#           and it moves to the main display into the park frame (queue_park_frame; all parked windows share it,
+#           a stack). Only the window whose own event fired comes over, never a backlog (D38). A window on the
+#           main display is never moved (it is one of yours). With kaching open nothing moves (D37).
 #   back    the session was prompted (session-start.sh touch): forget its tab; when no other tab of a parked
 #           window still waits, move the window back to exactly the saved frame.
 #   forget  the session ended (session-start.sh end): forget its tab and, when nothing else waits there, the
 #           parked window too, without moving it.
-#   next    raise the next parked waiting window (after the one shown last, wrapping), select its tab, activate
-#           Terminal. Prints one line for a Raycast HUD.
+#   next    raise the next waiting tab's window wherever it is (after the one shown last, wrapping, oldest
+#           first), select the tab, activate Terminal. Prints one line for a Raycast HUD.
+#   dragged the menu bar app saw window ID change display by hand; X Y W H is its frame before. Onto the main
+#           display: it takes the park frame and its cell stays reserved. Back onto the other display: into
+#           exactly its reserved cell. Any other window put on the other display joins the grid (D38).
+#   show    put that agent's window on the main display now, as if dragged there.
 #   retile  a session started (session-start.sh): lay out the grid again, in the background.
 #   tile    the same now, for a hotkey; prints how many windows moved.
 #   status  the waiting tabs and the parked windows.
+# Config ($AGENT_HOME/config): queue=off turns it off; queue_tile=off keeps the queue without tiling;
+# queue_park_frame=X,Y,W,H is where a parked window goes on the main display, X,Y from the display's top-left
+# corner (default 320,70,690,948; off = keep its size, cascaded);
+# queue_main_display=NAME picks the main display by (part of) its name, spaces as _ (default: the display with
+# the menu bar).
+# Env: QUEUE_TERM (the Terminal helper; default osascript -l JavaScript queue-term.js), QUEUE_TTY (skip the
+#      tty lookup; "none" = no tty), QUEUE_SYNC=1 (no background fork), AGENT_HOME
+set -euo pipefail
 # Tiling (on unless queue_tile=off): every display but the main one is a grid of the Terminal windows that live
 # there, parked ones included: a parked window keeps its cell (empty while it is away) and comes back to it, so
 # the grid only changes when a window is opened or closed. 1 fills the display, 2 side by side, 3 in three
@@ -29,14 +43,6 @@
 # so every command is a no-op for it. The session's tab is its controlling tty, found by walking up from this
 # process to the first ancestor that has one; a run with no tty (the watcher, launchd, claude -p) does nothing.
 # park/back/forget find the tty at once, then do the window work in the background so a hook never waits on it.
-# Config ($AGENT_HOME/config): queue=off turns it off; queue_tile=off keeps the queue without tiling;
-# queue_park_frame=X,Y,W,H is where a parked window goes on the main display, X,Y from the display's top-left
-# corner (default 320,70,690,948; off = keep its size, cascaded);
-# queue_main_display=NAME picks the main display by (part of) its name, spaces as _ (default: the display with
-# the menu bar).
-# Env: QUEUE_TERM (the Terminal helper; default osascript -l JavaScript queue-term.js), QUEUE_TTY (skip the
-#      tty lookup; "none" = no tty), QUEUE_SYNC=1 (no background fork), AGENT_HOME
-set -euo pipefail
 [ "${KACHING_LEARNER:-${CHING_LEARNER:-}}" != 1 ] || exit 0
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
@@ -50,9 +56,11 @@ case "$(config_get queue_tile on | tr '[:upper:]' '[:lower:]')" in off|0|no|fals
 
 QDIR="$AGENT_HOME/queue"
 WAITING="$QDIR/waiting"   # one file per waiting tab: <tty>, holding "epoch session_id kind name" (name may hold spaces)
-PARKED="$QDIR/parked"     # one file per moved window: <window id>, holding its old frame and when: "x y w h epoch"
+PARKED="$QDIR/parked"     # one file per moved window: <window id>, holding its old frame, when and how:
+                          # "x y w h epoch auto|hand" (hand: dragged over by you; only a drag sends it back)
+COME="$QDIR/come"         # one file per tab whose own park event may bring its window over: <tty>
 TABS="$QDIR/tabs"         # one file per Terminal session: <session id>, holding "tty window_id tab_index name"
-mkdir -p "$WAITING" "$PARKED" "$TABS"
+mkdir -p "$WAITING" "$PARKED" "$TABS" "$COME"
 
 term() {
   if [ -n "${QUEUE_TERM:-}" ]; then $QUEUE_TERM "$@"; else osascript -l JavaScript "$SELF_DIR/queue-term.js" "$@"; fi
@@ -121,7 +129,7 @@ flush() { # apply the relocations, then (tiling) the grid: moves for shown windo
     m="$m $(printf '%s\n' "$out" | awk '$1 == "move" { print $2, $3, $4, $5, $6 }' | tr '\n' ' ')"
     while read -r what id x y w h; do
       [ "$what" = park ] && [ -f "$PARKED/$id" ] || continue
-      printf '%s %s %s %s %s\n' "$x" "$y" "$w" "$h" "$(cut -d' ' -f5 "$PARKED/$id")" >"$PARKED/$id"
+      printf '%s %s %s %s %s\n' "$x" "$y" "$w" "$h" "$(cut -d' ' -f5- "$PARKED/$id")" >"$PARKED/$id"
     done <<<"$out"
   fi
   # shellcheck disable=SC2086
@@ -207,26 +215,31 @@ single_mode() {
 }
 
 # reconcile: move windows so the main display holds what it should now, then flush (the grid comes along).
-#   normal: every window with a waiting tab.
-#   kaching open (D37, amends D34): nothing. kaching's list is the inbox, so no window comes over, selecting an
-#           agent in kaching moves nothing, and a window parked before kaching opened goes back to its cell.
-# A window that is wanted and not parked is parked; a parked window that is not wanted goes back to its cell.
-SHOW_TTY=""
+#   kaching open (D37): nothing moves. kaching's list is the inbox.
+#   kaching closed: the windows with a waiting tab whose own park event asked to come (come/<tty>) are parked;
+#           a window parked that way goes back to its cell once none of its tabs wants it. A window you dragged
+#           over (hand) stays until you drag it back.
+# A window that is wanted and not parked is parked; an auto-parked window that is not wanted goes back.
 reconcile() {
-  local want="" win f id target
+  local want="" win f id target t
   [ -n "$(main_display)" ] || return 0
   prune
-  if single_mode; then
-    want=""
-  else
-    want=$(waiting_windows)
-    if [ -n "$SHOW_TTY" ]; then win=$(window_of "$SHOW_TTY"); if [ -n "$win" ] && ! yours "$win"; then want="$want ${win%% *}"; fi; fi
-  fi
-  want=" $(printf '%s' "$want" | tr '\n' ' ') "
+  if single_mode; then return 0; fi
+  for f in "$COME"/*; do
+    [ -f "$f" ] || continue
+    t=${f##*/}
+    [ -f "$WAITING/$t" ] || { rm -f "$f"; continue; }
+    win=$(window_of "$t")
+    [ -n "$win" ] || continue
+    ! yours "$win" || continue
+    want="$want ${win%% *}"
+  done
+  want=" $want "
   for f in "$PARKED"/*; do
     [ -f "$f" ] || continue
     id=${f##*/}
     case "$want" in *" $id "*) continue ;; esac
+    [ "$(cut -d' ' -f6 "$f")" != hand ] || continue
     # shellcheck disable=SC2046
     relocate "$id" $(cut -d' ' -f1-4 "$f")
     rm -f "$f"
@@ -234,14 +247,51 @@ reconcile() {
   done
   for id in $want; do
     [ ! -f "$PARKED/$id" ] || continue
-    win=$(printf '%s\n' "$WINDOWS" | awk -v i="$id" '$1 == i { print; exit }')
-    [ -n "$win" ] || continue
-    target=$(park_target "$win")   # before the record: the cascade counts the windows already parked
-    printf '%s %s\n' "$(printf '%s' "$win" | awk '{ print $2, $3, $4, $5 }')" "$(date +%s)" >"$PARKED/$id"
-    # shellcheck disable=SC2086
-    relocate "$id" $target
-    ev queue_park "$(jq -nc --arg w "$id" '{window:$w}')"
+    park_window "$id" auto
   done
+  flush >/dev/null
+}
+
+park_window() { # id auto|hand [x y w h: the cell to keep, default where it is now]: into the park frame
+  local id=$1 win target cell
+  win=$(printf '%s\n' "$WINDOWS" | awk -v i="$id" '$1 == i { print; exit }')
+  [ -n "$win" ] || return 0
+  cell=${3:+$3 $4 $5 $6}
+  [ -n "$cell" ] || cell=$(printf '%s' "$win" | awk '{ print $2, $3, $4, $5 }')
+  target=$(park_target "$win")   # before the record: the cascade counts the windows already parked
+  printf '%s %s %s\n' "$cell" "$(date +%s)" "$2" >"$PARKED/$id"
+  # shellcheck disable=SC2086
+  relocate "$id" $target
+  ev queue_park "$(jq -nc --arg w "$id" --arg h "$2" '{window:$w,how:$h}')"
+}
+
+on_main() { # x y w h -> true when that frame's centre is on the main display
+  local mx my mw mh
+  read -r mx my mw mh _ <<<"$(main_display)" || true
+  [ -n "${mh:-}" ] || return 1
+  [ $(($1 + $3 / 2)) -ge "$mx" ] && [ $(($1 + $3 / 2)) -lt $((mx + mw)) ] && [ $(($2 + $4 / 2)) -ge "$my" ] && [ $(($2 + $4 / 2)) -lt $((my + mh)) ]
+}
+
+# dragged ID X Y W H: window ID changed display by hand (the menu bar app watches); X Y W H is where it was.
+do_dragged() {
+  local id=$1 win x y w h
+  win=$(printf '%s\n' "$WINDOWS" | awk -v i="$id" '$1 == i { print; exit }')
+  [ -n "$win" ] || return 0
+  read -r _ x y w h _ <<<"$win" || true
+  if on_main "$x" "$y" "$w" "$h"; then
+    # onto the main display: a window the queue parked is already where it belongs; one that came from
+    # another display takes the park frame and keeps that cell reserved
+    [ ! -f "$PARKED/$id" ] || return 0
+    on_main "$2" "$3" "$4" "$5" && return 0
+    park_window "$id" hand "$2" "$3" "$4" "$5"
+  elif [ -f "$PARKED/$id" ]; then
+    # back onto the other display: exactly into its reserved cell
+    # shellcheck disable=SC2046
+    relocate "$id" $(cut -d' ' -f1-4 "$PARKED/$id")
+    rm -f "$PARKED/$id"
+    ev queue_back "$(jq -nc --arg w "$id" '{window:$w,how:"hand"}')"
+  fi
+  # anything put on the other display joins the grid (no-op for a window already in its cell)
   flush >/dev/null
 }
 
@@ -270,7 +320,7 @@ tty_of_sid() { # session id -> its tty (tabs map, else a waiting record that nam
   for f in "$WAITING"/*; do [ -f "$f" ] || continue; [ "$(cut -d' ' -f2 "$f")" != "$1" ] || { printf '%s' "${f##*/}"; return 0; }; done
 }
 
-# Waiting tabs whose window is parked, oldest first: "tty id name".
+# Waiting tabs, oldest first, wherever their window is: "tty id name".
 pending() {
   local f tty win id
   load_windows
@@ -280,7 +330,7 @@ pending() {
     tty=${f##*/}
     win=$(window_of "$tty")
     id=${win%% *}
-    [ -n "$id" ] && [ -f "$PARKED/$id" ] || continue
+    [ -n "$id" ] || continue
     printf '%s %s %s %s\n' "$(cut -d' ' -f1 "$f")" "$tty" "$id" "$(cut -d' ' -f4- "$f")"
   done | sort -n | cut -d' ' -f2-
 }
@@ -294,13 +344,16 @@ case "$CMD" in
     QUEUE_NAME=$NAME_ARG
     case "${QUEUE_SID:-}" in .*|*[!A-Za-z0-9._-]*) QUEUE_SID="" ;; esac
     case "$CMD" in
-      park)   job() { mark_waiting "$TTY"; lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
-      back)   job() { rm -f "$WAITING/$TTY"; lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
+      park)   job() { mark_waiting "$TTY"
+                      # its own event, kaching closed, not the idle reminder: this window may come over (D38)
+                      if ! single_mode && [ "${QUEUE_KIND:-done}" != idle ]; then : >"$COME/$TTY"; fi
+                      lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
+      back)   job() { rm -f "$WAITING/$TTY" "$COME/$TTY"; lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
       retile) job() { lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
       forget) job() { # the session ended: its tab leaves the queue; a parked window with nothing else waiting
                       # stays where it is (it is yours now)
                 local win
-                rm -f "$WAITING/$TTY"; [ -z "${QUEUE_SID:-}" ] || rm -f "$TABS/$QUEUE_SID"
+                rm -f "$WAITING/$TTY" "$COME/$TTY"; [ -z "${QUEUE_SID:-}" ] || rm -f "$TABS/$QUEUE_SID"
                 lock || return 0; load_windows
                 win=$(window_of "$TTY")
                 if [ -n "$win" ] && ! others_waiting "$win" "$TTY"; then rm -f "$PARKED/${win%% *}"; fi
@@ -309,27 +362,31 @@ case "$CMD" in
     if [ "${QUEUE_SYNC:-}" = 1 ]; then job; else (job) </dev/null >/dev/null 2>&1 & fi
     exit 0 ;;
   show|dismiss)
-    # show [SESSION_ID]: put that agent's window on the main display now (kaching calls it when its selection
-    #   changes; with no id it just re-reads the selection). dismiss SESSION_ID: take the agent out of the queue
-    #   without an answer; its window goes back to its cell.
+    # show SESSION_ID: put that agent's window on the main display now, as if you dragged it there.
+    # dismiss SESSION_ID: take the agent out of the queue without an answer; a window the queue brought over
+    #   goes back to its cell (kaching closed).
     SID_ARG=$NAME_ARG
-    tty=""
-    if [ -n "$SID_ARG" ]; then
-      tty=$(tty_of_sid "$SID_ARG")
-      if [ -z "$tty" ]; then echo "Unknown session: $SID_ARG"; exit 0; fi
-    elif [ "$CMD" = dismiss ]; then echo "usage: queue.sh dismiss SESSION_ID" >&2; exit 2; fi
+    if [ -z "$SID_ARG" ]; then echo "usage: queue.sh $CMD SESSION_ID" >&2; exit 2; fi
+    tty=$(tty_of_sid "$SID_ARG")
+    if [ -z "$tty" ]; then echo "Unknown session: $SID_ARG"; exit 0; fi
     lock || { echo "Queue busy, try again"; exit 0; }
     load_windows
     if [ "$CMD" = dismiss ]; then
       name=$(cut -d' ' -f4- "$WAITING/$tty" 2>/dev/null || true)
-      rm -f "$WAITING/$tty"
+      rm -f "$WAITING/$tty" "$COME/$tty"
       reconcile
       echo "Dismissed ${name:-$SID_ARG}"
     else
-      SHOW_TTY=$tty
-      reconcile
+      win=$(window_of "$tty")
+      if [ -n "$win" ] && [ ! -f "$PARKED/${win%% *}" ] && ! yours "$win"; then park_window "${win%% *}" hand; flush >/dev/null; fi
       echo "Shown"
     fi ;;
+  dragged)
+    # shellcheck disable=SC2154
+    case "${2:-}${3:-}${4:-}${5:-}${6:-}" in ''|*[!0-9-]*) echo "usage: queue.sh dragged ID X Y W H" >&2; exit 2 ;; esac
+    lock || exit 0
+    load_windows
+    do_dragged "$2" "$3" "$4" "$5" "$6" ;;
   next)
     lock || { echo "Queue busy, try again"; exit 0; }
     list=$(pending)
@@ -350,6 +407,6 @@ case "$CMD" in
   status)
     list=$(pending)
     if [ -z "$list" ]; then echo "nothing waiting"; else printf '%s\n' "$list" | awk '{ n = $3; for (i = 4; i <= NF; i++) n = n " " $i; printf "%s  %s  (window %s)\n", n, $1, $2 }'; fi ;;
-  *) echo "usage: queue.sh park|back|forget [NAME] | retile | tile | show [SESSION_ID] | dismiss SESSION_ID | next | status" >&2; exit 2 ;;
+  *) echo "usage: queue.sh park|back|forget [NAME] | retile | tile | dragged ID X Y W H | show SESSION_ID | dismiss SESSION_ID | next | status" >&2; exit 2 ;;
 esac
 exit 0

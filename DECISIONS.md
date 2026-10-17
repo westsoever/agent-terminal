@@ -2,6 +2,15 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D38 (2026-10-17): Windows move on their own only when kaching is closed, and you can drag them (closes D37's open part)
+
+**Decisions (user):**
+- **kaching open:** no automatic moves at all. The waiting and tabs records are still kept for kaching.
+- **kaching closed:** a waiting window still comes to the main display, but only on its own session's event (done, input, blocked, ready). The idle reminder never moves a window, and windows that started waiting while kaching was open never come over as a batch. That batch is what emptied monitor 2 under D34.
+- **Drags:** dragging a window from monitor 2 to monitor 1 gives it the park frame and keeps its grid cell reserved. Dragging it back puts it exactly in that cell. Any window dragged onto monitor 2 joins the grid. A window you dragged over stays until you drag it back; answering it doesn't send it back.
+
+**Built:** the menu bar app (KachingBar) polls the window server for Terminal frames twice a second, which needs no Accessibility or Screen Recording permission. Once a window has landed on another display, with the mouse up and the frame still, it calls `queue.sh dragged ID X Y W H`. `queue.sh` decides what to do. Moves the queue made itself are reported too, and ignored. `next` now raises the oldest waiting tab wherever its window is, and `show SESSION_ID` acts like a drag onto monitor 1.
+
 ## D37 (2026-10-17): kaching never moves windows; the queue stops moving them while kaching runs (amends D34)
 
 **Decision (user):** while kaching is open, Terminal windows don't move: kaching's waiting list is the inbox, so the "one window comes over to say it needs input" idea (D29, D34) is redundant there. Windows should only resize when the owner moves one between displays by hand (snap into the grid on monitor 2, the park frame on monitor 1); that part belongs to the monitor queue (chingSorter) and isn't built yet. Opening, quitting or reloading kaching must never touch a Terminal window or a session. kaching never starts or closes sessions.

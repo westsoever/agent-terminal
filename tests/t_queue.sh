@@ -46,7 +46,7 @@ assert_eq "back forgets the parked window" "" "$(ls "$QD/parked")"
 # a window already on the main display is yours: never moved, never queued for next
 QUEUE_TTY=ttys001 "$Q" park main
 assert_eq "main-display window is not moved" "0 30 961 979" "$(win 12)"
-assert_eq "next with only a main-display session waiting" "Nothing waiting" "$("$Q" next)"
+assert_eq "next: a waiting tab on the main display is raised too" "main" "$("$Q" next)"
 
 # tabs of one window move together and stay until no tab waits
 reset "21 1920 -37 961 1043 ttys010,ttys011,ttys012"
@@ -228,22 +228,56 @@ sleep 1
 QUEUE_SID=s211 QUEUE_TTY=ttys211 "$Q" park b
 assert_eq "kaching open: a waiting window stays in its cell" "2000 100 800 500" "$(win 211)"
 assert_eq "kaching open: the next one too" "2100 600 800 400" "$(win 212)"
-assert_eq "kaching open: one parked before goes back to its cell" "2900 100 800 400" "$(win 213)"
+assert_eq "kaching open: one parked before stays where it is (no moves at all)" "40 70 800 400" "$(win 213)"
+QUEUE_SID=s212 QUEUE_TTY=ttys212 "$Q" back
+assert_eq "kaching open: answered, it still does not move" "40 70 800 400" "$(win 213)"
 QUEUE_SID=s210 QUEUE_TTY=ttys210 "$Q" back
-assert_eq "kaching open: answered, still in its cell" "2000 100 800 500" "$(win 211)"
 assert_eq "kaching open: nothing came over" "2100 600 800 400" "$(win 212)"
-# selecting an agent in kaching moves nothing, also when show is called
-QUEUE_SID=s212 QUEUE_NAME=c QUEUE_TTY=ttys212 "$Q" retile
-printf 'pid=%s\nself_tty=ttys999\nsid=s212\ntty=ttys212\n' "$$" >"$AGENT_HOME/terminal/open"
-assert_eq "show: done" "Shown" "$("$Q" show)"
-assert_eq "show: the selected agent stays in its cell" "2900 100 800 400" "$(win 213)"
-assert_eq "show SID: done" "Shown" "$("$Q" show s211)"
-assert_eq "show SID: stays in its cell" "2100 600 800 400" "$(win 212)"
-assert_eq "kaching open: nothing parked" "" "$(ls "$QD/parked")"
-# kaching closed (a dead pid): every waiting window comes over again on the next change
-printf 'pid=999999\ntty=ttys212\n' >"$AGENT_HOME/terminal/open"
-QUEUE_SID=s212 QUEUE_TTY=ttys212 "$Q" park c
-assert_eq "closed: the oldest waiting window comes over first" "40 70 800 400" "$(win 213)"
-assert_eq "closed: the next waiting one comes too" "72 102 800 400" "$(win 212)"
+# kaching closed (a dead pid): no backlog comes over; only a window whose own event fires now
+printf 'pid=999999\n' >"$AGENT_HOME/terminal/open"
+QUEUE_SID=s210 QUEUE_TTY=ttys210 "$Q" retile
+assert_eq "closed: a window that waited while kaching was open stays in its cell" "2100 600 800 400" "$(win 212)"
+QUEUE_SID=s211 QUEUE_KIND=idle QUEUE_TTY=ttys211 "$Q" park b
+assert_eq "closed: the idle reminder brings nothing over" "2100 600 800 400" "$(win 212)"
+QUEUE_SID=s211 QUEUE_KIND=done QUEUE_TTY=ttys211 "$Q" park b
+assert_eq "closed: its own done event brings it over" "40 70 800 400" "$(win 212)"
+QUEUE_SID=s211 QUEUE_TTY=ttys211 "$Q" back
+assert_eq "closed: answered, back to its cell" "2100 600 800 400" "$(win 212)"
 rm -f "$AGENT_HOME/terminal/open"
+
+# ---------- dragged by hand (D38): the menu bar app reports a window that changed display ----------
+setcfg queue_park_frame=320,70,690,948
+reset "301 1920 -67 960 540 ttys300" "302 2880 -67 960 540 ttys301" "303 1920 473 960 540 ttys302" \
+      "304 2880 473 960 540 ttys303" "305 100 100 700 500 ttys304"
+# drag the bottom-left one onto the main display: it takes the park frame; its cell stays reserved
+awk '$1 == 303 { $2 = 500; $3 = 300 } { print }' "$FT/windows" >"$FT/w.tmp" && mv "$FT/w.tmp" "$FT/windows"
+"$Q" dragged 303 1920 473 960 540
+assert_eq "drag to main: the park frame" "320 70 690 948" "$(win 303)"
+assert_eq "drag to main: its cell is kept" "1920 473 960 540 hand" "$(cut -d' ' -f1-4,6 "$QD/parked/303")"
+assert_eq "drag to main: the others keep the 2x2 grid" "2880 473 960 540" "$(win 304)"
+# a prompt or another session's event does not send a hand-dragged window back
+QUEUE_SID=s302 QUEUE_TTY=ttys302 "$Q" back
+assert_eq "hand-dragged: a prompt leaves it on the main display" "320 70 690 948" "$(win 303)"
+# drag it back (dropped somewhere on monitor 2): exactly into its reserved cell
+awk '$1 == 303 { $2 = 3000; $3 = 100 } { print }' "$FT/windows" >"$FT/w.tmp" && mv "$FT/w.tmp" "$FT/windows"
+"$Q" dragged 303 320 70 690 948
+assert_eq "drag back: exactly its cell" "1920 473 960 540" "$(win 303)"
+assert_eq "drag back: no longer parked" "" "$(ls "$QD/parked")"
+# your own window dragged onto monitor 2 joins the grid (5 windows: 3 on top, 2 below)
+awk '$1 == 305 { $2 = 2500; $3 = 100 } { print }' "$FT/windows" >"$FT/w.tmp" && mv "$FT/w.tmp" "$FT/windows"
+"$Q" dragged 305 100 100 700 500
+assert_eq "drag onto monitor 2: joins the grid" "2560 -67 640 540" "$(win 305)"
+assert_eq "drag onto monitor 2: the corners keep their corners" "1920 473 960 540" "$(win 303)"
+# a window the queue parked itself is left alone when the watcher reports its move
+reset "311 1920 -67 960 1080 ttys310" "312 2880 -67 960 1080 ttys311"
+QUEUE_SID=s310 QUEUE_TTY=ttys310 "$Q" park a
+: >"$FT/calls"
+"$Q" dragged 311 1920 -67 960 1080
+assert_eq "own park reported as a drag: nothing moves" "0" "$(moves)"
+assert_eq "own park reported as a drag: still auto" "auto" "$(cut -d' ' -f6 "$QD/parked/311")"
+# show SESSION_ID: as if dragged over
+QUEUE_SID=s311 QUEUE_NAME=b QUEUE_TTY=ttys311 "$Q" retile
+assert_eq "show: done" "Shown" "$("$Q" show s311)"
+assert_eq "show: on the main display" "hand" "$(cut -d' ' -f6 "$QD/parked/312")"
+assert_eq "dragged: bad arguments" "2" "$("$Q" dragged 1 x >/dev/null 2>&1; echo $?)"
 exit 0

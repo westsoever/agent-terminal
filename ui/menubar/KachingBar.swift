@@ -17,6 +17,12 @@
 //            KACHING_BAR_STALE_SECS old (default 660: two ticks plus a minute).
 //   needs    `dash.sh --counts` (needs = blocked + input over the session registry), run with a 5 s ceiling.
 //
+// Drags (D38): DragWatcher reads the Terminal windows' frames from the window server twice a second (no
+// permission needed for frames). When a window has landed on another display by hand (mouse button up, frame
+// still for one tick), it runs `queue.sh dragged ID X Y W H` with the frame it had before; queue.sh decides
+// (park frame on the main display, its reserved cell or the grid on the other). Windows the queue moves itself
+// are reported too; queue.sh leaves those alone. KACHING_BAR_DRAGS=off turns the watcher off.
+//
 // CLI: KachingBar --status-once  prints the computed state as key=value lines and exits (used by tests/t_menubar.sh).
 // Env: AGENT_HOME (~/.agent) KACHING_DIR (~/.claude/kaching) LAUNCH_AGENTS_DIR (~/Library/LaunchAgents)
 //      KACHING_BAR_STALE_SECS (660) KACHING_BAR_POLL_SECS (12); the CHING_* names from before D35 still count.
@@ -37,6 +43,7 @@ struct KachingPaths: Sendable {
     var watchPlist: URL { launchAgentsDir.appendingPathComponent("org.kaching.watch.plist") }
     var oldWatchPlist: URL { launchAgentsDir.appendingPathComponent("org.ching.watch.plist") }   // before D35
     var dash: URL { kachingDir.appendingPathComponent("bin/dash.sh") }
+    var queue: URL { kachingDir.appendingPathComponent("bin/queue.sh") }
     var proposalsTool: URL { kachingDir.appendingPathComponent("bin/kaching-proposals") }
 
     static func fromEnvironment(_ env: [String: String] = ProcessInfo.processInfo.environment) -> KachingPaths {
@@ -236,6 +243,82 @@ enum TerminalLauncher {
     static func quote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 }
 
+// MARK: - Drags
+
+@MainActor
+final class DragWatcher {
+    private struct Seen { var frame: CGRect; var display: Int }
+    private let paths: KachingPaths
+    private var timer: Timer?
+    private var settled: [Int: Seen] = [:]   // window number -> where it last stood still
+    private var last: [Int: CGRect] = [:]    // window number -> frame at the previous tick
+
+    init(paths: KachingPaths) { self.paths = paths }
+
+    func start() {
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+        timer?.tolerance = 0.2
+    }
+
+    /// Display frames in top-left coordinates (y down from the top of the main display), as Terminal reports them.
+    private static func displays() -> [CGRect] {
+        let screens = NSScreen.screens
+        guard let mainH = screens.first?.frame.height else { return [] }
+        return screens.map { CGRect(x: $0.frame.minX, y: mainH - $0.frame.maxY, width: $0.frame.width, height: $0.frame.height) }
+    }
+
+    private static func display(of f: CGRect, in displays: [CGRect]) -> Int {
+        displays.firstIndex(where: { $0.contains(CGPoint(x: f.midX, y: f.midY)) }) ?? -1
+    }
+
+    private static func terminalWindows() -> [Int: CGRect] {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+                as? [[String: Any]] else { return [:] }
+        var out: [Int: CGRect] = [:]
+        for w in list where (w[kCGWindowOwnerName as String] as? String) == "Terminal"
+                && (w[kCGWindowLayer as String] as? Int) == 0 {
+            guard let n = w[kCGWindowNumber as String] as? Int,
+                  let b = w[kCGWindowBounds as String] as? NSDictionary,
+                  let r = CGRect(dictionaryRepresentation: b as CFDictionary) else { continue }
+            out[n] = r
+        }
+        return out
+    }
+
+    private func tick() {
+        guard NSEvent.pressedMouseButtons == 0 else { return }   // a drag in progress: wait for the drop
+        let displays = Self.displays()
+        let now = Self.terminalWindows()
+        for (n, f) in now {
+            defer { last[n] = f }
+            guard last[n] == f else { continue }                 // still moving (or first sight): next tick
+            let d = Self.display(of: f, in: displays)
+            guard let before = settled[n] else { settled[n] = Seen(frame: f, display: d); continue }
+            if before.frame == f { continue }
+            settled[n] = Seen(frame: f, display: d)
+            if before.display != d && d >= 0 && before.display >= 0 { report(n, before.frame) }
+        }
+        // a window on a hidden desktop is not on screen: keep where it settled, so coming back is not a move
+        for n in Array(last.keys) where now[n] == nil { last[n] = nil }
+    }
+
+    private func report(_ n: Int, _ f: CGRect) {
+        guard FileManager.default.fileExists(atPath: paths.queue.path) else { return }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/bash")
+        p.arguments = [paths.queue.path, "dragged", String(n)] + [f.minX, f.minY, f.width, f.height].map { String(Int($0.rounded())) }
+        var vars = ProcessInfo.processInfo.environment
+        vars["AGENT_HOME"] = paths.agentHome.path
+        p.environment = vars
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        p.standardInput = FileHandle.nullDevice
+        try? p.run()
+    }
+}
+
 // MARK: - UI
 
 @MainActor
@@ -346,8 +429,9 @@ final class StatusBarController: NSObject {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let controller: StatusBarController
+    private let drags: DragWatcher?
 
-    init(controller: StatusBarController) { self.controller = controller }
+    init(controller: StatusBarController, drags: DragWatcher?) { self.controller = controller; self.drags = drags }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // One dot per login: launchd and a manual open must not give two.
@@ -357,6 +441,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil); return
         }
         controller.start()
+        drags?.start()
     }
 }
 
@@ -389,8 +474,10 @@ struct KachingBarMain {
         }
         MainActor.assumeIsolated {
             let app = NSApplication.shared
+            let drags = (env["KACHING_BAR_DRAGS"] ?? "").lowercased() == "off" ? nil : DragWatcher(paths: .fromEnvironment(env))
             let delegate = AppDelegate(controller: StatusBarController(provider: provider,
-                                                                       pollSecs: TimeInterval(num("KACHING_BAR_POLL_SECS", 12))))
+                                                                       pollSecs: TimeInterval(num("KACHING_BAR_POLL_SECS", 12))),
+                                       drags: drags)
             app.delegate = delegate
             app.setActivationPolicy(.accessory)
             app.run()
