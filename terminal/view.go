@@ -197,12 +197,22 @@ func (m model) desk(h int) []string {
 func (m model) queuePanel(w, h int) []string {
 	in := w - 2
 	var body []string
-	groups := []string{"WAITING", "WORKING", "IDLE"}
+	// INPUT and WAITING are both Group 0 (waiting): INPUT asks the owner something (needsYou), WAITING is done.
+	groups := []struct {
+		name string
+		in   func(Agent) bool
+	}{
+		{"INPUT", func(a Agent) bool { return a.needsYou() }},
+		{"WAITING", func(a Agent) bool { return a.Group() == 0 && !a.needsYou() }},
+		{"WORKING", func(a Agent) bool { return a.Group() == 1 }},
+		{"IDLE", func(a Agent) bool { return a.Group() == 2 }},
+	}
 	si := 0
-	for g, name := range groups {
+	for gi, g := range groups {
+		name := g.name
 		first := true
 		for i, a := range m.agents {
-			if FamilyGroup(m.agents, i) != g {
+			if familySection(m.agents, i) != gi {
 				continue
 			}
 			if first {
@@ -216,6 +226,9 @@ func (m model) queuePanel(w, h int) []string {
 				si = len(body)
 			}
 			body = append(body, m.queueRow(in, i, a))
+			if a.State == "input" && !a.Busy && a.Ask != "" { // what its last turn asked, under its row
+				body = append(body, row(in, s("   ↳ "+trunc(a.Ask, in-5), cGrey)))
+			}
 		}
 	}
 	if len(m.agents) == 0 {
@@ -225,6 +238,34 @@ func (m model) queuePanel(w, h int) []string {
 		body = body[si-vis+1:]
 	}
 	return box(w, h, []seg{s("AGENTS", cGrey)}, cDark, body)
+}
+
+// sectionOf: the queue section an agent belongs to by itself: 0 INPUT, 1 WAITING, 2 WORKING, 3 IDLE.
+func sectionOf(a Agent) int {
+	switch {
+	case a.needsYou():
+		return 0
+	case a.Group() == 0:
+		return 1
+	case a.Group() == 1:
+		return 2
+	}
+	return 3
+}
+
+// familySection: the section a family is listed in, its most urgent member's (lead and sub-sessions alike).
+func familySection(a []Agent, i int) int {
+	key := a[i].SID
+	if a[i].Lead != "" {
+		key = a[i].Lead
+	}
+	sec := sectionOf(a[i])
+	for _, x := range a {
+		if (x.SID == key || x.Lead == key) && sectionOf(x) < sec {
+			sec = sectionOf(x)
+		}
+	}
+	return sec
 }
 
 func (m model) queueRow(in, i int, a Agent) string {
