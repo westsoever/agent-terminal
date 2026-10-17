@@ -429,6 +429,7 @@ if [ "$need" -eq 1 ]; then out="1 needs you. "; elif [ "$need" -gt 1 ]; then out
 out="$out$active active session"; [ "$active" -eq 1 ] || out="${out}s"; out="$out out of $total."
 n=0
 while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do
+  [ "$name" != "~" ] || name=Home   # text-to-speech says nothing for "~"
   case "$state" in
     blocked) s="$name is blocked${note:+: $note}." ;;
     input) s="$name needs your input." ;;
@@ -441,6 +442,7 @@ done <"$TMP/sorted"
 if [ "$n" -eq 0 ]; then
   newest=$(head -1 "$TMP/sorted")
   nn=$(printf '%s' "$newest" | cut -d$'\037' -f4); nu=$(printf '%s' "$newest" | cut -d$'\037' -f1); ns=$(printf '%s' "$newest" | cut -d$'\037' -f6)
+  [ "$nn" != "~" ] || nn=home
   out="$out Nothing is blocked. Latest: $nn is $ns, $(spoken_age $((NOW - nu)))."
 fi
 [ "$done_n" -eq 0 ] || out="$out $done_n finished."
