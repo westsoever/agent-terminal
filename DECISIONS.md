@@ -2,6 +2,10 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D31 (2026-10-17): The grid is a map of where each project lives (amends D30)
+
+**Decision (user):** moving never resizes a window, on either display, and the main display is never laid out. The grid on the second display is sized by all its agent windows, waiting ones included: a waiting window's cell stays empty while it is away, and it comes back to exactly that cell, so the layout is a visual guide to where each project is. When the count changes (a window opened or closed), each window takes the free cell nearest to where it was.
+
 ## D30 (2026-10-17): Tiling and no focus stealing for the monitor queue
 
 **Decision (user):** a window that arrives must never take the focus from the session the owner is working in. Each display tiles its Terminal windows by count (2 side by side, 3 in columns, 4 as 2x2), so arrivals sit beside the owner's work instead of on top of it. One window per project, with its subtasks as tabs. Desktops (Spaces) stay out: windows on a hidden desktop are not moved by tiling. A window cannot be sent back to a particular desktop (no public API), so it goes to the desktop shown on its old display.

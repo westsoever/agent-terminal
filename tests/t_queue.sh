@@ -114,46 +114,59 @@ assert_eq "prompt: back on its display" "2000 100 800 500" "$(win 81)"
 # ---------- tiling (the default) ----------
 setcfg ""
 moves() { grep -c '^move' "$FT/calls"; }
-# park: the main display is shared 50/50 by your window and the parked one; the other display re-tiles
-reset "91 100 100 700 500 ttys080" "92 2000 100 800 500 ttys081" "93 2500 300 800 500 ttys082"
-QUEUE_TTY=ttys081 "$Q" park w
-assert_eq "tile 2 on main: yours on the left half" "0 30 960 992" "$(win 91)"
-assert_eq "tile 2 on main: the parked one on the right half" "960 30 960 992" "$(win 92)"
-assert_eq "the other display: its one window fills it" "1920 -67 1920 1080" "$(win 93)"
-assert_eq "one helper call for all the moves" "1" "$(moves)"
-# back: it returns to the other display and both re-tile
-QUEUE_TTY=ttys081 "$Q" back
-assert_eq "back: yours fills the main display again" "0 30 1920 992" "$(win 91)"
-assert_eq "back: other display, first by window id" "1920 -67 960 1080" "$(win 92)"
-assert_eq "back: other display, second" "2880 -67 960 1080" "$(win 93)"
+# four on the other display: a 2x2 grid in reading order; the main display is never laid out
+reset "90 100 100 700 500 ttys079" "91 1950 -50 800 400 ttys080" "92 2900 -50 800 400 ttys081" \
+      "93 1950 500 800 400 ttys082" "94 2900 500 800 400 ttys083"
+assert_eq "tile: four windows moved" "Tiled: 4 windows moved" "$("$Q" tile)"
+assert_eq "2x2: top left" "1920 -67 960 540" "$(win 91)"
+assert_eq "2x2: top right" "2880 -67 960 540" "$(win 92)"
+assert_eq "2x2: bottom left" "1920 473 960 540" "$(win 93)"
+assert_eq "2x2: bottom right" "2880 473 960 540" "$(win 94)"
+assert_eq "main display: your window untouched" "100 100 700 500" "$(win 90)"
+assert_eq "tile again: nothing to move" "Tiled: 0 windows moved" "$("$Q" tile)"
 
-# three in columns, four as 2x2; parked windows after your own, oldest first
-reset "101 0 30 900 900 ttys090" "102 2000 100 800 500 ttys091" "103 2100 100 800 500 ttys092" "104 2200 100 800 500 ttys093"
-QUEUE_TTY=ttys092 "$Q" park a
-sleep 1
-QUEUE_TTY=ttys091 "$Q" park b
-assert_eq "tile 3: yours first" "0 30 640 992" "$(win 101)"
-assert_eq "tile 3: oldest parked second (not by id)" "640 30 640 992" "$(win 103)"
-assert_eq "tile 3: newest parked last" "1280 30 640 992" "$(win 102)"
-sleep 1
-QUEUE_TTY=ttys093 "$Q" park c
-assert_eq "tile 4: 2x2, top left" "0 30 960 496" "$(win 101)"
-assert_eq "tile 4: 2x2, bottom right is the newest" "960 526 960 496" "$(win 104)"
+# park: the bottom-left one comes over at its own size; the other three keep their cells, its cell stays empty
+: >"$FT/calls"
+QUEUE_TTY=ttys082 "$Q" park w
+assert_eq "park: same size on the main display" "40 70 960 540" "$(win 93)"
+assert_eq "park: only the parked window moves" "move 93 40 70 960 540" "$(grep '^move' "$FT/calls")"
+assert_eq "park: the others keep their cells" "2880 473 960 540" "$(win 94)"
+QUEUE_TTY=ttys082 "$Q" back
+assert_eq "back: exactly its old cell" "1920 473 960 540" "$(win 93)"
 
-# a window on a hidden desktop is not laid out; a tile that changes nothing moves nothing
+# a window closed while another is parked: the grid shrinks and the parked one's cell moves with it
+QUEUE_TTY=ttys082 "$Q" park w
+awk '$1 != 92' "$FT/windows" >"$FT/w.tmp" && mv "$FT/w.tmp" "$FT/windows"
+QUEUE_TTY=ttys080 "$Q" retile
+assert_eq "3 left: three columns, first" "1920 -67 640 1080" "$(win 91)"
+assert_eq "3 left: the parked one stays on the main display" "40 70 960 540" "$(win 93)"
+assert_eq "3 left: the parked one's new cell is saved" "2560 -67 640 1080" "$(cut -d' ' -f1-4 "$QD/parked/93")"
+assert_eq "3 left: third column" "3200 -67 640 1080" "$(win 94)"
+QUEUE_TTY=ttys082 "$Q" back
+assert_eq "back: into its new cell" "2560 -67 640 1080" "$(win 93)"
+
+# a fifth window opened: 3 on top, 2 below, and every window keeps its corner
+reset "151 1920 -67 960 540 ttys140" "152 2880 -67 960 540 ttys141" "153 1920 473 960 540 ttys142" \
+      "154 2880 473 960 540 ttys143" "155 2600 200 700 400 ttys144"
+"$Q" tile >/dev/null
+assert_eq "grow to 5: top left stays top left" "1920 -67 640 540" "$(win 151)"
+assert_eq "grow to 5: top right stays top right" "3200 -67 640 540" "$(win 152)"
+assert_eq "grow to 5: bottom left stays bottom left" "1920 473 960 540" "$(win 153)"
+assert_eq "grow to 5: bottom right stays bottom right" "2880 473 960 540" "$(win 154)"
+assert_eq "grow to 5: the new one takes the free cell" "2560 -67 640 540" "$(win 155)"
+
+# a window on a hidden desktop is not laid out
 reset "111 0 30 1920 992 ttys100" "112 2000 100 800 500 ttys101 0"
 assert_eq "tile: nothing to move" "Tiled: 0 windows moved" "$("$Q" tile)"
 assert_eq "tile: no move call when nothing changes" "0" "$(moves)"
 assert_eq "hidden-desktop window untouched" "2000 100 800 500" "$(win 112)"
-reset "121 0 30 700 700 ttys110" "122 800 30 700 700 ttys111"
-assert_eq "tile: hotkey reports the moves" "Tiled: 2 windows moved" "$("$Q" tile)"
-assert_eq "tile: second half" "960 30 960 992" "$(win 122)"
 
 # a session start re-tiles; queue_tile=off leaves the windows as they are
-reset "131 0 30 700 700 ttys120" "132 800 30 700 700 ttys121"
+reset "131 2000 30 700 700 ttys120" "132 2800 30 700 700 ttys121"
 printf '%s' "$(hook_json SessionStart "$R" q2)" | QUEUE_TTY=ttys121 "$BIN/session-start.sh" >/dev/null
-assert_eq "session start: re-tiled" "0 30 960 992" "$(win 131)"
-reset "141 0 30 700 700 ttys130" "142 800 30 700 700 ttys131"
+assert_eq "session start: re-tiled, left half" "1920 -67 960 1080" "$(win 131)"
+assert_eq "session start: re-tiled, right half" "2880 -67 960 1080" "$(win 132)"
+reset "141 2000 30 700 700 ttys130" "142 2800 30 700 700 ttys131"
 setcfg queue_tile=off
 QUEUE_TTY=ttys131 "$Q" retile
 assert_eq "queue_tile=off: retile moves nothing" "" "$(cat "$FT/calls")"

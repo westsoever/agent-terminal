@@ -5,21 +5,23 @@
 # nothing there but your own windows means every agent is busy. `next` (bind it to a hotkey) brings the waiting
 # windows to the front one at a time, oldest first, with the waiting tab selected.
 #   park    a session waits (called by notify.sh for done, input, blocked, ready, idle): remember its tab;
-#           when its window sits on another display, save the window's frame and move it to the main display.
-#           A window already on the main display is never moved (it is one of yours).
+#           when its window sits on another display, save the window's frame and move it to the main display,
+#           same size (cascaded 32 px per window already there). A window on the main display is never moved
+#           (it is one of yours).
 #   back    the session was prompted (session-start.sh touch): forget its tab; when no other tab of a parked
-#           window still waits, move the window back to the saved frame.
+#           window still waits, move the window back to exactly the saved frame.
 #   forget  the session ended (session-start.sh end): forget its tab and, when nothing else waits there, the
 #           parked window too, without moving it.
 #   next    raise the next parked waiting window (after the one shown last, wrapping), select its tab, activate
 #           Terminal. Prints one line for a Raycast HUD.
-#   retile  a session started (session-start.sh): lay out the windows again, in the background.
+#   retile  a session started (session-start.sh): lay out the grid again, in the background.
 #   tile    the same now, for a hotkey; prints how many windows moved.
 #   status  the waiting tabs and the parked windows.
-# Tiling (on unless queue_tile=off): after every move each display lays out the Terminal windows shown on it in a
-# grid: 1 fills the display, 2 side by side, 3 in three columns, 4 as 2x2, more in ceil(sqrt(n)) columns (see
-# queue-layout.pl). Windows on a hidden desktop or minimised are left alone. Without tiling a parked window
-# keeps its size, cascaded on the main display, and goes back to its old frame.
+# Tiling (on unless queue_tile=off): every display but the main one is a grid of the Terminal windows that live
+# there, parked ones included: a parked window keeps its cell (empty while it is away) and comes back to it, so
+# the grid only changes when a window is opened or closed. 1 fills the display, 2 side by side, 3 in three
+# columns, 4 as 2x2, more in ceil(sqrt(n)) columns (see queue-layout.pl). The main display is never laid out
+# and park/back never resize. Windows on a hidden desktop or minimised are left alone.
 # Focus: moving or tiling never raises a window or takes focus (queue-term.js puts Terminal's front window
 # back if it changed); only `next` does, because you asked for it.
 # A tab is grouped by its window: workers opened as tabs of the orchestrator's window move together.
@@ -94,26 +96,31 @@ others_waiting() { # window line, tty -> true when another tab of that window st
 }
 
 # relocate ID X Y W H: the window goes there. WINDOWS is updated too, so a layout sees it in its new place.
-MOVES=""; FORCE=""
+MOVES=""
 relocate() {
   WINDOWS=$(printf '%s\n' "$WINDOWS" | awk -v i="$1" -v x="$2" -v y="$3" -v w="$4" -v h="$5" '$1 == i { $2 = x; $3 = y; $4 = w; $5 = h; $7 = 1 } { print }')
-  MOVES="$MOVES $1 $2 $3 $4 $5"; FORCE="$FORCE $1"
+  MOVES="$MOVES $1 $2 $3 $4 $5"
 }
-layout() { # the moves that tile every display ("id x y w h" lines)
+layout() { # the grid changes: "move id x y w h" and "park id x y w h" lines (see queue-layout.pl)
   local mx my f
   read -r mx my _ <<<"$(main_display)" || true
   { screens | sed 's/^/S /'
     [ -z "${my:-}" ] || printf 'M %s %s\n' "$mx" "$my"
     printf '%s\n' "$WINDOWS" | sed 's/^/W /'
-    for f in "$PARKED"/*; do [ -f "$f" ] || continue; printf 'P %s %s\n' "${f##*/}" "$(awk '{ print $5 + 0 }' "$f")"; done
-    for f in $FORCE; do printf 'F %s\n' "$f"; done
+    for f in "$PARKED"/*; do [ -f "$f" ] || continue; printf 'P %s %s\n' "${f##*/}" "$(cut -d' ' -f1-4 "$f")"; done
   } | perl "$SELF_DIR/queue-layout.pl"
 }
-flush() { # apply the relocations: through the layout when tiling, else as they are. Prints how many windows moved.
-  local m
-  if [ "$TILE" = 1 ]; then m=$(layout); else m=$MOVES; fi
-  MOVES=""; FORCE=""
-  m=$(printf '%s' "$m" | tr '\n' ' ')
+flush() { # apply the relocations, then (tiling) the grid: moves for shown windows, new cells for parked ones.
+  local m=$MOVES out what id x y w h
+  MOVES=""
+  if [ "$TILE" = 1 ]; then
+    out=$(layout)
+    m="$m $(printf '%s\n' "$out" | awk '$1 == "move" { print $2, $3, $4, $5, $6 }' | tr '\n' ' ')"
+    while read -r what id x y w h; do
+      [ "$what" = park ] && [ -f "$PARKED/$id" ] || continue
+      printf '%s %s %s %s %s\n' "$x" "$y" "$w" "$h" "$(cut -d' ' -f5 "$PARKED/$id")" >"$PARKED/$id"
+    done <<<"$out"
+  fi
   # shellcheck disable=SC2086
   if [ -n "${m// /}" ]; then term move $m >/dev/null 2>&1 || true; fi
   printf '%s\n' "$(( $(printf '%s' "$m" | wc -w) / 5 ))"
