@@ -31,7 +31,7 @@
 # park/back/forget find the tty at once, then do the window work in the background so a hook never waits on it.
 # Config ($AGENT_HOME/config): queue=off turns it off; queue_tile=off keeps the queue without tiling;
 # queue_park_frame=X,Y,W,H is where a parked window goes on the main display, X,Y from the display's top-left
-# corner (default 320,70,460,790; off = keep its size, cascaded);
+# corner (default 320,70,690,948; off = keep its size, cascaded);
 # queue_main_display=NAME picks the main display by (part of) its name, spaces as _ (default: the display with
 # the menu bar).
 # Env: QUEUE_TERM (the Terminal helper; default osascript -l JavaScript queue-term.js), QUEUE_TTY (skip the
@@ -146,7 +146,7 @@ park_target() { # window line -> "x y w h" on the main display: the park frame, 
   # the park frame: x,y from the display's own top-left corner (what the screenshot crosshair shows), w,h;
   # every parked window gets the same frame, a stack that `next` goes through. off: keep the window's size
   # and cascade it 32 px per window already parked.
-  frame=$(config_get queue_park_frame "320,70,460,790")
+  frame=$(config_get queue_park_frame "320,70,690,948")
   IFS=, read -r px py pw ph <<<"$frame" || true
   if [[ "$frame" =~ ^[0-9]{1,5},[0-9]{1,5},[0-9]{1,5},[0-9]{1,5}$ ]] && [ $((10#$pw)) -gt 0 ] && [ $((10#$ph)) -gt 0 ]; then
     nx=$(( ${fx:-$mx} + 10#$px )); ny=$(( ${fy:-$my} + 10#$py )); w=$((10#$pw)); h=$((10#$ph))
