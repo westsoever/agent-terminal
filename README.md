@@ -18,7 +18,8 @@ cd ~/bbq/ching
 ./install.sh --dry-run      # shows the settings.json and launchd diff, changes nothing
 ./install.sh                # asks before applying; --yes applies without asking
 ./install.sh --install-dispatcher --yes   # optional: the voice dispatcher's own folder
-./install.sh --uninstall    # removes Ching's hook entries and the launchd job
+./install.sh --install-menubar --yes      # optional: the menu bar dot (builds ~/Applications/ChingBar.app)
+./install.sh --uninstall    # removes Ching's hook entries, the launchd jobs and the menu bar dot
 ```
 
 `install.sh` is idempotent. It backs up `~/.claude/settings.json` before writing and only adds entries; it never removes your own hooks. A second run should say `nothing to do`.
@@ -43,6 +44,7 @@ After pulling new commits, run `./install.sh --dry-run` to see whether anything 
 | `dash.sh --inbox` | **NEEDS YOU**: blocked or waiting for input. **READY**: release gate passed (only with the push gate on). **FINISHED**: done since you last looked; looking marks them as seen. **SYNC**: repos with work you could lose. |
 | `dash.sh --next` | The top 5 sessions to attend to (urgency × importance × recency), each with its next action. |
 | `dash.sh --speak` | The short spoken summary. |
+| `dash.sh --counts` | A few `key=value` lines (sessions, needs, proposals) for the menu bar dot. Reads only Ching's own session records, so it is fast. |
 | `/dash` | The same from inside any session. It speaks by default; `/dash --text`, `--inbox` and `--next` print instead. |
 
 ### Hand over and pick up
@@ -89,6 +91,22 @@ To add a repo it hasn't seen yet, list it in `~/.agent-repos`, one path per line
 - release-gate results.
 
 Test and sandbox sessions are left out. The footer says which numbers are exact and which are proxies.
+
+## Menu bar dot
+
+A small dot in the menu bar at the top of the screen shows whether Ching is running.
+
+| Dot | Meaning |
+|---|---|
+| green | Ching is running: the watcher has checked in within the last 11 minutes. |
+| amber | Ching is running and at least one session needs you (blocked or waiting for your input, the same sessions as NEEDS YOU in `dash.sh --inbox`). |
+| grey ring | Ching isn't running: the watcher isn't installed or hasn't checked in for over 11 minutes. Right after the Mac wakes from sleep it can be grey for a few minutes until the watcher's next run. |
+
+Click it for the menu: a status line ("Ching running · 3 sessions · 1 needs you"), when the watcher last ran, **Open inbox** (a Terminal window with `dash.sh --inbox`), **Proposals waiting: N** when the learner has open proposals, and **Quit**. The dot checks again every 12 seconds; each check reads a few small files and takes well under a second.
+
+**Install:** `./install.sh --install-menubar --yes`. It needs the Xcode command line tools (`swiftc`), builds `~/Applications/ChingBar.app` and adds the login job `org.ching.menubar`, which starts the dot at login and restarts it if it crashes. **Quit** from the menu keeps it off until your next login. Running the command again after a pull rebuilds the app only when its code changed. `./install.sh --uninstall` removes both.
+
+**Coming later:** reading back the transcript of a conversation from the menu (the greyed-out "Transcripts (coming soon)" item), and notifications from the dot for sessions that need your input.
 
 ## The guard
 
@@ -141,6 +159,8 @@ Status: **built and gate-tested, never heard.** No audio has been played yet. Yo
 | `~/.agent/sync-check.md` | Latest sync snapshot |
 | `~/.agent/config` | Machine switches (`push_gate`) |
 | `~/.agent/notify.log`, `watch.log` | Delivery log and watcher errors. An empty `watch.log` means no errors. |
+| `~/.agent/watch.heartbeat` | Rewritten by every watcher run; the menu bar dot reads its time |
+| `~/Applications/ChingBar.app`, `~/.agent/menubar.log` | The menu bar dot (optional) and its output |
 | `~/.agent/dispatcher/` | The dispatcher's own settings and MCP config |
 | `~/.agent/proposals/` | Phase 6 output, when it is built. Proposals only, never applied automatically. |
 | `~/.agent-repos` | Extra repos for `dash.sh` and the sync check |
