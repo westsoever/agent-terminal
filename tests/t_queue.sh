@@ -217,31 +217,33 @@ assert_eq "dismiss: back in its cell" "2100 600 800 400" "$(win 202)"
 assert_eq "dismiss: no longer waiting" "" "$(ls "$QD/waiting")"
 assert_eq "dismiss: unknown session" "Unknown session: nope" "$("$Q" dismiss nope)"
 
-# single mode (kaching open: a live pid in terminal/open): one agent on the main display at a time
+# kaching open (a live pid in terminal/open, D37): no window moves; kaching's list is the inbox
 reset "211 2000 100 800 500 ttys210" "212 2100 600 800 400 ttys211" "213 2900 100 800 400 ttys212"
 mkdir -p "$AGENT_HOME/terminal"
+QUEUE_SID=s212 QUEUE_TTY=ttys212 "$Q" park early             # waits before kaching opens: comes over (normal mode)
+assert_eq "before kaching: the waiting one comes over" "40 70 800 400" "$(win 213)"
 printf 'pid=%s\nself_tty=ttys999\nsid=\ntty=\n' "$$" >"$AGENT_HOME/terminal/open"
 QUEUE_SID=s210 QUEUE_TTY=ttys210 "$Q" park a
 sleep 1
 QUEUE_SID=s211 QUEUE_TTY=ttys211 "$Q" park b
-assert_eq "single: the oldest comes over" "40 70 800 500" "$(win 211)"
-assert_eq "single: the next one stays in its cell" "2100 600 800 400" "$(win 212)"
+assert_eq "kaching open: a waiting window stays in its cell" "2000 100 800 500" "$(win 211)"
+assert_eq "kaching open: the next one too" "2100 600 800 400" "$(win 212)"
+assert_eq "kaching open: one parked before goes back to its cell" "2900 100 800 400" "$(win 213)"
 QUEUE_SID=s210 QUEUE_TTY=ttys210 "$Q" back
-assert_eq "single: answered, it goes back" "2000 100 800 500" "$(win 211)"
-assert_eq "single: and the next one comes" "40 70 800 400" "$(win 212)"
-# the selection in the open file wins; show re-reads it, show SID picks that agent
+assert_eq "kaching open: answered, still in its cell" "2000 100 800 500" "$(win 211)"
+assert_eq "kaching open: nothing came over" "2100 600 800 400" "$(win 212)"
+# selecting an agent in kaching moves nothing, also when show is called
 QUEUE_SID=s212 QUEUE_NAME=c QUEUE_TTY=ttys212 "$Q" retile
 printf 'pid=%s\nself_tty=ttys999\nsid=s212\ntty=ttys212\n' "$$" >"$AGENT_HOME/terminal/open"
 assert_eq "show: done" "Shown" "$("$Q" show)"
-assert_eq "show: the selected agent is on the main display" "40 70 800 400" "$(win 213)"
-assert_eq "show: the one it replaced is back in its cell" "2100 600 800 400" "$(win 212)"
-assert_eq "show SID: that agent" "Shown" "$("$Q" show s211)"
-assert_eq "show SID: on the main display" "40 70 800 400" "$(win 212)"
-assert_eq "show SID: the other back" "2900 100 800 400" "$(win 213)"
+assert_eq "show: the selected agent stays in its cell" "2900 100 800 400" "$(win 213)"
+assert_eq "show SID: done" "Shown" "$("$Q" show s211)"
+assert_eq "show SID: stays in its cell" "2100 600 800 400" "$(win 212)"
+assert_eq "kaching open: nothing parked" "" "$(ls "$QD/parked")"
 # kaching closed (a dead pid): every waiting window comes over again on the next change
 printf 'pid=999999\ntty=ttys212\n' >"$AGENT_HOME/terminal/open"
 QUEUE_SID=s212 QUEUE_TTY=ttys212 "$Q" park c
-assert_eq "closed: the waiting one is still over" "40 70 800 400" "$(win 212)"
-assert_eq "closed: the newly waiting one comes too" "72 102 800 400" "$(win 213)"
+assert_eq "closed: the oldest waiting window comes over first" "40 70 800 400" "$(win 213)"
+assert_eq "closed: the next waiting one comes too" "72 102 800 400" "$(win 212)"
 rm -f "$AGENT_HOME/terminal/open"
 exit 0
