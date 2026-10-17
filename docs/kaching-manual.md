@@ -14,6 +14,7 @@ Push `/`, write the code, then push `Enter`.
 | `AG` | Agents (the wall) | All agents as tiles. You can also push `W`. |
 | `FL` | Files | All files that the agents wrote about. |
 | `RP` | Repos | The git sync check: repos with work that you can lose. |
+| `RC` | Recaps | The last recap of each agent. Claude Code writes a recap when you come back to a session after some time. The desk also shows the recap of the selected agent above its last message. |
 | `PR` | Proposals | The changes that the learner proposes. |
 | `PC` | Paperclip | Paperclip issues that need you, and issues in progress. |
 | `A3` | Agent 3 | The desk, with agent 3 selected. Use a number from 1 to 9. |
@@ -91,12 +92,13 @@ The top line does not show your message. It shows only the name of the agent tha
 
 When a tile shows on the full screen, the number keys send answers, as on the desk.
 
-### 1.6 Keys in the lists (FL, PR, PC, RP)
+### 1.6 Keys in the lists (FL, RC, PR, PC, RP)
 
 | View | Key | Result |
 |---|---|---|
 | All lists | `l`, `j` | Select the next or previous line. |
 | `FL` | `Enter` | Open the selected file. |
+| `RC` | `Enter` | Go to the desk, with that agent selected. |
 | `PR` | `Enter` | Show the full proposal. Push `q` to close it. |
 | `PR` | `a` | Approve the proposal. The screen asks you to write a code. |
 | `PR` | `x` | Reject the proposal. |

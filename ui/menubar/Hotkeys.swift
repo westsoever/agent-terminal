@@ -107,6 +107,7 @@ final class Hotkeys {
     }
 
     private func fire(_ id: UInt32) {
+        VoiceKeys.cancelChord()   // a hotkey's key press never reaches the voice shortcut's monitors (VoiceShortcut.swift)
         guard let b = bindings[id] else { return }
         let path: String
         if b.script.hasPrefix("/") { path = b.script }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ const (
 	vFiles
 	vRepos
 	vProposals
+	vRecaps
 	vPaperclip
 	vHelp
 )
@@ -33,6 +35,7 @@ var tabs = []struct {
 	{"AG", "agents", vWall},
 	{"FL", "files", vFiles},
 	{"RP", "repos", vRepos},
+	{"RC", "recaps", vRecaps},
 	{"PR", "proposals", vProposals},
 	{"PC", "paperclip", vPaperclip},
 }
@@ -518,7 +521,7 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch m.view {
-	case vFiles, vProposals, vPaperclip, vRepos:
+	case vFiles, vProposals, vRecaps, vPaperclip, vRepos:
 		if done, cmd := m.listKey(ks); done {
 			return m, cmd
 		}
@@ -720,6 +723,8 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 		n = len(m.allFiles())
 	case vProposals:
 		n = len(m.props)
+	case vRecaps:
+		n = len(m.recaps())
 	case vPaperclip:
 		n = len(m.pc.Items)
 	case vRepos:
@@ -751,6 +756,11 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 				id := propID(m.props[m.listSel])
 				c := exec.Command(proposalsBin(), "show", id)
 				return true, tea.ExecProcess(exec.Command("sh", "-c", c.String()+" | less -R"), func(err error) tea.Msg { return execDone{err} })
+			}
+		case vRecaps:
+			if rs := m.recaps(); m.listSel < len(rs) {
+				m.selSID, m.view = rs[m.listSel].agent.SID, vDesk
+				m.writeState()
 			}
 		case vPaperclip:
 			if m.listSel < len(m.pc.Items) {
@@ -877,11 +887,28 @@ func propID(line string) string {
 	return ""
 }
 
+type agentRecap struct {
+	agent Agent
+	last  Last
+}
+
+// recaps: the agents that have a recap, newest recap first.
+func (m *model) recaps() []agentRecap {
+	var out []agentRecap
+	for i := range m.agents {
+		if l := m.last(&m.agents[i]); l.Recap != "" {
+			out = append(out, agentRecap{m.agents[i], l})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].last.RecapAt.After(out[j].last.RecapAt) })
+	return out
+}
+
 func (m *model) loadProposals() {
 	out, _ := exec.Command(proposalsBin(), "list").Output()
 	m.props = nil
-	for _, l := range strings.Split(string(out), "\n") {
-		if strings.TrimSpace(l) != "" && strings.Contains(l, ":") {
+	for _, l := range strings.Split(string(out), "\n") { // open proposals are the indented "kind id: ..." lines
+		if strings.HasPrefix(l, "  ") && !strings.HasPrefix(l, "  (") && strings.Contains(l, ":") {
 			m.props = append(m.props, strings.TrimSpace(l))
 		}
 	}

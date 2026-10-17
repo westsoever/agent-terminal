@@ -395,4 +395,124 @@ rm -f "$PP/skill-sync-loop.md" "$PP/rule-back.md"
 assert_contains "proposals: one waiting is singular" "$(prdash --speak)" "1 proposal waiting."
 assert_not_contains "proposals: the default view does not list them" "$(prdash)" "no-version-bump"
 assert_not_contains "proposals: dash never sends a notification (it does not call notify.sh)" "$(grep -v '^#' "$BIN/dash.sh")" "notify.sh"
+
+# ---------------- --route: the dispatcher's routing list (live Claude Code sessions only) ----------------
+# Its own AGENT_HOME and CLAUDE_DIR so the registry fixtures above do not leak in. Live pids are background
+# sleeps (each needs its own tty for the focus tests); the tty lookup is a fake ps (DASH_PS_TTY_CMD) that maps
+# pid -> tty from $WORK/route-ttys and logs each call.
+RAH="$WORK/route-ah"; RCD="$WORK/route-claude"; mkdir -p "$RAH/sessions"
+RNOW=1792250000
+cat >"$WORK/fake-ps" <<'EOS'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$(dirname "$0")/fake-ps.log"
+f="$(dirname "$0")/route-ttys"; [ -f "$f" ] || exit 0
+IFS=, read -r -a want <<<"$1"
+while read -r p t; do for w in "${want[@]}"; do if [ "$p" = "$w" ]; then printf '%5s %s\n' "$p" "$t"; fi; done; done <"$f"
+EOS
+chmod +x "$WORK/fake-ps"
+route() { AGENT_HOME="$RAH" CLAUDE_DIR="$RCD" DASH_NOW="$RNOW" DASH_PS_TTY_CMD="$WORK/fake-ps" "$BIN/dash.sh" --route; }
+rjson() { # file pid sid cwd name status(''= absent) [kind]
+  jq -nc --argjson p "$2" --arg s "$3" --arg c "$4" --arg n "$5" --arg st "$6" --arg k "${7:-interactive}" \
+    '{pid:$p,sessionId:$s,cwd:$c,name:$n,status:$st,kind:$k,startedAt:1} | if $st == "" then del(.status) else . end' \
+    >"$RCD/sessions/$1.json"
+}
+rt() { local IFS=$'\t'; printf '%s' "$*"; }   # one expected TSV line
+RHDR=$(rt name message_to status state state_dir notes focus branch)
+assert_eq "route: no sessions folder at all prints the header only" "$RHDR" "$(route)"
+mkdir -p "$RCD/sessions"
+assert_eq "route: an empty sessions folder prints the header only" "$RHDR" "$(route)"
+
+sleep 600 & L1=$!; sleep 600 & L2=$!; sleep 600 & L3=$!; sleep 600 & L4=$!
+sleep 600 & DEAD=$!; kill "$DEAD"; wait "$DEAD" 2>/dev/null
+trap 'kill $L1 $L2 $L3 $L4 2>/dev/null' EXIT
+printf '%s ttys001\n%s ttys002\n%s ttys003\n%s ??\n%s ttys009\n' "$L1" "$L2" "$L3" "$L4" "$$" >"$WORK/route-ttys"
+
+RA=$(mk_repo routeA); RB=$(mk_repo routeB); RA=$(cd "$RA" && pwd -P); RB=$(cd "$RB" && pwd -P)
+HP=$(cd "$HOME" && pwd -P); RPLAIN="$WORK/routeplain"; mkdir -p "$RPLAIN"; RPLAIN=$(cd "$RPLAIN" && pwd -P)
+git -C "$RB" checkout -q -b feat
+# s1: repo A, meta says working, STATE.md in the agent sessions dir (it wins over the repo's .agent/STATE.md)
+rjson s1 "$L1" sid-r1 "$RA" routeA-Sessions idle
+mkdir -p "$RAH/sessions/sid-r1"; printf 'cwd=%s\nroot=%s\nbranch=metabranch\nstate=working\n' "$RA" "$RA" >"$RAH/sessions/sid-r1/meta"
+printf '# State\n' >"$RAH/sessions/sid-r1/STATE.md"
+mkdir -p "$RA/.agent"; printf '# State\n' >"$RA/.agent/STATE.md"
+# s2: the home folder, busy, no meta, no STATE.md anywhere
+rjson s2 "$L2" sid-r2 "$HP" homeChat busy
+# s3: repo B, meta without root or branch: root and branch from git, STATE.md in the repo's .agent
+rjson s3 "$L3" sid-r3 "$RB" routeB-x busy
+mkdir -p "$RB/.agent"; printf '# State\n' >"$RB/.agent/STATE.md"
+mkdir -p "$RAH/sessions/sid-r3"; printf 'state=input\n' >"$RAH/sessions/sid-r3/meta"
+# s8: a plain folder, no status in the json, no tty
+rjson s8 "$L4" sid-r8 "$RPLAIN" plainS ""
+# not listed: a dead pid, the dispatcher (by name, and by cwd), a claude-mem observer session, unreadable json
+rjson s4 "$DEAD" sid-r4 "$RA" deadOne idle
+rjson s5 "$$" sid-r5 "$RA" dispatcher idle
+mkdir -p "$RAH/dispatcher"; rjson s6 "$$" sid-r6 "$RAH/dispatcher" disp2 idle
+mkdir -p "$WORK/.claude-mem/observer-sessions/77"; rjson s7 "$$" sid-r7 "$WORK/.claude-mem/observer-sessions/77" 77-ab idle
+printf '{not json' >"$RCD/sessions/bad.json"
+printf '{"peerToken":"x","procStart":"y"}\n' >"$RCD/sessions/nopid.json"
+
+R1=$(rt routeA routeA-Sessions idle working "$RAH/sessions/sid-r1" yes - metabranch)
+R2=$(rt home homeChat busy - "$RAH/sessions/sid-r2" no - -)
+R3=$(rt routeB routeB-x busy input "$RB/.agent" yes - feat)
+R8=$(rt routeplain plainS - - "$RAH/sessions/sid-r8" no - -)
+: >"$WORK/fake-ps.log"
+out=$(route)
+assert_eq "route: header, then busy before idle, then by name; no focus file" "$RHDR
+$R2
+$R3
+$R1
+$R8" "$out"
+assert_eq "route: one ps call for every tty" "1" "$(grep -c . "$WORK/fake-ps.log")"
+assert_not_contains "route: a dead pid is not listed" "$out" "deadOne"
+assert_not_contains "route: the dispatcher is not listed (by name)" "$out" "dispatcher	"
+assert_not_contains "route: the dispatcher is not listed (by cwd)" "$out" "disp2"
+assert_not_contains "route: claude-mem observer sessions are hidden" "$out" "77-ab"
+assert_contains "route: the home folder is named home, not ~" "$(printf '%s\n' "$out" | grep homeChat)" "$(rt home homeChat)"
+assert_not_contains "route: no ~ anywhere" "$out" "~"
+assert_eq "route: message_to is the json name" "routeA-Sessions" "$(printf '%s\n' "$out" | awk -F'\t' '$1 == "routeA" { print $2 }')"
+assert_not_contains "route: no ANSI escapes" "$out" $'\033'
+
+# focus: fresh vs stale vs absent
+printf 'ttys001 %s\n' "$((RNOW - 30))" >"$RAH/dispatcher/focus"
+F1=$(rt routeA routeA-Sessions idle working "$RAH/sessions/sid-r1" yes focused metabranch)
+assert_eq "route: a fresh focus file puts its session first, marked focused" "$RHDR
+$F1
+$R2
+$R3
+$R8" "$(route)"
+printf 'ttys003 %s\n' "$((RNOW - 600))" >"$RAH/dispatcher/focus"
+assert_eq "route: focus at exactly the max age still counts" "focused" "$(route | awk -F'\t' '$1 == "routeB" { print $7 }')"
+printf 'ttys003 %s\n' "$((RNOW - 601))" >"$RAH/dispatcher/focus"
+assert_not_contains "route: a stale focus file marks nothing" "$(route)" "focused"
+printf 'ttys003 %s\n' "$((RNOW - 100))" >"$RAH/dispatcher/focus"
+assert_not_contains "route: DASH_FOCUS_MAX_AGE shortens the window" "$(DASH_FOCUS_MAX_AGE=60 route)" "focused"
+assert_eq "route: DASH_FOCUS_MAX_AGE lengthens it too" "focused" "$(DASH_FOCUS_MAX_AGE=200 route | awk -F'\t' '$1 == "routeB" { print $7 }')"
+printf '/dev/ttys002 %s\n' "$((RNOW - 5))" >"$RAH/dispatcher/focus"
+assert_eq "route: a /dev/ prefix on the focus tty still matches" "home" "$(route | sed -n 2p | cut -f1)"
+printf 'ttys003 %s\n' "$((RNOW + 99999))" >"$RAH/dispatcher/focus"
+assert_not_contains "route: a focus time far in the future marks nothing" "$(route)" "focused"
+printf 'ttys003 %s\n' "$((RNOW + 30))" >"$RAH/dispatcher/focus"
+assert_eq "route: a little clock skew still counts" "focused" "$(route | awk -F'\t' '$1 == "routeB" { print $7 }')"
+printf '?? %s\n' "$((RNOW - 5))" >"$RAH/dispatcher/focus"
+assert_not_contains "route: a session without a tty is never focused" "$(route)" "focused"
+rm -f "$RAH/dispatcher/focus"
+assert_not_contains "route: no focus file marks nothing" "$(route)" "focused"
+
+# state_dir choice: sessions dir with STATE.md (above) > repo .agent with STATE.md > sessions dir (notes no)
+rm -f "$RAH/sessions/sid-r1/STATE.md"
+assert_eq "route: a repo .agent/STATE.md (root from meta) is used when the sessions dir has none" \
+  "$RA/.agent	yes" "$(route | awk -F'\t' '$1 == "routeA" { print $5 "\t" $6 }')"
+rm -f "$RA/.agent/STATE.md"
+assert_eq "route: without any STATE.md, state_dir is the sessions dir and notes no" \
+  "$RAH/sessions/sid-r1	no" "$(route | awk -F'\t' '$1 == "routeA" { print $5 "\t" $6 }')"
+
+assert_eq "route: 8 non-empty fields on every line" "" \
+  "$(route | awk -F'\t' 'NF != 8 { print "NF " NF ": " $0 } { for (i = 1; i <= NF; i++) if ($i == "") print "empty " i ": " $0 }')"
+assert_not_contains "route: the default view does not read the Claude Code session files" \
+  "$(AGENT_HOME="$RAH" CLAUDE_DIR="$RCD" DASH_NOW="$RNOW" "$BIN/dash.sh")" "routeA-Sessions"
+err=$("$BIN/dash.sh" --bogus 2>&1 >/dev/null); rc=$?
+assert_eq "an unknown flag exits 64" "64" "$rc"
+assert_contains "the unknown-flag text lists --route" "$err" "--route"
+assert_contains "--help lists --route" "$("$BIN/dash.sh" --help)" "--route"
+kill $L1 $L2 $L3 $L4 2>/dev/null
 exit 0

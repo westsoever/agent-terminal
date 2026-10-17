@@ -52,7 +52,8 @@ STAGE=$(mktemp -d "$TARGET/.$NAME.build.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
 NEW="$STAGE/$NAME.app"
 mkdir -p "$NEW/Contents/MacOS" "$NEW/Contents/Resources"
-"$SWIFTC" -O -swift-version 6 -parse-as-library -module-name "$NAME" -framework AppKit -framework Carbon "${SRCS[@]}" -o "$NEW/Contents/MacOS/$NAME"
+"$SWIFTC" -O -swift-version 6 -parse-as-library -module-name "$NAME" -framework AppKit -framework ApplicationServices \
+  -framework Carbon "${SRCS[@]}" -o "$NEW/Contents/MacOS/$NAME"
 
 cat >"$NEW/Contents/Info.plist" <<EOP
 <?xml version="1.0" encoding="UTF-8"?>
@@ -70,7 +71,7 @@ cat >"$NEW/Contents/Info.plist" <<EOP
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSAppleEventsUsageDescription</key><string>The Kaching hotkeys move and raise your Terminal windows.</string>
+  <key>NSAppleEventsUsageDescription</key><string>The Kaching hotkeys move and raise your Terminal windows; the voice shortcut reads which Terminal tab is in front and wakes the voice dispatcher in its tab.</string>
   <key>KachingSourceHash</key><string>$HASH</string>
 </dict>
 </plist>
