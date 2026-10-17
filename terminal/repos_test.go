@@ -12,24 +12,6 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-func TestRepoRemote(t *testing.T) {
-	for in, want := range map[string]string{
-		"https://github.com/technobbq/miso.git":   "technobbq/miso",
-		"https://www.github.com/technobbq/bbqos":  "technobbq/bbqos",
-		"git@github.com:x/y.git":                  "x/y",
-		"ssh://git@github.com/x/y":                "x/y",
-		"https://github.com/MacPass/MacPass/":     "MacPass/MacPass",
-		"https://gitlab.com/x/y.git":              "",
-		"https://github.com.evil.example/x/y.git": "",
-		"https://github.com/onlyowner":            "",
-		"":                                        "",
-	} {
-		if got := repoRemote(in); got != want {
-			t.Errorf("repoRemote(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func mkRepo(t *testing.T, dir, origin string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
@@ -78,6 +60,9 @@ func TestRepoListOrder(t *testing.T) {
 	}
 	if strings.Join(names, " ") != "gamma alpha beta Zed api web" {
 		t.Fatalf("order: %v", names)
+	}
+	if a := got[1]; a.Remote != "technobbq/Alpha" { // GitHub's spelling
+		t.Fatalf("alpha = %+v", a)
 	}
 	if g := got[0]; g.Remote != "westsoever/gamma" || g.Needs != "1 stash" || len(g.Notes) != 1 || g.Dir == "" {
 		t.Fatalf("gamma = %+v", g)

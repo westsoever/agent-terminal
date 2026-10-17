@@ -62,27 +62,6 @@ var repoOwners = []string{"westsoever", "technobbq"}
 var repoSkip = map[string]bool{"Library": true, "Desktop": true, "Documents": true, "Downloads": true, "Movies": true,
 	"Music": true, "Pictures": true, "Public": true, "Applications": true, ".Trash": true, "Google Drive": true}
 
-// repoRemote: owner/name of a GitHub URL (https, www, ssh, .git or not); "" for another host.
-func repoRemote(u string) string {
-	u = strings.TrimSpace(u)
-	for _, p := range []string{"https://", "http://", "ssh://", "git://"} {
-		u = strings.TrimPrefix(u, p)
-	}
-	if at := strings.Index(u, "@"); at >= 0 && at < strings.IndexAny(u+"/:", "/:") {
-		u = u[at+1:] // git@github.com:o/n, ssh://git@github.com/o/n
-	}
-	u = strings.TrimPrefix(u, "www.")
-	rest, ok := strings.CutPrefix(u, "github.com")
-	if !ok || rest == "" || (rest[0] != '/' && rest[0] != ':') {
-		return ""
-	}
-	f := strings.Split(strings.Trim(rest[1:], "/"), "/")
-	if len(f) < 2 || f[0] == "" || f[1] == "" {
-		return ""
-	}
-	return f[0] + "/" + strings.TrimSuffix(f[1], ".git")
-}
-
 // gitOrigin: the origin URL in dir's .git/config, "" when it has none.
 func gitOrigin(dir string) string {
 	b, err := os.ReadFile(filepath.Join(dir, ".git", "config"))
@@ -132,7 +111,7 @@ func parseSync(lines []string) []syncNote {
 func localRepos(sync []string) []Repo {
 	home := os.Getenv("HOME")
 	var dirs []string
-	for _, root := range []string{filepath.Join(home, "bbq"), home} {
+	for _, root := range cloneRoots() {
 		es, _ := os.ReadDir(root)
 		for _, e := range es {
 			if e.IsDir() && !(root == home && repoSkip[e.Name()]) {
@@ -169,7 +148,7 @@ func localRepos(sync []string) []Repo {
 			continue
 		}
 		seen[d] = true
-		r := Repo{Name: filepath.Base(d), Dir: d, Remote: repoRemote(gitOrigin(d))}
+		r := Repo{Name: filepath.Base(d), Dir: d, Remote: remoteRepo(gitOrigin(d))}
 		if i, ok := rank[d]; ok {
 			r.Needs, r.Notes = notes[i].needs, notes[i].notes
 		}
@@ -243,12 +222,20 @@ func (g GHRepos) merge(n GHRepos) GHRepos {
 	return n
 }
 
-// repoList: the local clones (in localRepos' order), then the GitHub repos with no clone here, by name.
+// repoList: the local clones (in localRepos' order), then the GitHub repos with no clone here, by name. A clone
+// takes its owner/name as GitHub writes it (remoteRepo gives it in lower case).
 func repoList(local []Repo, gh GHRepos) []Repo {
+	named := map[string]string{}
+	for _, nw := range gh.Items {
+		named[strings.ToLower(nw)] = nw
+	}
 	out := append([]Repo(nil), local...)
 	have := map[string]bool{}
-	for _, r := range local {
+	for i, r := range out {
 		have[strings.ToLower(r.Remote)] = true
+		if nw, ok := named[strings.ToLower(r.Remote)]; ok {
+			out[i].Remote = nw
+		}
 	}
 	var only []Repo
 	for _, nw := range gh.Items {
