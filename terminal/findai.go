@@ -271,7 +271,7 @@ func parseAIAnswer(out string, idx []aiEntry) ([]findHit, error) {
 			if strings.HasPrefix(e.ref.ID, id) && !seen[e.ref.ID] {
 				seen[e.ref.ID] = true
 				hits = append(hits, findHit{ID: e.ref.ID, Name: e.name, Cwd: e.cwd, Path: e.ref.Path, At: e.ref.Mtime,
-					Tier: tierAI, Why: strings.TrimSpace(it.Why)})
+					Tier: tierAI, Why: clip(clean(it.Why), 240)})
 				break
 			}
 		}

@@ -1165,3 +1165,27 @@ func TestFindTimingReal(t *testing.T) {
 		t.Logf("%-26q names %2d in %-8v text %2d in %-8v (%d transcripts, partial %v)", q, len(names), d1.Round(time.Millisecond), len(hits), st.Took.Round(time.Millisecond), st.Files, st.Partial)
 	}
 }
+
+// An escape sequence in a transcript, or in Claude's answer, must not reach the terminal.
+func TestFindTextHasNoControlCharacters(t *testing.T) {
+	esc := string(rune(27))
+	if sn := makeSnippet("a"+esc+"[31m zebra"+esc+"[0m deploy\x07", []string{"zebra"}, 100); strings.ContainsAny(sn, esc+"\x07") || !strings.Contains(sn, "zebra") {
+		t.Errorf("snippet %q", sn)
+	}
+	why, _ := json.Marshal(tm{"id": "s12345678", "why": "red" + esc + "[31m and\tbell\x07"})
+	hits, err := parseAIAnswer("["+string(why)+"]", []aiEntry{{ref: sessionRef{ID: "12345678-aaaa"}}})
+	if err != nil || len(hits) != 1 || strings.ContainsAny(hits[0].Why, esc+"\x07\t") {
+		t.Errorf("why %+v err %v", hits, err)
+	}
+	if got := titlesIn([]byte(`{"type":"custom-title","customTitle":"na` + "\\u001b" + `[2Jme"}`)); strings.Contains(got.Custom, esc) {
+		t.Errorf("title %q", got.Custom)
+	}
+	m := findModel(t, 100, 30)
+	m.view = vFind
+	m.find = findState{Query: "zebra", Terms: []string{"zebra"}, NamesDone: true, TextDone: true,
+		Text: []findHit{{ID: sid(1), Tier: tierText, Who: "you", Snippet: "zebra", Count: 1, At: time.Now(), Path: "/x"}}}
+	m.find.Panel = &findPanel{ID: sid(1), sc: &findScroll{}, Groups: [][]excerptTurn{{{User: true, Text: "zebra " + esc + "[31mred", Match: true}, {Text: "reply" + esc + "[2J zebra"}}}}
+	if v := ansiRe.ReplaceAllString(m.View(), ""); strings.Contains(v, esc) {
+		t.Errorf("an escape reached the panel: %q", v)
+	}
+}

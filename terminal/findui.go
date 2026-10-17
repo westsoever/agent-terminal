@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -583,7 +584,7 @@ func (m model) findHitRows(hit findHit, in int, selected bool, nameW, cwdW int) 
 // findPanelView: the excerpts of the selected session, a read-only page the scroll keys move through.
 func (m model) findPanelView(h int, title []seg) []string {
 	p := m.find.Panel
-	in := m.w - 8
+	in := m.w - 6
 	hit, _ := m.selectedHit()
 	t := []seg{s(m.label(hit), cWhite), s(" · "+tildify(hit.Cwd), cGrey), s(" · "+fmtDate(hit.At), cGrey)}
 	var rows []string
@@ -637,7 +638,10 @@ func (m model) excerptRows(tn excerptTurn, in int) []string {
 	if tn.Match {
 		n = 700
 	}
-	text := makeSnippet(tn.Text, m.find.Terms, n)
+	text := strings.TrimSpace(clean(tn.Text)) // a short message keeps its lines; a long one is cut to a window of the match
+	if utf8.RuneCountInString(text) > n {
+		text = makeSnippet(text, m.find.Terms, n)
+	}
 	var out []string
 	if tn.User {
 		band := cWhite.Background(promptBg)

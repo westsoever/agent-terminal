@@ -201,10 +201,21 @@ func lowerInto(dst, src []byte) []byte {
 	return dst
 }
 
+// clean: the text with its control characters (but not its newlines) as spaces. A transcript can hold an escape
+// sequence, and it must not reach the terminal.
+func clean(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r != '\n' && unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
+}
+
 // makeSnippet: a window of the text (spaces collapsed) with the match near its start, "…" where it is cut. The
 // window is the place where most terms are in view; the first term decides a tie.
 func makeSnippet(text string, terms []string, width int) string {
-	txt := []rune(strings.Join(strings.Fields(text), " "))
+	txt := []rune(strings.Join(strings.Fields(clean(text)), " "))
 	if len(txt) <= width {
 		return string(txt)
 	}
@@ -412,7 +423,7 @@ func titlesIn(tail []byte) titles {
 			return ""
 		}
 		v, _ := m[key].(string)
-		return strings.TrimSpace(v)
+		return strings.TrimSpace(clean(v))
 	}
 	return titles{last("custom-title", "customTitle"), last("agent-name", "agentName"), last("ai-title", "aiTitle")}
 }
@@ -652,6 +663,7 @@ func (sc *scanner) scan(ctx context.Context, ref sessionRef, st *scanTerms) (hit
 		}
 	}
 	h := findHit{ID: ref.ID, Path: ref.Path, At: ref.Mtime, Tier: tierText}
+	var newest Turn // the newest message that matches: its snippet is made once, at the end
 	visit := func(line []byte) {
 		if !candidateLine(line) {
 			return
@@ -661,10 +673,7 @@ func (sc *scanner) scan(ctx context.Context, ref sessionRef, st *scanTerms) (hit
 				continue
 			}
 			h.Count++
-			h.Who, h.Snippet = "agent", makeSnippet(t.Text, st.terms, snippetWidth)
-			if t.User {
-				h.Who = "you"
-			}
+			newest = t
 			if !t.At.IsZero() {
 				h.At = t.At
 			}
@@ -715,6 +724,10 @@ func (sc *scanner) scan(ctx context.Context, ref sessionRef, st *scanTerms) (hit
 	}
 	if h.Count == 0 {
 		return nil, cut
+	}
+	h.Who, h.Snippet = "agent", makeSnippet(newest.Text, st.terms, snippetWidth)
+	if newest.User {
+		h.Who = "you"
 	}
 	t := withSidecar(titlesIn(data[max(0, len(data)-titleTail):]), ref.Path)
 	h.Name = t.display()
