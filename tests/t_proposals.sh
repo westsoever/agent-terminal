@@ -443,8 +443,9 @@ printf '250000\n' >"$TOKF"
 assert_eq "budget: learn_budget_left is never negative" "0" "$(learn_budget_left)"
 assert_eq "budget: ... and reads LEARN_TOKEN_CAP" "0" "$(LEARN_TOKEN_CAP=1000 learn_budget_left)"
 assert_eq "estimate: 0 bytes is the per-call overhead (default 4000)" "4000" "$(printf '' | learn_estimate_tokens)"
-assert_eq "estimate: bytes / 3.5 rounded up, plus the overhead" "4003" "$(printf 'abcdefgh' | learn_estimate_tokens)"
-assert_eq "estimate: LEARN_CALL_OVERHEAD" "13" "$(printf 'abcdefgh' | LEARN_CALL_OVERHEAD=10 learn_estimate_tokens)"
+assert_eq "estimate: bytes / 2.4 rounded up, a quarter for the answer, plus the overhead" "4005" "$(printf 'abcdefgh' | learn_estimate_tokens)"
+assert_eq "estimate: LEARN_CALL_OVERHEAD" "15" "$(printf 'abcdefgh' | LEARN_CALL_OVERHEAD=10 learn_estimate_tokens)"
+assert_eq "estimate: 2400 bytes are 1000 tokens in, 250 for the answer" "5250" "$(head -c 2400 /dev/zero | tr '\0' x | learn_estimate_tokens)"
 # a call whose estimate does not fit what is left is refused before it starts (the cap was soft: 219k against 200k)
 printf '190000\n' >"$TOKF"; n=$(ncalls)
 big=$(head -c 70000 /dev/zero | tr '\0' 'x')   # about 20k tokens
@@ -452,7 +453,8 @@ out=$(printf 'ching-learn-task: skills\n%s\n' "$big" | learn_model_call haiku 2>
 assert_eq "budget: a call that would pass the cap exits 5" "5" "$rc"
 assert_eq "budget: ... and no call is made" "$n" "$(ncalls)"
 assert_eq "budget: ... and nothing is added to the day" "190000" "$(cat "$TOKF")"
-assert_contains "budget: ... logged with the estimate" "$(tail -1 "$P/.work/learn.log")" "rc=capped tokens=0 estimate=24"
+est=$(printf 'ching-learn-task: skills\n%s\n' "$big" | learn_estimate_tokens)
+assert_contains "budget: ... logged with the estimate" "$(tail -1 "$P/.work/learn.log")" "rc=capped tokens=0 estimate=$est"
 out=$(printf 'ching-learn-task: skills\nsmall\n' | learn_model_call haiku 2>/dev/null); rc=$?
 assert_eq "budget: a small call that fits still runs" "0" "$rc"
 assert_eq "budget: ... and the day total is the real usage, not the estimate" "191500" "$(cat "$TOKF")"

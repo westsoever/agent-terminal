@@ -253,8 +253,10 @@ assert_eq "session: every variable unset, but an interpreter running .../claude 
 assert_contains "session: ... the parent walk names it" "$out" "it runs under claude, process"
 mkdir -p "$WORK/badps"; printf '#!/bin/sh\nexit 1\n' >"$WORK/badps/ps"; chmod +x "$WORK/badps/ps"
 out=$(PATH="$WORK/badps:$PATH" "${PERSON[@]}" "$CP" approve rule-no-version-bump </dev/null 2>&1); rc=$?
-assert_eq "session: a process table that cannot be read refuses (fails closed)" "1" "$rc"
-assert_contains "session: ... and says why" "$out" "cannot read the process table"
+# the CLI calls /bin/ps by absolute path: a fake ps first on PATH can neither hide a claude ancestor nor change
+# the outcome (verifier 2, N4); here the real walk runs, finds no claude, and the no-terminal check refuses
+assert_eq "session: a fake ps first on PATH changes nothing (still refused)" "1" "$rc"
+assert_not_contains "session: ... the fake ps was not used" "$out" "cannot read the process table"
 out=$(env "${UNSET[@]}" CHING_TEST=1 "CHING_TEST_ANCESTRY_STOP=$$" HOME=/var/empty "$CP" approve rule-no-version-bump </dev/null 2>&1); rc=$?
 assert_eq "test seam: CHING_TEST with HOME outside the /tmp/ching-tests sandbox exits 3" "3" "$rc"
 assert_contains "test seam: ... and says so" "$out" "honoured only inside the test sandbox"

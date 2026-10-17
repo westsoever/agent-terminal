@@ -476,14 +476,16 @@ _LEARN_LIMITED_PL='
 _learn_limited() { perl -e "$_LEARN_LIMITED_PL" "$@"; }
 
 # learn_estimate_tokens < TEXT: what a learn_model_call with TEXT as its prompt is expected to cost, in tokens:
-# the bytes / 3.5, rounded up, plus LEARN_CALL_OVERHEAD (default 4000: about 2.7k tokens of fixed prompt per call,
-# measured live on 2026-10-17 with the isolation flags below, and an allowance for the answer). An estimate: a
-# long answer or a prompt in another script can still pass it.
+# the bytes / 2.4, rounded up (JSON snippets tokenise at about 2.4 bytes per token, measured 2026-10-17), plus a
+# quarter of that for the answer and its thinking, plus LEARN_CALL_OVERHEAD (default 4000: about 2.7k tokens of
+# fixed prompt per call, measured live on 2026-10-17 with the isolation flags below). An estimate: a call may still
+# overshoot it, by up to about a quarter of its own size in the worst case measured.
 learn_estimate_tokens() {
   local bytes ovh
   bytes=$(wc -c | tr -d ' ')
   ovh=$(learn_setting LEARN_CALL_OVERHEAD); case "$ovh" in ''|*[!0-9]*) ovh=4000 ;; esac
-  printf '%s\n' $(( (bytes * 2 + 6) / 7 + ovh ))
+  local inp=$(( (bytes * 5 + 11) / 12 ))
+  printf '%s\n' $(( inp + inp / 4 + ovh ))
 }
 
 # learn_budget_left: the tokens left today under LEARN_TOKEN_CAP (never below 0). A component that batches its

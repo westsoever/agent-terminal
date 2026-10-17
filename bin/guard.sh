@@ -268,11 +268,15 @@ check_delete_target() { # path-as-written
       abs=$(resolve_path "$dir" "$SIM_CWD")
       if [ "$abs" = "$ROOT" ] || is_safe_delete_target "$abs"; then return 0; fi
       # a named glob straight inside a temp root (/tmp/myrun.*): only entries under it can match. A bare /tmp/*
-      # (every session's scratch) stays denied: the glob's own segment needs a literal prefix of 3+ characters.
+      # or a short one like /tmp/cla* (which hits /tmp/claude-501, every session's live scratch) stays denied: the
+      # glob's own segment needs a literal prefix of 6+ characters with a . - or _ in it, and not a shared name.
       local seg=${pre##*/} rest=${a#"$pre"}
       case "$rest" in
         */*) ;;
-        *) if [ "${#seg}" -ge 3 ] && is_safe_delete_target "$abs/$seg"; then return 0; fi ;;
+        *) case "$seg" in
+             claude*|com.apple*|ching-tests*|launchd*|tmux-*) ;;
+             *[._-]*) if [ "${#seg}" -ge 6 ] && is_safe_delete_target "$abs/$seg"; then return 0; fi ;;
+           esac ;;
       esac
       emit_deny "recursive delete of '$a' is outside the current repo and /tmp. Delete only inside the repo or a /tmp path."
       ;;
@@ -662,12 +666,12 @@ check_proposals_call() { # TOKS is the segment
   [ "$k" -lt "$NT" ] || return 0
   base_of "${TOKS[$k]}"; b=$BASE
   case "$b" in *[[:upper:]]*) b=$(printf '%s' "$b" | LC_ALL=C tr 'A-Z' 'a-z') ;; esac   # macOS: CHING-PROPOSALS runs it too
-  # $b is a glob on purpose: would the shell expand this command word to ching-proposals? Only a glob with 3+
-  # literal characters counts: a bare `*` or `*)` is what the splitter leaves of a `case` arm or a heredoc line, not
-  # a command anyone types, and treating it as the CLI denied any command quoting shell code.
-  local lit=${b//[\*\?\[\]]/}
+  # $b is a glob on purpose: would the shell expand this command word to ching-proposals? Exempt only a lone `*` and
+  # a word ending in `)`: that is what the splitter leaves of a `case` arm or a heredoc line, not a command anyone
+  # types, and treating it as the CLI denied any command quoting shell code. Short globs (bin/c*s, bin/*s, ????)
+  # still count. (A lone `*` run inside bin/ would start the CLI with a file name as its subcommand: it refuses.)
   # shellcheck disable=SC2053
-  if [[ "$b" == *[\*\?\[]* ]] && [ "${#lit}" -ge 3 ] && [[ ching-proposals == $b ]]; then b=ching-proposals; fi
+  if [[ "$b" == *[\*\?\[]* ]] && [ "$b" != '*' ] && [[ "$b" != *')' ]] && [[ ching-proposals == $b ]]; then b=ching-proposals; fi
   if [ "$b" = ching-proposals ]; then
     j=$((k + 1))
     while [ "$j" -lt "$NT" ]; do case "${TOKS[$j]}" in -h|--help) break ;; -*) j=$((j + 1)) ;; *) break ;; esac; done

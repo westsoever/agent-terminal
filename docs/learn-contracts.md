@@ -36,7 +36,7 @@ $AGENT_HOME/proposals/            mode 0700, made by proposals_root
 | `LEARN_SKILL_MAX` | `3` | C, proposals per run (D26) |
 | `LEARN_MAX_SNIPPETS` | `200` | B and C input cap; hitting it logs `learn_run{outcome: truncated}`. B sends its stage-1 hits oldest first (by `ts`), and when `lib.sh` has `learn_budget_left` it also cuts the batch to about (tokens left today) / 450 snippets, at least 5 |
 | `LEARN_CALL_TIMEOUT` | `300` | `learn_model_call`, seconds per call |
-| `LEARN_CALL_OVERHEAD` | `4000` | `learn_estimate_tokens`: tokens a call costs beyond its prompt's bytes / 3.5 (about 2.7k fixed prompt, measured 2026-10-17, and an allowance for the answer) |
+| `LEARN_CALL_OVERHEAD` | `4000` | `learn_estimate_tokens`: tokens a call costs beyond its prompt's estimate (bytes / 2.4, plus a quarter for the answer) (about 2.7k fixed prompt, measured 2026-10-17, and an allowance for the answer) |
 | `LEARN_DISABLE` | empty | D: component names to skip, separated by commas or spaces |
 
 Other environment:
@@ -57,7 +57,7 @@ Source `lib.sh` the way every script does (`. "$SELF_DIR/lib.sh"`). All of these
 | `learn_redact [--jsonl]` | stdin to stdout with credentials replaced by `[REDACTED]` (section 5.3). `--jsonl`: one JSON value per line, every string inside is redacted; an unchanged line comes out byte for byte, a changed one is re-encoded with sorted keys (key order is never part of a contract), and a non-JSON line is redacted as text | 0 |
 | `learn_model_call MODEL < PROMPT` | the only way to call a model (section 7). Prints the model's JSON answer, compact, one line | 0 ok; 1 call failed, timed out or not a success envelope; 2 the answer is not exactly one JSON document; 3 `.work` unusable; 5 capped: the call's estimate does not fit what is left of today's `LEARN_TOKEN_CAP`, no call made; 64 no MODEL |
 | `learn_budget_left` | tokens left today under `LEARN_TOKEN_CAP` (never below 0), read without the lock | 0 |
-| `learn_estimate_tokens < TEXT` | what a call with TEXT as its prompt is expected to cost: bytes / 3.5 rounded up, plus `LEARN_CALL_OVERHEAD` | 0 |
+| `learn_estimate_tokens < TEXT` | what a call with TEXT as its prompt is expected to cost: bytes / 2.4 rounded up, plus a quarter of that for the answer, plus `LEARN_CALL_OVERHEAD` | 0 |
 | `proposal_fingerprint TEXT` | sha1 (40 lower-case hex) of TEXT lower-cased, with whitespace runs squeezed to one space and trimmed | 0 |
 | `proposal_slug TEXT` | lower case, every run of other characters becomes `-`, at most 50 characters, no dash at either end | 0 |
 | `proposals_root` | makes `$AGENT_HOME/proposals` (0700; an existing one is tightened) and prints its canonical path | 3 if it is a symlink or cannot be made |
@@ -263,7 +263,7 @@ What each flag is for, from live checks on 2026-10-17 (claude 2.1.302, the `stre
 - `--no-session-persistence`: no transcript under `~/.claude/projects`.
 - Cost: a one-line prompt came to 2,747 tokens (input 2, cache read 649, cache creation 2,087, output 9), against about 6k before. What claude itself still writes under the real HOME is its own runtime state (`~/.claude.json`, `~/.claude/sessions/`, remote-settings and policy caches), which any run with the real HOME does.
 
-The cap is an estimate check, not a guarantee: an answer longer than the overhead allows, or a prompt that tokenises worse than 3.5 bytes per token, can still pass it, but a call that plainly does not fit (a 70k-token classify batch with 50k left) never starts. A component that batches should size the batch to fit: build the prompt, and while `learn_estimate_tokens < prompt` is above `learn_budget_left`, drop items and log `truncated`; with nothing left to send, log `capped` and make no call.
+The cap is an estimate check, not a guarantee: an answer longer than the overhead allows, or a prompt that tokenises worse than 2.4 bytes per token, can still pass it (measured worst case: about a quarter over the crossing call's estimate), but a call that plainly does not fit (a 70k-token classify batch with 50k left) never starts. A component that batches should size the batch to fit: build the prompt, and while `learn_estimate_tokens < prompt` is above `learn_budget_left`, drop items and log `truncated`; with nothing left to send, log `capped` and make no call.
 
 The prompt's first line is `ching-learn-task: <name>`. This lets the stub pick its canned answer, and it makes logs readable. Task names: `corrections-classify`, `corrections-draft`, `skills`. The prompt templates go in `templates/learn-prompts/` (B and C).
 

@@ -151,7 +151,9 @@ show_diff() { # label -> the change REAL -> NEW as a unified diff
 # CLAUDE_CODE_ENTRYPOINT=cli, CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_EXECPATH, CLAUDE_CODE_CHILD_SESSION, CLAUDE_PID and
 # AI_AGENT=claude-code_<version>_agent; IDE integrations add CLAUDE_CODE_SSE_PORT. Not every CLAUDE_CODE_* name: people
 # export CLAUDE_CODE_USE_BEDROCK and the like in their own shell. CHING_LEARNER is the learner job (guard.sh).
-SESSION_VARS="CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SESSION_ID CLAUDE_CODE_EXECPATH CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SSE_PORT CLAUDE_PID AI_AGENT CHING_LEARNER"
+# not CLAUDE_CODE_SSE_PORT: the VS Code extension sets it in every integrated terminal, so it would lock the owner
+# out; a session started from VS Code is still caught by the other variables and the parent-process walk
+SESSION_VARS="CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SESSION_ID CLAUDE_CODE_EXECPATH CLAUDE_CODE_CHILD_SESSION CLAUDE_PID AI_AGENT CHING_LEARNER"
 TEST_MODE=0
 under_sandbox() { # path -> 0 when it resolves inside a /tmp/ching-tests.* folder (tests/run.sh's sandbox)
   local r
@@ -170,9 +172,10 @@ claude_ancestor() { # -> prints "pid name" of the nearest claude process up the 
   # there is none, exit 2 when the process table cannot be read. One ps call per column set, then a walk in awk.
   local stop=1 tab args
   if [ "$TEST_MODE" -eq 1 ] && [[ "${CHING_TEST_ANCESTRY_STOP:-}" =~ ^[0-9]+$ ]]; then stop=$CHING_TEST_ANCESTRY_STOP; fi
-  tab=$(ps -axww -o pid= -o ppid= -o comm= 2>/dev/null) && [ -n "$tab" ] || return 2
-  args=$(ps -axww -o pid= -o args= 2>/dev/null) && [ -n "$args" ] || return 2
-  { printf '%s\n' "$tab"; echo "--args--"; printf '%s\n' "$args"; } | awk -v start="$PPID" -v stop="$stop" '
+  # absolute paths: a fake ps or awk first on PATH must not be able to hide a claude ancestor
+  tab=$(/bin/ps -axww -o pid= -o ppid= -o comm= 2>/dev/null) && [ -n "$tab" ] || return 2
+  args=$(/bin/ps -axww -o pid= -o args= 2>/dev/null) && [ -n "$args" ] || return 2
+  { printf '%s\n' "$tab"; echo "--args--"; printf '%s\n' "$args"; } | /usr/bin/awk -v start="$PPID" -v stop="$stop" '
     function isclaude(p,   c, a, w, n, i) {   # comm, or the first or second word of args (node .../bin/claude)
       c = tolower(comm[p]); sub(/.*\//, "", c)
       if (c == "claude") return 1
