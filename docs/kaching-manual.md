@@ -14,7 +14,7 @@ Push `/`, write the code, then push `Enter`.
 | `FL` | Files | The last 30 files that the agents wrote about, newest first. Files of agents that stopped stay in the list. |
 | `RP` | Repos | The git sync check: repos with work that you can lose. |
 | `RC` | Recaps | The last recap of each agent. Claude Code writes a recap when you come back to a session after some time. The desk also shows the recap of the selected agent above its last message. |
-| `PR` | Pull requests | The open GitHub pull requests that involve you (yours, assigned to you, or that ask your review), the last updated first. The number in the tab is how many. |
+| `PR` | Pull requests | The open GitHub pull requests that involve you (yours, assigned to you, that ask your review, or where you commented or were mentioned), the last updated first. The number in the tab is how many. |
 | `PO` | Proposals | The changes that the learner proposes. The tab is orange when proposals are open. |
 | `PC` | Paperclip | Paperclip issues that need you, and issues in progress. The selected issue shows on the right, with what it asks you. The tab is orange when an issue needs you. |
 | `NW` | New agent | Start a background agent. Refer to section 6.15. |
@@ -394,7 +394,7 @@ The folder must be trusted by Claude Code. If the command line shows `Workspace 
 2. Push `l` (down) or `j` (up) to select a pull request. Each line shows the repo and number, how long ago it changed, and its title. A draft shows `draft` after its number.
 3. Push `Enter` to open it on GitHub in your browser.
 
-Kaching reads the list with `gh` every 30 seconds. If the view shows a `gh search prs` error, write `gh auth login` in a terminal.
+Kaching reads the list with `gh`: every 30 seconds while the view is open, every 2 minutes for the number in the tab. If a read fails, the last list stays and the error shows at the top. If the error says you are not logged in, write `gh auth login` in a terminal.
 
 ## 7. Change the keys and the fixed messages
 

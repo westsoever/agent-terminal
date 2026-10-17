@@ -74,7 +74,8 @@ type model struct {
 	pcScroll   *chatScroll         // how far the PC side panel is scrolled back
 	pcAt       time.Time
 	pulls      PullsState // the PR view: open GitHub pull requests
-	badgeAt    time.Time  // when the proposals, pull requests and Paperclip were last read for the tab bar
+	pullsAt    time.Time  // when they were last asked for
+	badgeAt    time.Time  // when the proposals and Paperclip were last read for the tab bar
 	pendingJob string     // a background agent /NW started: selected once it shows in the list
 	props      []string
 	sync       []string
@@ -450,13 +451,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if time.Time(msg).Second()%10 < 2 {
 			cmds = append(cmds, loadTTYs)
 		}
+		every := pullsEvery // the PR tab's count, read slower than what the open view shows
+		if m.view == vPulls {
+			every = badgeEvery
+		}
+		if time.Since(m.pullsAt) > every {
+			m.pullsAt = time.Now()
+			cmds = append(cmds, func() tea.Msg { return pullsMsg(loadPulls()) })
+		}
 		if m.view == vPaperclip && time.Since(m.pcAt) > 5*time.Second {
 			m.pcAt = time.Now()
 			cmds = append(cmds, func() tea.Msg { return pcMsg(loadPaperclip()) })
 		}
 		if time.Since(m.badgeAt) > badgeEvery { // the PO and PC tabs turn orange on other views too
 			m.badgeAt = time.Now()
-			cmds = append(cmds, func() tea.Msg { return propsMsg(readProposals()) }, func() tea.Msg { return pullsMsg(loadPulls()) })
+			cmds = append(cmds, func() tea.Msg { return propsMsg(readProposals()) })
 			if m.view != vPaperclip {
 				m.pcAt = time.Now()
 				cmds = append(cmds, func() tea.Msg { return pcMsg(loadPaperclip()) })
@@ -502,9 +511,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 	case pullsMsg:
-		m.pulls = PullsState(msg)
-		if m.listSel >= len(m.pulls.Items) && m.view == vPulls {
-			m.listSel = max(0, len(m.pulls.Items)-1)
+		sel := ""
+		if m.view == vPulls && m.listSel < len(m.pulls.Items) {
+			sel = m.pulls.Items[m.listSel].URL
+		}
+		m.pulls = m.pulls.merge(PullsState(msg))
+		if m.view == vPulls { // the selection stays on its pull request when the order changes
+			if i := m.pulls.index(sel); i >= 0 {
+				m.listSel = i
+			} else if m.listSel >= len(m.pulls.Items) {
+				m.listSel = max(0, len(m.pulls.Items)-1)
+			}
 		}
 		return m, nil
 	case propsMsg:
@@ -1098,6 +1115,7 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 			case vProposals:
 				m.loadProposals()
 			case vPulls:
+				m.pullsAt = time.Now()
 				return m, func() tea.Msg { return pullsMsg(loadPulls()) }
 			case vPaperclip:
 				m.pcAt = time.Now()
@@ -1214,7 +1232,7 @@ func (m *model) recaps() []agentRecap {
 	return out
 }
 
-// badgeEvery: how often the tab bar reads the proposals, pull requests and Paperclip.
+// badgeEvery: how often the tab bar reads the proposals and Paperclip, and the PR view its pull requests.
 const badgeEvery = 30 * time.Second
 
 // readProposals: the learner's open proposals, one "kind id: ..." line each.
