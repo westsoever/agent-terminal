@@ -74,14 +74,14 @@ func (m model) tabBar() []string {
 			pcNeeds++
 		}
 	}
-	nums := map[view]string{vDesk: fmt.Sprint(need), vWall: fmt.Sprint(len(m.agents)),
+	nums := map[view]string{vDesk: fmt.Sprint(need),
 		vProposals: fmt.Sprint(len(m.props)), vPulls: fmt.Sprint(len(m.pulls.Items)), vPaperclip: fmt.Sprint(pcNeeds)}
 	// a view with work that waits for the owner is filled orange: open proposals, Paperclip issues that need you
 	alert := map[view]bool{vProposals: len(m.props) > 0, vPaperclip: pcNeeds > 0}
 	var cells []cell
 	cells = append(cells, cell{[]seg{s("kaching", cWhite)}, false})
 	for _, t := range tabs {
-		active := m.view == t.v || (t.v == vWall && m.view == vWall)
+		active := m.view == t.v || (t.v == vDesk && m.view == vWall) // the wall (W) is the inbox as tiles
 		lbl := cGrey
 		if active {
 			lbl = cWhite
@@ -159,6 +159,12 @@ func (m model) commandLine() string {
 		}
 		if m.view == vPaperclip && m.listSel < len(m.pc.Items) {
 			target = m.pc.Items[m.listSel].Ref
+		}
+		if url, ok := strings.CutPrefix(m.ed.target, "pr:"); ok {
+			if i := m.pulls.index(url); i >= 0 {
+				pr := m.pulls.Items[i]
+				target = fmt.Sprintf("a new agent on %s#%d", pr.Repo, pr.Number)
+			}
 		}
 		left = []seg{s(" writing to ", cGrey), s(target, cWhite)}
 		if dir, ok := strings.CutPrefix(m.ed.target, "nw:"); ok {
@@ -707,10 +713,24 @@ func (m model) proposalsView(h int) []string {
 	return m.listBox("PROPOSALS   enter show · a approve · x reject · z snooze 7d", items, h, "no open proposals")
 }
 
-// pullsView: the open pull requests that involve the owner, the last updated first.
+// pullsView: the open pull requests that involve the owner, the last updated first. With the side panel open
+// (k), the list narrows to the left and the selected pull request shows on the right.
 func (m model) pullsView(h int) []string {
+	if m.prOpen && len(m.pulls.Items) > 0 {
+		lw, rw := pcWidths(m.w)
+		left, right := m.prList(lw, h), m.prPanel(rw, h)
+		out := make([]string, h)
+		for i := range out {
+			out[i] = " " + left[i] + " " + right[i]
+		}
+		return out
+	}
+	title := "PULL REQUESTS   open, that involve you · k opens one · enter opens it in the browser"
 	if m.pulls.Err != "" {
-		return m.listBox("PULL REQUESTS", nil, h, m.pulls.Err)
+		if len(m.pulls.Items) == 0 {
+			return m.listBox("PULL REQUESTS", nil, h, m.pulls.Err)
+		}
+		title = "PULL REQUESTS   from " + age(m.pulls.At) + " ago · " + m.pulls.Err
 	}
 	var items [][]seg
 	for _, pr := range m.pulls.Items {
@@ -721,7 +741,169 @@ func (m model) pullsView(h int) []string {
 		}
 		items = append(items, []seg{s(padTo(ref, 34), cGrey), s(" "+padTo(age(pr.Updated), 4), cDark), s(" "+pr.Title, tt)})
 	}
-	return m.listBox("PULL REQUESTS   open, that involve you · enter opens it in the browser", items, h, "no open pull requests")
+	empty := "no open pull requests"
+	if m.pulls.At.IsZero() {
+		empty = "loading…"
+	}
+	return m.listBox(title, items, h, empty)
+}
+
+// prList: the PR view's narrow list, next to the side panel.
+func (m model) prList(w, h int) []string {
+	in := w - 2
+	var body []string
+	first := 0
+	if vis := h - 2; m.listSel >= vis {
+		first = m.listSel - vis + 1
+	}
+	for i := first; i < len(m.pulls.Items); i++ {
+		pr := m.pulls.Items[i]
+		ref := fmt.Sprintf("%s#%d", pr.Repo[strings.Index(pr.Repo, "/")+1:], pr.Number)
+		if i == m.listSel {
+			body = append(body, row(in, s(padTo(fmt.Sprintf(" > %-16s %s", ref, pr.Title), in), cSel)))
+			continue
+		}
+		tt := cWhite
+		if pr.Draft {
+			tt = cGrey
+		}
+		body = append(body, row(in, s("   ", cPlain), s(padTo(ref, 16)+" ", cGrey), s(pr.Title, tt)))
+	}
+	return box(w, h, []seg{s("PULL REQUESTS", cGrey)}, cDark, body)
+}
+
+// prPanel: the selected pull request: its state, description, files and thread; the quick comments and the
+// comment box stay at the bottom.
+func (m model) prPanel(w, h int) []string {
+	in := w - 4
+	pr := m.pulls.Items[m.listSel]
+	title := []seg{s(fmt.Sprintf("%s#%d", pr.Repo, pr.Number), cWhite)}
+	if pr.Draft {
+		title = append(title, s(" · draft", cGrey))
+	}
+	d, loaded := m.prDet[pr.URL]
+	var msg, tail []string
+	for _, l := range wrap(pr.Title, in) {
+		msg = append(msg, row(in, s(l, cWhite)))
+	}
+	switch {
+	case !loaded:
+		msg = append(msg, "", row(in, s("loading…", cDark)))
+	case d.Err != "":
+		msg = append(msg, "", row(in, s(d.Err, cOrange)))
+	default:
+		state := []seg{s(d.Head+" → "+d.Base, cGrey), s(fmt.Sprintf("   +%d -%d in %d files", d.Add, d.Del, len(d.Files)), cDark)}
+		msg = append(msg, row(in, state...))
+		var flags []seg
+		switch d.Mergeable {
+		case "MERGEABLE":
+			flags = append(flags, s("no conflicts", cGrey))
+		case "CONFLICTING":
+			flags = append(flags, s("conflicts", cOrange))
+		}
+		if d.Checks != "" {
+			st := cGrey
+			if strings.Contains(d.Checks, "failed") {
+				st = cOrange
+			}
+			flags = append(flags, s(" · checks: "+d.Checks, st))
+		}
+		if d.Review != "" {
+			flags = append(flags, s(" · "+strings.ToLower(strings.ReplaceAll(d.Review, "_", " ")), cGrey))
+		}
+		if len(flags) > 0 {
+			msg = append(msg, row(in, flags...))
+		}
+		if strings.TrimSpace(d.Body) != "" {
+			msg = append(msg, "", row(in, s("DESCRIPTION", cDark)))
+			msg = append(msg, textRows(d.Body, in, m.cfg.Tables)...)
+		}
+		if len(d.Files) > 0 {
+			msg = append(msg, "", row(in, s("FILES", cDark)))
+			for _, f := range d.Files {
+				n := fmt.Sprintf(" +%d -%d", f.Add, f.Del)
+				msg = append(msg, row(in, s(padTo(f.Path, max(1, in-width(n))), cGrey), s(n, cDark)))
+			}
+		}
+		if len(d.Thread) > 0 {
+			msg = append(msg, "", row(in, s("─ thread ", cDark), s(strings.Repeat("─", max(0, in-9)), cDark)))
+		}
+		for i, c := range d.Thread {
+			if i > 0 {
+				msg = append(msg, row(in))
+			}
+			head := []seg{s(c.Author, cGrey), s(" · "+age(c.At)+" ago", cDark)}
+			if c.State != "" {
+				head = append(head, s(" · "+strings.ToLower(strings.ReplaceAll(c.State, "_", " ")), cOrange))
+			}
+			msg = append(msg, row(in, head...))
+			msg = append(msg, textRows(c.Body, in, m.cfg.Tables)...)
+		}
+	}
+	K := m.cfg.Keys
+	tail = append(tail, "", row(in, s("A NEW AGENT WORKS ON IT", cDark)))
+	for i, q := range prQuick {
+		tail = append(tail, row(in, s(fmt.Sprint(i+1), cOrange), s(" "+q.label, cWhite)))
+	}
+	box := "─ your comment: the agent's task (enter starts it) "
+	tail = append(tail, "", row(in, s(box, cDark), s(strings.Repeat("─", max(0, in-width(box))), cDark)))
+	if m.mode == mTyping && m.ed.target == "pr:"+pr.URL {
+		tail = append(tail, m.ed.lines(in)...)
+	} else {
+		scroll := K.Older + "/" + K.Newer
+		if K.Older == "up" && K.Newer == "down" {
+			scroll = "↑↓"
+		}
+		tail = append(tail, row(in, s("> ", cOrange), s(K.Reply+" comment · enter opens on GitHub · "+scroll+" scroll · esc closes", cDark)))
+	}
+	id := pr.URL // a new pull request, or its panel just read, starts at the top
+	if loaded {
+		id += "@" + d.At.String()
+	}
+	return boxR(w, h, title, nil, cDark, m.panelBody(m.prScroll, id, true, msg, tail, in, h))
+}
+
+// panelBody: a side panel's lines: msg bottom-anchored and scrolled back by c, tail fixed under it. Another id
+// starts at the newest line, or at the first with top.
+func (m model) panelBody(c *chatScroll, id string, top bool, msg, tail []string, in, h int) []string {
+	avail := max(1, h-2-len(tail))
+	most := max(0, len(msg)-avail)
+	if c == nil {
+		c = &chatScroll{}
+	}
+	fresh := c.sid != id
+	if fresh {
+		*c = chatScroll{sid: id}
+	}
+	c.max, c.page = most, avail
+	if fresh && top {
+		c.off = most
+	}
+	c.off = min(c.off, most)
+	end := len(msg) - c.off
+	start := max(0, end-avail)
+	msg = msg[start:end]
+	if start > 0 && len(msg) > 1 {
+		msg[0] = row(in, s(fmt.Sprintf("↑ %d earlier lines", start), cDark))
+	}
+	if c.off > 0 && len(msg) > 1 {
+		more := "newer"
+		if top {
+			more = "more"
+		}
+		msg[len(msg)-1] = row(in, s(fmt.Sprintf("↓ %d %s lines", c.off, more), cOrange))
+	}
+	var body []string
+	for _, l := range msg {
+		body = append(body, " "+l+" ")
+	}
+	for len(body) < h-2-len(tail) {
+		body = append(body, "")
+	}
+	for _, t := range tail {
+		body = append(body, " "+t+" ")
+	}
+	return body
 }
 
 // pcWidths: the PC view's issue list and side panel outer widths for a screen w wide.
@@ -893,37 +1075,8 @@ func (m model) pcPanel(w, h int) []string {
 		}
 		tail = append(tail, row(in, s("> ", cOrange), s(hint, cDark)))
 	}
-	avail := max(1, h-2-len(tail))
 	// bottom-anchored like the desk: off lines back from the end; a new issue starts at the end
-	most := max(0, len(msg)-avail)
-	c := m.pcScroll
-	if c == nil {
-		c = &chatScroll{}
-	}
-	if c.sid != it.ID {
-		*c = chatScroll{sid: it.ID}
-	}
-	c.max, c.page = most, avail
-	c.off = min(c.off, most)
-	end := len(msg) - c.off
-	start := max(0, end-avail)
-	msg = msg[start:end]
-	if start > 0 && len(msg) > 1 {
-		msg[0] = row(in, s(fmt.Sprintf("↑ %d earlier lines", start), cDark))
-	}
-	if c.off > 0 && len(msg) > 1 {
-		msg[len(msg)-1] = row(in, s(fmt.Sprintf("↓ %d newer lines", c.off), cOrange))
-	}
-	var body []string
-	for _, l := range msg {
-		body = append(body, " "+l+" ")
-	}
-	for len(body) < h-2-len(tail) {
-		body = append(body, "")
-	}
-	for _, t := range tail {
-		body = append(body, " "+t+" ")
-	}
+	body := m.panelBody(m.pcScroll, it.ID, false, msg, tail, in, h)
 	border := cDark
 	if it.Needs {
 		border = cOrange
@@ -966,7 +1119,7 @@ func (m model) helpView(h int) []string {
 		row2("FL", "the last 30 files the agents wrote about, newest first (enter opens)"),
 		row2("RP", "repos with work that you can lose"),
 		row2("RC", "recaps: what each agent summed up while you were away (enter goes to it)"),
-		row2("PR", "pull requests: the open ones that involve you on GitHub, the last updated first (enter opens it in the browser)"),
+		row2("PR", "pull requests: the open ones that involve you on GitHub, the last updated first; "+K.Reply+" opens one on the right (description, files, thread), "+K.Reply+" again comments: enter starts a new agent with your comment as its task; 1 review it, 2 merge it; enter opens it in the browser"),
 		row2("PO", "proposals: enter shows, a approve, x reject, z hide 7 days (the tab is orange while some are open)"),
 		row2("PC", "Paperclip issues and company approvals, the selected one's thread on the right: 1-9 answer what it asks (approve, decline, …), "+K.Reply+" comment, enter opens it in the browser (orange while one needs you); the keys below"),
 		row2("NW [folder]", "start a background agent: write its first message, enter starts it (folder: a path, a folder in ~/bbq, an agent's name; none: the selected agent's)"),
@@ -1057,9 +1210,18 @@ func (m model) footer() []string {
 		add(&r1, "esc", "desk")
 	case vPulls:
 		add(&r1, K.Next+" "+K.Prev, "move")
-		add(&r1, "enter", "in browser")
-		add(&r1, "esc", "desk")
-		add(&r1, K.Command, "command")
+		if m.prOpen {
+			add(&r1, K.Reply, "comment → new agent")
+			add(&r1, "1-2", "review / merge")
+			add(&r1, key(K.Older)+key(K.Newer), "scroll")
+			add(&r1, "enter", "in browser")
+			add(&r1, "esc", "close")
+		} else {
+			add(&r1, K.Reply, "open")
+			add(&r1, "enter", "in browser")
+			add(&r1, "esc", "desk")
+			add(&r1, K.Command, "command")
+		}
 	case vFiles, vProposals, vRecaps, vRepos:
 		add(&r1, K.Next+" "+K.Prev, "move")
 		add(&r1, "enter", "open")

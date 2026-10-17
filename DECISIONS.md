@@ -2,11 +2,17 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D45 (2026-10-18): A pull request opens on the right in kaching, and a comment on it starts an agent (amends D44)
+
+**Decision (user):** "When I press K, I would want the side panel to open that holds the content of the pull request … I can press again on the side panel, and then I can comment on this … once I hit Enter, it gets sent off to a new session that works through this pull request."
+
+**Built:** in `PR`, `k` opens the selected pull request on the right (`gh pr view`: branches, size, conflicts, checks, review state, description, files, comments and reviews), starting at the top; `j`/`l` keep moving and the panel follows; `↑`/`↓` scroll. `k` again opens the comment box: Enter starts a background agent (`claude --bg`, as `/NW`) in the repo's local clone (found by its origin under `~/bbq` and `~`; home when there is none) with the pull request, its branch and the comment as the task. The agent works in its own worktree and reports back; it comments on GitHub only when asked. `1` review it and `2` merge it are ready-made comments. Approving is left to the agent's report and the owner: GitHub does not let the owner approve their own pull requests, which most of these are. Number keys in `PR` never answer an agent's menu. `esc` closes the box, then the panel, then goes to the desk.
+
 ## D44 (2026-10-18): kaching gets a PR view for pull requests; proposals move to PO; the AG tab goes (amends D33)
 
 **Decision (user):** "Create the PR section here for pull requests. Make me access it with /pr, call it Pull Requests, and rename the Proposals one. Maybe make it PO instead. For now, you can remove or hide the AG Agents section. I'm not using it, and it's not really helpful because it does exactly the same as the inbox."
 
-**Built:** `PR` (pull requests) lists the open GitHub pull requests that involve the owner, from `gh search prs --state open --involves @me`, the last updated first; Enter opens one in the browser. It is read with the tab-bar badges every 30 s and shows its count. Proposals keep their keys under `PO`. The `AG` tab and code are gone; the wall is still there behind `W` (and `/W`), so it can come back. A tab too narrow for its label now keeps its count (`PR  10`) instead of dropping to the code alone.
+**Built:** `PR` (pull requests) lists the open GitHub pull requests that involve the owner, from `gh search prs --state open --involves @me --sort updated`, the last updated first; Enter opens one in the browser. It is read every 30 s while the view is open and every 2 min for the tab's count (GitHub's search quota is 30 a minute); a failed read keeps the last list and shows its error above it, and the selection stays on its pull request when the order changes. Proposals keep their keys under `PO`. The `AG` tab and code are gone; the wall is still there behind `W` (and `/W`), so it can come back. A tab too narrow for its label now keeps its count (`PR  10`) instead of dropping to the code alone.
 
 ## D43 (2026-10-17): A prompt sends a window back, wherever it was prompted (amends D38, D42)
 
