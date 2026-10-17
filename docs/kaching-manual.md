@@ -12,7 +12,7 @@ Push `/`, write the code, then push `Enter`.
 |---|---|---|
 | `IN` | Inbox (the desk) | All agents and the selected agent. This is the start view. |
 | `FL` | Files | The last 30 files that the agents wrote about, newest first. Files of agents that stopped stay in the list. |
-| `RP` | Repos | The git sync check: repos with work that you can lose. |
+| `RP` | Repos | The git clones on this Mac and your GitHub repos (`westsoever`, `technobbq`) that have no clone. Repos with work that you can lose (the git sync check) are at the top. |
 | `RC` | Recaps | The last recap of each agent. Claude Code writes a recap when you come back to a session after some time. The desk also shows the recap of the selected agent above its last message. |
 | `PR` | Pull requests | The open GitHub pull requests that involve you (yours, assigned to you, that ask your review, or where you commented or were mentioned), the last updated first. The number in the tab is how many. |
 | `PO` | Proposals | The changes that the learner proposes. The tab is orange when proposals are open. |
@@ -98,7 +98,7 @@ The top line does not show your message. It shows only the name of the agent tha
 
 When a tile shows on the full screen, the number keys send answers, as on the desk.
 
-### 1.6 Keys in the lists (FL, RC, PR, PC, RP)
+### 1.6 Keys in the lists (FL, RC, PR, PO, PC, RP)
 
 | View | Key | Result |
 |---|---|---|
@@ -125,6 +125,15 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | `PC` | `↑`, `↓` | Scroll the row on the right: its description, its thread and the full request. |
 | `PC` | `Enter` | Open the row in Paperclip in your browser. |
 | `PC` | `k` | Write a comment on the row. `Enter` sends it. |
+| `RP` | `Enter` | Open the folder of the repo. A repo without a local folder asks `No local folder. Open it on GitHub?`: push `Enter` or `y` to open it, any other key to stop. |
+| `RP` | `b`, `Option+Enter` | Open the repo on GitHub in your browser. `Shift+Enter` also does this, but only in a terminal that sends it differently from `Enter` (Terminal.app does not). |
+| `RP` | `k` | Show the folders of the repo in a panel on the right. |
+| `RP` panel | `l`, `j` | Select the next or previous file or folder. |
+| `RP` panel | `k` | Go into the folder, or open the file. `..` goes up. |
+| `RP` panel | `h`, `Backspace` | Go up one folder. |
+| `RP` panel | `Enter` | Show the folder in Finder, or open the file. |
+| `RP` panel | `b` | Open the folder that the panel shows on GitHub. |
+| `RP` panel | `Esc` | Close the panel. Push `Esc` again to go to the desk. |
 
 ### 1.7 Keys in the FIND view
 
@@ -367,10 +376,21 @@ The tiles change size with the window. A wide window shows more tiles in each li
 
 ### 6.12 Look at the repos
 
-1. Push `/`.
-2. Write `RP`.
-3. Push `Enter`.
-4. Read the repos that need attention.
+1. Push `/`, write `RP`, push `Enter`.
+2. Read the list. Each line shows the name of the repo, its name on GitHub (`owner/name`), its local folder (or `github only`) and, in orange, what the git sync check found (for example `1 stash`). Repos with a finding are at the top, then the other local repos, then the GitHub repos without a clone. The selected repo shows the full findings below its line.
+3. Push `l` (down) or `j` (up) to select a repo.
+4. Do one of these steps:
+   - To open its folder, push `Enter`. If the repo has no local folder, the command line asks `No local folder. Open it on GitHub?`. Push `Enter` or `y` to open it on GitHub. Push `Esc` to stop.
+   - To open it on GitHub, push `b` or `Option+Enter`.
+   - To look at its files, push `k`. The list moves to the left and the panel on the right shows the folders and files of the repo (folders first, `.git` is not shown).
+5. In the panel:
+   - Push `l` or `j` to select a file or folder.
+   - Push `k` to go into a folder, or to open a file (with `open_cmd`). Select `..` and push `k`, or push `h`, to go up.
+   - Push `Enter` to show the folder in Finder, or to open the file.
+   - Push `b` to open the folder that the panel shows on GitHub.
+   - Push `Esc` to close the panel.
+
+Kaching finds local repos one level below `~/bbq` and `~`, in `~/.agent-repos` and in the sync check. It reads the GitHub repos with `gh repo list` each time you open the view. If that read fails, the last list stays and the error shows at the top. For a repo without a local folder, the panel reads the folders from GitHub, and `k` on a file opens it on GitHub.
 
 ### 6.13 Do a proposal of the learner
 

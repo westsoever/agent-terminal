@@ -45,6 +45,10 @@ func main() {
 			if m.view == vPulls { // only here: it asks GitHub
 				m.pulls = loadPulls()
 			}
+			if m.view == vRepos {
+				m.repoGH = loadGHRepos()
+				m.setRepos()
+			}
 			if m.view == vPaperclip {
 				m.pc = loadPaperclip()
 				if it := m.pcSelected(); it != nil {
