@@ -33,7 +33,7 @@ The right hand does the most frequent work: `j` goes up, `l` goes down, `k` open
 |---|---|
 | `l` or `↓` | Select the next agent (down the list). |
 | `j` or `↑` | Select the previous agent (up the list). |
-| `Space` | Select the next agent that waits for you. |
+| `Space` | Select the agent in `INPUT` that has waited the longest. |
 | `1` to `9` | Send the answer with that number to the selected agent. |
 | `k` | Write a message to the selected agent. `Enter` sends it. `Esc` keeps it as a draft. Refer to section 1.4. |
 | `o`, then `a` to `i` | Open the file with that letter. |
@@ -87,7 +87,7 @@ The top line does not show your message. It shows only the name of the agent tha
 |---|---|
 | `1` to `9` | Select the tile with that number. |
 | `z` | Show the selected tile on the full screen. Push `z` again to go back. |
-| `l`, `j`, `Space` | Select the next, previous or next waiting agent. |
+| `l`, `j`, `Space` | Select the next or previous agent, or the agent in `INPUT` that has waited the longest. |
 | `Esc` | Go back to the desk. |
 
 When a tile shows on the full screen, the number keys send answers, as on the desk.
@@ -225,9 +225,9 @@ In command mode and write mode:
 ### 6.1 Find the agents that wait for you
 
 1. Look at the command line. It shows the number of agents that wait for you.
-2. Push `Space`. Kaching selects the next agent that waits for you.
-3. Read the agent panel.
-4. Push `Space` again to go to the next agent.
+2. Push `Space`. Kaching selects the agent in `INPUT` that has waited the longest. Agents that are only done (`WAITING`) are skipped.
+3. Read the agent panel and answer it.
+4. Push `Space` again. Kaching selects the agent in `INPUT` that now has waited the longest. Pushing `Space` again before you answer keeps the same agent.
 
 ### 6.2 Select an answer
 

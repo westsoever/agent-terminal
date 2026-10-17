@@ -335,26 +335,20 @@ func (m *model) promptKey(ks string) (bool, tea.Cmd) {
 	return false, nil
 }
 
+// nextWaiting selects the INPUT agent that has waited the longest: it asked the owner something or is blocked.
+// It doesn't cycle: once that one is answered, the next longest is first. Done agents (WAITING) are skipped.
 func (m *model) nextWaiting() {
-	var w []int
+	best := -1
 	for i, a := range m.agents {
-		if a.Group() == 0 {
-			w = append(w, i)
+		if a.needsYou() && (best < 0 || a.Since.Before(m.agents[best].Since)) {
+			best = i
 		}
 	}
-	if len(w) == 0 {
-		m.setStatus("nobody is waiting for you")
+	if best < 0 {
+		m.setStatus("nobody asks you anything")
 		return
 	}
-	cur := m.selIndex()
-	for _, i := range w {
-		if i > cur {
-			m.selSID = m.agents[i].SID
-			m.writeState()
-			return
-		}
-	}
-	m.selSID = m.agents[w[0]].SID
+	m.selSID = m.agents[best].SID
 	m.writeState()
 }
 

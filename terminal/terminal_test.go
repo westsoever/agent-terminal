@@ -345,3 +345,32 @@ func TestReturnWindow(t *testing.T) {
 		}
 	}
 }
+
+// Space selects the INPUT agent that has waited the longest, every time: it skips done agents (WAITING) and
+// doesn't cycle on to the next one until that one is answered.
+func TestNextWaitingLongestInput(t *testing.T) {
+	cfg, _, _ := loadConfig()
+	now := time.Now()
+	m := model{cfg: cfg, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}}
+	m.agents = []Agent{
+		{SID: "done-oldest", State: "done", Since: now.Add(-3 * time.Hour)},
+		{SID: "input-new", State: "input", Since: now.Add(-5 * time.Minute)},
+		{SID: "blocked-old", State: "blocked", Since: now.Add(-time.Hour)},
+		{SID: "working", State: "working", Busy: true, Since: now.Add(-4 * time.Hour)},
+	}
+	m.selSID = "working"
+	for i := 0; i < 3; i++ {
+		m.nextWaiting()
+		if m.selSID != "blocked-old" {
+			t.Fatalf("press %d: selected %s", i+1, m.selSID)
+		}
+	}
+	m.agents[2].State = "working" // answered
+	if m.nextWaiting(); m.selSID != "input-new" {
+		t.Fatalf("after the answer: selected %s", m.selSID)
+	}
+	m.agents[1].State = "idle"
+	if m.nextWaiting(); m.selSID != "input-new" || m.status == "" {
+		t.Fatalf("nobody in INPUT: selected %s, status %q", m.selSID, m.status)
+	}
+}

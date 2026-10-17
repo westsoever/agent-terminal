@@ -56,7 +56,7 @@ tables = "auto"
 [keys]
 next = "l"            # next agent (down the list)
 prev = "j"            # previous agent (up the list)
-next_waiting = " "    # space alone: next agent that waits for you
+next_waiting = " "    # space alone: the INPUT agent that has waited the longest
 type_reply = "k"      # write a reply (enter sends, esc keeps a draft)
 open_file = "o"       # then a letter: open that mentioned file
 go_to_window = "g"    # bring the agent's own Terminal window forward, where it is

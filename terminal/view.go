@@ -728,7 +728,7 @@ func (m model) helpView(h int) []string {
 		"",
 		"## Desk",
 		row2(k(K.Next)+" / "+k(K.Prev), "next / previous agent"),
-		row2(k(K.Waiting), "next agent that waits for you"),
+		row2(k(K.Waiting), "the agent in INPUT that has waited the longest"),
 		row2(k(K.Older)+" / "+k(K.Newer), "scroll the agent's conversation 3 lines back / on (also when zoomed, and while writing on the draft's first / last line)"),
 		row2("pgup / pgdown", "a page back / on   ·   home: its start   ·   end: the newest"),
 		row2("1-9", "send that numbered answer"),
@@ -786,7 +786,7 @@ func (m model) footer() []string {
 		add(&r1, "1-9", "select")
 		add(&r1, K.Zoom, "zoom")
 		add(&r1, K.Next+" "+K.Prev, "next/prev")
-		add(&r1, key(K.Waiting), "next waiting")
+		add(&r1, key(K.Waiting), "longest input")
 		add(&r1, "esc", "desk")
 	case vFiles, vProposals, vRecaps, vPaperclip, vRepos:
 		add(&r1, K.Next+" "+K.Prev, "move")
@@ -797,7 +797,7 @@ func (m model) footer() []string {
 		add(&r1, "1-9", "answer")
 		add(&r1, K.Next+" "+K.Prev, "next/prev")
 		add(&r1, key(K.Older)+key(K.Newer), "scroll")
-		add(&r1, key(K.Waiting), "next waiting")
+		add(&r1, key(K.Waiting), "longest input")
 		add(&r1, K.Open+" a-i", "open file")
 		add(&r1, K.Goto, "go to window")
 		add(&r1, K.Here, "bring here")
