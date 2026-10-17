@@ -66,6 +66,12 @@ func segsWidth(segs []seg) int {
 // box draws a frame of outer width w and height h around body rows (each already exactly w-2 wide or shorter;
 // shorter rows are padded). title goes into the top border. border is the frame's style.
 func box(w, h int, title []seg, border lipgloss.Style, body []string) []string {
+	return boxR(w, h, title, nil, border, body)
+}
+
+// boxR is box with a second title at the right end of the top border. It drops the right title's last parts
+// while the two don't fit.
+func boxR(w, h int, title, right []seg, border lipgloss.Style, body []string) []string {
 	if w < 4 || h < 2 {
 		return nil
 	}
@@ -87,6 +93,15 @@ func box(w, h int, title []seg, border lipgloss.Style, body []string) []string {
 		t = runewidth.Truncate(t, w-6, "…")
 		top = append(top, s(t, cWhite), s(" ", border))
 		rest = w - 1 - segsWidth(top)
+	}
+	for len(right) > 0 && rest-(segsWidth(right)+3) < 3 { // too wide: drop its last part
+		right = right[:len(right)-1]
+	}
+	if rw := segsWidth(right) + 3; len(right) > 0 { // " right ─": at least 3 dashes stay between
+		top = append(top, s(strings.Repeat("─", rest-rw)+" ", border))
+		top = append(top, right...)
+		rest = 1
+		top = append(top, s(" ", border))
 	}
 	top = append(top, s(strings.Repeat("─", rest)+"┐", border))
 	out := []string{row(w, top...)}

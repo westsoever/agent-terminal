@@ -132,7 +132,8 @@ func TestViewGeometry(t *testing.T) {
 	sortAgents(m.agents)
 	m.selSID = m.agents[0].SID
 	long := strings.Replace(recapLine, "We fixed the queue.", strings.Repeat("A long recap line. ", 40), 1)
-	m.agents[0].Transcript = writeTranscript(t, `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}`, long)
+	m.agents[0].Transcript = writeTranscript(t, `{"type":"assistant","effort":"xhigh","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"hi"}]}}`, long)
+	m.usage = Usage{OK: true, Five: Limit{Pct: 54, Reset: now.Add(97 * time.Minute), OK: true}, Week: Limit{Pct: 88, Reset: now.Add(50 * time.Hour), OK: true}}
 	m.pc = PCState{Items: []PCItem{{Ref: "COS-5", Status: "blocked", Title: "t", Detail: "why", Needs: true}}}
 	m.props = []string{"skill x: something"}
 	m.sync = []string{"## repo", "needs: 1 stash"}

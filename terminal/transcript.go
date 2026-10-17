@@ -21,6 +21,8 @@ type Last struct {
 	Recap    string    // Claude Code's latest recap (the "while you were away" summary), '' when none
 	RecapAt  time.Time // when Claude Code wrote it
 	Chat     []Turn    // the conversation in the transcript tail, oldest first, at most maxTurns
+	Model    string    // the model of its latest reply, as Claude Code names it ("claude-opus-5-5"), '' when none
+	Effort   string    // the effort that reply ran at ("high"), '' when the transcript doesn't say
 }
 
 // Turn is one message of the conversation: the owner's prompt (User) or a text the agent wrote.
@@ -42,7 +44,9 @@ type entry struct {
 	Content   json.RawMessage `json:"content"` // system entries: plain text
 	Timestamp time.Time       `json:"timestamp"`
 	IsMeta    bool            `json:"isMeta"`
+	Effort    string          `json:"effort"`
 	Message   struct {
+		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
 }
@@ -106,6 +110,9 @@ func readLast(path, cwd string) Last {
 		}
 		if e.Type != "assistant" && e.Type != "user" {
 			continue
+		}
+		if e.Type == "assistant" && e.Message.Model != "" && e.Message.Model != "<synthetic>" {
+			l.Model, l.Effort = e.Message.Model, e.Effort
 		}
 		var blocks []block
 		if json.Unmarshal(e.Message.Content, &blocks) != nil {

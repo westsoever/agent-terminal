@@ -162,7 +162,9 @@ The screen has five parts, from the top to the bottom:
 2. The command line. It shows the current code, the time, the number of agents and the number of agents that wait for you. It also shows short messages from Kaching.
 3. The agent list (left). It shows all agents in three groups.
 4. The agent panel (right). It shows the selected agent.
-5. The key bar (bottom). The first line shows the keys for the current view. The second line shows the fixed messages.
+5. The key bar (bottom). The first line shows the keys for the current view. The second line shows the fixed messages. On the right, the two lines show your Claude usage: the 5-hour window above the 7-day limit. Each line shows the exact percentage, a bar, and the time until it starts again (`↻ 1h33m`, `↻ 1d08h`). When the screen is narrow, keys at the end of the lines give way.
+
+The usage comes from the statusline: `~/.claude/statusline-command.sh` writes the `rate_limits` of each session to `~/.agent/usage/<session id>.json` when they change, and Kaching shows the newest file. Before any session has updated its statusline, the bar says `no statusline reading yet`.
 
 ### 4.2 The agent list
 
@@ -184,7 +186,7 @@ A dark name shows an agent that is not in Terminal.app. You can read its message
 
 The agent panel shows the selected agent:
 
-- The top line shows its name, its folder and its git branch.
+- The top line shows its name, its folder and its git branch. On the right it shows the model and effort of its last reply, for example `[Opus 5.5] high`. The wall tiles show it too; a narrow tile shows only the model.
 - The text is the end of its last message.
 - The numbered lines are the answers that it asks you to select from.
 - `FILES IT MENTIONED` shows the files that its last message names. Each file has a letter.
@@ -200,6 +202,7 @@ An orange frame shows that the agent waits for you.
 | White | The current view, or a name that is important. |
 | Grey | Normal text. |
 | Dark grey | Frames, idle agents, and agents that you cannot send text to. |
+| Green, amber, red | Claude usage: below 50%, from 50%, from 80%. |
 
 ## 5. Modes
 

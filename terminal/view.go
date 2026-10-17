@@ -482,7 +482,7 @@ func (m model) agentPanel(w, h int) []string {
 	if a.Group() == 0 {
 		border = cOrange
 	}
-	return box(w, h, title, border, body)
+	return boxR(w, h, title, modelTag(l), border, body)
 }
 
 // ---- wall
@@ -584,7 +584,7 @@ func (m model) tile(i, w, h int) []string {
 		body = append(body, " "+row(in, o...)+" ")
 	}
 	body = append(body, " "+row(in, s("> ", border))+" ")
-	return box(w, h, title, border, body)
+	return boxR(w, h, title, modelTag(l), border, body)
 }
 
 // ---- list views
@@ -810,6 +810,20 @@ func (m model) footer() []string {
 	r2 := []seg{s(" ", cPlain)}
 	for _, r := range m.cfg.Replies {
 		add(&r2, strings.Replace(r.Key, "space ", "␣", 1), r.Label)
+	}
+	// the Claude usage on the right of the two key rows; the keys give way
+	u := usageRows(m.usage, time.Now())
+	uw := max(segsWidth(u[0]), segsWidth(u[1]))
+	if kw := m.w - uw - 3; kw >= 20 {
+		fit := func(segs []seg) []seg { // whole hints only: drop the last key and label while they don't fit
+			for len(segs) > 1 && segsWidth(segs) > kw {
+				segs = segs[:max(1, len(segs)-2)]
+			}
+			return segs
+		}
+		r1, r2 = fit(r1), fit(r2)
+		return []string{cDark.Render(strings.Repeat("─", m.w)),
+			row(kw, r1...) + "  " + row(uw, u[0]...) + " ", row(kw, r2...) + "  " + row(uw, u[1]...) + " "}
 	}
 	return []string{cDark.Render(strings.Repeat("─", m.w)), row(m.w, r1...), row(m.w, r2...)}
 }

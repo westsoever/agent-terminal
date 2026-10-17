@@ -75,6 +75,7 @@ type model struct {
 	ed        *editor
 	prompts   map[string]Prompt // sid -> the menu its screen shows (selected waiting agents only)
 	scroll    *chatScroll       // shared by every copy of the model: View records the limits it drew
+	usage     Usage             // the Claude usage limits, read on every tick
 }
 
 // chatScroll is how far the selected agent's conversation is scrolled back from its newest line. agentPanel
@@ -115,6 +116,7 @@ func newModel() model {
 		m.setErr("keys.toml: " + err.Error())
 	}
 	m.agents = loadAgents(nil, nil)
+	m.usage = loadUsage()
 	if len(m.agents) > 0 {
 		m.selSID = m.agents[0].SID
 	}
@@ -136,6 +138,7 @@ func (m *model) setErr(t string)    { m.status, m.statusErr = t, true }
 
 func (m *model) refresh() {
 	m.agents = loadAgents(m.ttys, m.groups)
+	m.usage = loadUsage()
 	m.applyPrompts()
 	for sid, at := range m.expect {
 		for _, a := range m.agents {
