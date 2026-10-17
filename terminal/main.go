@@ -27,6 +27,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "--render wants WxH, e.g. 140x40")
 			os.Exit(2)
 		}
+		readOnly = true
 		lipgloss.SetColorProfile(termenv.ANSI256)
 		m := newModel()
 		m.w, m.h = w, h

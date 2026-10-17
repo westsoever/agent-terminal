@@ -27,6 +27,7 @@ type Keys struct {
 	Command string `toml:"command"`
 	Wall    string `toml:"wall"`
 	Zoom    string `toml:"zoom"`
+	Dismiss string `toml:"dismiss"`
 	Refresh string `toml:"refresh"`
 }
 
@@ -53,6 +54,7 @@ go_to_window = "g"    # bring the agent's own Terminal window forward
 command = "/"         # command line: IN AG FL RP PR PC A<n> HELP QUIT
 wall = "W"            # every agent as tiles
 zoom = "z"            # in the wall: one tile full screen
+dismiss = "x"         # take a waiting agent out of the queue without answering
 refresh = "R"         # re-read everything now
 
 # Pre-written replies. key is one key, or "space " + a key (press space, then the key).
@@ -138,6 +140,7 @@ func loadConfig() (Config, time.Time, error) {
 	fill(&c.Keys.Command, def.Keys.Command)
 	fill(&c.Keys.Wall, def.Keys.Wall)
 	fill(&c.Keys.Zoom, def.Keys.Zoom)
+	fill(&c.Keys.Dismiss, def.Keys.Dismiss)
 	fill(&c.Keys.Refresh, def.Keys.Refresh)
 	for i := range c.Replies {
 		c.Replies[i].Key = strings.TrimSpace(c.Replies[i].Key)
