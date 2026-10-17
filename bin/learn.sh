@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # learn.sh [--weekly | --nightly] - the learner's one entry point (Phase 6 spec 5 and 7), run by launchd
-# (org.ching.learn, every day at 05:30 local; install.sh). It runs the learner components in order, under a mkdir
-# lock (the ching-watch.sh pattern), each with cwd $AGENT_HOME/proposals/.work:
+# (org.kaching.learn, every day at 05:30 local; install.sh). It runs the learner components in order, under a mkdir
+# lock (the kaching-watch.sh pattern), each with cwd $AGENT_HOME/proposals/.work:
 #   nightly  learn-extract.sh, learn-corrections.sh
 #   weekly   then learn-skills.sh and learn-report.sh
 # The weekly part runs on the first run of each ISO week (normally Monday 05:30; a Monday missed while the Mac was
@@ -9,7 +9,7 @@
 # A component file that does not exist (yet) is skipped with a learn_run {outcome: missing} event, so this works
 # before every component has landed. LEARN_DISABLE (environment or $AGENT_HOME/config; names separated by commas or
 # spaces: extract corrections skills report, or all) skips a component with learn_run {outcome: disabled}.
-# Sets CHING_LEARNER=1 (guard learner mode) and CLAUDE_MEM_INTERNAL=1 (claude-mem does not observe, D27) for every
+# Sets KACHING_LEARNER=1 (guard learner mode) and CLAUDE_MEM_INTERNAL=1 (claude-mem does not observe, D27) for every
 # component. Fails quiet: every component's output and a line per step go to .work/learn.log; a component that
 # exits non-zero, or runs past LEARN_COMPONENT_TIMEOUT seconds (default 3600), gives learn_run {outcome: error}. It
 # never touches hooks, sessions or anything outside $AGENT_HOME/proposals (events.jsonl aside). Prints one summary
@@ -32,7 +32,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-export CHING_LEARNER=1 CLAUDE_MEM_INTERNAL=1
+export KACHING_LEARNER=1 CLAUDE_MEM_INTERNAL=1
 umask 077
 COMP_DIR=${LEARN_COMPONENT_DIR:-$SELF_DIR}
 SID=""; NAME="ching-learn"; CWD=""   # what ev() stamps on the events

@@ -159,7 +159,7 @@ gate "$R" >/dev/null   # re-mint properly
 # ---------- the real git pre-push hook as the second layer ----------
 out=$(CLAUDE_DIR="$CLAUDE_DIR" "$KIT/install.sh" --install-prepush "$R"); assert_contains "pre-push installed" "$out" "write"
 assert_file "pre-push hook file" "$R/.git/hooks/pre-push"
-assert_contains "hook points at the kit via the symlink" "$(cat "$R/.git/hooks/pre-push")" "$CLAUDE_DIR/ching/bin"
+assert_contains "hook points at the kit via the symlink" "$(cat "$R/.git/hooks/pre-push")" "$CLAUDE_DIR/kaching/bin"
 out=$(CLAUDE_DIR="$CLAUDE_DIR" "$KIT/install.sh" --install-prepush "$R"); assert_contains "pre-push install is idempotent" "$out" "already installed"
 out=$(git -C "$R" push origin HEAD:main 2>&1); rc=$?
 assert_eq "hook: push to main with a valid token succeeds" "0" "$rc"
@@ -211,7 +211,7 @@ out=$(git -C "$RG" push origin HEAD:main 2>&1); assert_eq "hook, gate on, releas
 # existing foreign pre-push hook is preserved
 R4=$(mk_repo foreign); printf '#!/bin/sh\nexit 0\n' >"$R4/.git/hooks/pre-push"; chmod +x "$R4/.git/hooks/pre-push"
 out=$(CLAUDE_DIR="$CLAUDE_DIR" "$KIT/install.sh" --install-prepush "$R4")
-assert_contains "foreign hook: not overwritten, side file written" "$out" "pre-push.ching"
+assert_contains "foreign hook: not overwritten, side file written" "$out" "pre-push.kaching"
 assert_eq "foreign hook content intact" '#!/bin/sh' "$(head -1 "$R4/.git/hooks/pre-push")"
 # honours core.hooksPath
 R5=$(mk_repo hp); mkdir -p "$R5/.githooks"; git -C "$R5" config core.hooksPath .githooks

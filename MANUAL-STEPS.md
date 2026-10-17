@@ -2,12 +2,12 @@
 
 Everything here needs a human (a GUI app, a microphone, or a trust prompt). Tick the boxes as you go. Total about 45 minutes; items are ordered shortest first.
 
-Everything runs in the throwaway sandbox `/tmp/agent-sandbox/repo`. Nothing touches miso, `~/.miso` or your real settings. The kit is backed up in `/Users/clyde/bbq/ching/phase0-manual/` (`setup.sh` rebuilds the sandbox if `/tmp` was cleaned).
+Everything runs in the throwaway sandbox `/tmp/agent-sandbox/repo`. Nothing touches miso, `~/.miso` or your real settings. The kit is backed up in `/Users/clyde/bbq/kaching/phase0-manual/` (`setup.sh` rebuilds the sandbox if `/tmp` was cleaned).
 
 **Before you start (1 min):**
 
 ```
-/Users/clyde/bbq/ching/phase0-manual/setup.sh
+/Users/clyde/bbq/kaching/phase0-manual/setup.sh
 ```
 
 This re-installs the logging hook in the sandbox and empties the log. The log file is `/tmp/agent-sandbox/logs/clients.log`. Your own user hooks (osascript popups) will still fire in these sessions; that is expected.
@@ -149,7 +149,7 @@ Three steps only you can do (0.6, 0.7, 4.3) and one new two-minute check (V1). T
 
 **Before you start (5 minutes)**
 
-1. `ching-b` is merged into `~/bbq/ching` main, `install.sh` has been run on your real settings (it shows the diff and asks), and `install.sh --install-dispatcher` has been run. Check: `ls ~/.claude/commands/dash.md ~/.claude/ching/dispatcher/tool-gate.sh ~/.agent/dispatcher/.claude/settings.json` lists all three.
+1. `ching-b` is merged into `~/bbq/kaching` main, `install.sh` has been run on your real settings (it shows the diff and asks), and `install.sh --install-dispatcher` has been run. Check: `ls ~/.claude/commands/dash.md ~/.claude/kaching/dispatcher/tool-gate.sh ~/.agent/dispatcher/.claude/settings.json` lists all three.
 2. `voicemode whisper service status` and `voicemode kokoro status` both say running locally.
 3. The terminal app you will use has macOS microphone access (System Settings > Privacy & Security > Microphone).
 4. Quiet room. Do the steps in this order: pick the pass line, V1, then 4.3 (which measures 0.6), then 0.7.
@@ -192,7 +192,7 @@ Use the stopwatch on every phrase. The average of the four, against the line you
 
 **Why:** every session has VoiceMode's converse tool (the plugin is enabled for all of them). Only the dispatcher is meant to speak. The voice lock (`~/.voicemode/conch`) is what stops a worker that tries from talking over it. The source says the second caller is refused, not queued, unless it asks to wait. This step confirms that live.
 
-Stop the dispatcher first (`/exit`), so it does not hold the voice. If `/tmp/agent-sandbox` was cleaned, run `/Users/clyde/bbq/ching/phase0-manual/setup.sh` first.
+Stop the dispatcher first (`/exit`), so it does not hold the voice. If `/tmp/agent-sandbox` was cleaned, run `/Users/clyde/bbq/kaching/phase0-manual/setup.sh` first.
 
 1. Terminal 3 (watcher): `watch -n1 voicemode conch status` (no `watch`? `while true; do voicemode conch status; sleep 1; clear; done`).
 2. Terminal 1: `cd /tmp/agent-sandbox/repo && claude -n voiceA --permission-mode bypassPermissions`. Terminal 2: the same with `-n voiceB`.
@@ -203,4 +203,4 @@ Stop the dispatcher first (`/exit`), so it does not hold the voice. If `/tmp/age
 **Fail:** two voices at once in either test; B hangs in test 2; the lock stays held after both finish (`voicemode conch status`).
 **Tell Claude:** `0.7 pass`, or `0.7 fail: overlapped in test 1` / `0.7 fail: B never spoke in test 2`.
 
-**When you are done:** reply with one line per item, for example `V1 pass`, `0.6 pass 6.1 s average, line 8`, `4.3 pass`, `0.7 pass`. Cleanup: `rm -rf /tmp/ching-accept /tmp/agent-sandbox`.
+**When you are done:** reply with one line per item, for example `V1 pass`, `0.6 pass 6.1 s average, line 8`, `4.3 pass`, `0.7 pass`. Cleanup: `rm -rf /tmp/kaching-accept /tmp/agent-sandbox`.

@@ -112,15 +112,15 @@ EOS
 chmod +x "$WORK/fake-claude"
 export ESC_CALLS="$WORK/esc-calls" ESC_FILE="$WORK/esc-ok"; : >"$ESC_CALLS"; rm -f "$ESC_FILE"
 write_goal "$R" "test -f $ESC_FILE"
-out=$(CHING_CLAUDE_BIN="$WORK/fake-claude" CHING_TEST_MODELS="cheap strong" stop "$R" sess-ESC1)
+out=$(KACHING_CLAUDE_BIN="$WORK/fake-claude" KACHING_TEST_MODELS="cheap strong" stop "$R" sess-ESC1)
 assert_eq "escalation: cheap model fixed it, stop allowed" "" "$out"
 assert_eq "escalation: only the cheap model was called" "cheap" "$(tr '\n' ' ' <"$ESC_CALLS" | sed 's/ $//')"
 rm -f "$ESC_FILE"
-out=$(CHING_TEST_MODELS="" stop "$R" sess-ESC2)
+out=$(KACHING_TEST_MODELS="" stop "$R" sess-ESC2)
 assert_eq "no models configured: plain block" "block" "$(printf '%s' "$out" | jq -r .decision)"
 # recursion guard: a model started by test-escalate.sh inherits this hook; its stop is never gated
 : >"$ESC_CALLS"; rm -f "$ESC_FILE"
-out=$(CHING_ESCALATING=1 CHING_CLAUDE_BIN="$WORK/fake-claude" CHING_TEST_MODELS="cheap strong" stop "$R" sess-ESC3)
+out=$(KACHING_ESCALATING=1 KACHING_CLAUDE_BIN="$WORK/fake-claude" KACHING_TEST_MODELS="cheap strong" stop "$R" sess-ESC3)
 assert_eq "escalating child: stop is allowed, never blocked" "" "$out"
 assert_eq "escalating child: no model is started" "0" "$(wc -l <"$ESC_CALLS" | tr -d ' ')"
 assert_no_file "escalating child: no retry counter written" "$AGENT_HOME/sessions/sess-ESC3/retries"
@@ -167,27 +167,27 @@ write_goal "$R" "test -f $WORK/never-exists"
 for i in 1 2 3; do
   echo "cap $i" >>"$R/churn.txt"
   # LADDER_DAILY=100: this test counts the calls per stop, the daily ceiling (default 6) has its own test below
-  out=$(CHING_TEST_LADDER_DAILY=100 CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-CAPLADDER)
+  out=$(KACHING_TEST_LADDER_DAILY=100 KACHING_CLAUDE_BIN="$WORK/fake-claude-nofix" KACHING_TEST_MODELS="cheap strong" stop "$R" sess-CAPLADDER)
   assert_eq "cap ladder: stop $i blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
 done
 GAVE_UP_BEFORE=$(grep -c 'gave up after' "$R/.agent/STATE.md" || true)
-out=$(CHING_TEST_LADDER_DAILY=100 CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-CAPLADDER)
+out=$(KACHING_TEST_LADDER_DAILY=100 KACHING_CLAUDE_BIN="$WORK/fake-claude-nofix" KACHING_TEST_MODELS="cheap strong" stop "$R" sess-CAPLADDER)
 assert_eq "cap ladder: stop 4 is allowed" "" "$out"
 assert_eq "cap ladder: 3 blocking stops x 2 models, none on the cap stop" "6" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
 assert_no_file "cap ladder: counter reset at the cap" "$AGENT_HOME/sessions/sess-CAPLADDER/retries"
 assert_eq "cap ladder: the cap stop is still recorded in STATE.md" "$((GAVE_UP_BEFORE + 1))" "$(grep -c 'gave up after' "$R/.agent/STATE.md" || true)"
 
 # Daily ceiling: the retry cap is per session id, so a repo whose tests fail for any reason (a missing service)
-# would pay for the whole ladder on every blocked stop of every session. CHING_TEST_LADDER_DAILY caps the
+# would pay for the whole ladder on every blocked stop of every session. KACHING_TEST_LADDER_DAILY caps the
 # model calls per UTC day, machine-wide. One session id, 3 prompts x 4 stops: 18 calls without the ceiling.
 rm -rf "$AGENT_HOME/ladder"; : >"$NOFIX_CALLS"
 for p in 1 2 3; do
   for i in 1 2 3; do
     echo "daily $p $i" >>"$R/churn.txt"
-    out=$(CHING_TEST_LADDER_DAILY=4 CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-DAILY)
+    out=$(KACHING_TEST_LADDER_DAILY=4 KACHING_CLAUDE_BIN="$WORK/fake-claude-nofix" KACHING_TEST_MODELS="cheap strong" stop "$R" sess-DAILY)
     assert_eq "daily ceiling: prompt $p stop $i still blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
   done
-  out=$(CHING_TEST_LADDER_DAILY=4 CHING_CLAUDE_BIN="$WORK/fake-claude-nofix" CHING_TEST_MODELS="cheap strong" stop "$R" sess-DAILY)
+  out=$(KACHING_TEST_LADDER_DAILY=4 KACHING_CLAUDE_BIN="$WORK/fake-claude-nofix" KACHING_TEST_MODELS="cheap strong" stop "$R" sess-DAILY)
   assert_eq "daily ceiling: prompt $p stop 4 is allowed" "" "$out"
 done
 assert_eq "daily ceiling 4: 3 prompts x 4 stops make exactly 4 model calls" "4" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
@@ -203,7 +203,7 @@ echo "attempted fix" >"$TRY_FILE"   # edits the tree without fixing anything
 EOS
 chmod +x "$WORK/fake-claude-try"
 export TRY_FILE="$LR/attempt.txt"
-lstop() { CHING_TEST_LADDER_DAILY=100 CHING_CLAUDE_BIN="$WORK/fake-claude-try" CHING_TEST_MODELS="cheap strong" stop "$LR" "$1"; }
+lstop() { KACHING_TEST_LADDER_DAILY=100 KACHING_CLAUDE_BIN="$WORK/fake-claude-try" KACHING_TEST_MODELS="cheap strong" stop "$LR" "$1"; }
 : >"$NOFIX_CALLS"
 out=$(lstop sess-SAME)
 assert_eq "same tree: first stop runs the ladder (2 calls)" "2" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
@@ -220,7 +220,7 @@ git -C "$LR" checkout -q README.md
 # a tree is recorded only when a model was really called: a ladder held back by the daily ceiling or by the
 # deadline has not failed on it
 echo "skipped-ladder tree" >>"$LR/README.md"; : >"$NOFIX_CALLS"
-out=$(CHING_TEST_LADDER_DAILY=0 CHING_CLAUDE_BIN="$WORK/fake-claude-try" CHING_TEST_MODELS="cheap strong" stop "$LR" sess-NOREC)
+out=$(KACHING_TEST_LADDER_DAILY=0 KACHING_CLAUDE_BIN="$WORK/fake-claude-try" KACHING_TEST_MODELS="cheap strong" stop "$LR" sess-NOREC)
 assert_eq "daily ceiling 0: no model call" "0" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
 out=$(STOP_CHECK_DEADLINE=20 lstop sess-NOREC)
 assert_eq "deadline too near: no model call" "0" "$(wc -l <"$NOFIX_CALLS" | tr -d ' ')"
@@ -314,7 +314,7 @@ EOS
 chmod +x "$WORK/fake-claude-count"
 export COUNT_CALLS="$WORK/count-calls"; : >"$COUNT_CALLS"
 write_goal "$R" "false"
-out=$(STOP_CHECK_DEADLINE=20 CHING_TEST_LADDER_DAILY=100 CHING_CLAUDE_BIN="$WORK/fake-claude-count" CHING_TEST_MODELS="cheap strong" stop "$R" sess-DLLADDER)
+out=$(STOP_CHECK_DEADLINE=20 KACHING_TEST_LADDER_DAILY=100 KACHING_CLAUDE_BIN="$WORK/fake-claude-count" KACHING_TEST_MODELS="cheap strong" stop "$R" sess-DLLADDER)
 assert_eq "deadline: too little budget left, no model call" "0" "$(wc -l <"$COUNT_CALLS" | tr -d ' ')"
 assert_eq "deadline: the failing check still blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
 assert_contains "deadline: the ladder skip is in the escalation log" "$(cat "$AGENT_HOME/test-escalation.log")" "reason=deadline"
@@ -390,11 +390,11 @@ assert_eq "a commit after the prompt (clean tree): blocks" "block" "$(printf '%s
 age_tree; touch -t 202001010000 "$CU/new.txt"; touch_prompt "$CU" cu-4; rm "$CU/new.txt"
 out=$(stop "$CU" cu-4)
 assert_eq "a tracked file deleted after the prompt: blocks" "block" "$(printf '%s' "$out" | jq -r .decision)"
-# scripted runs opt out: CHING_NO_CHECKPOINT=1, or a non-interactive Claude Code run (claude -p sets
+# scripted runs opt out: KACHING_NO_CHECKPOINT=1, or a non-interactive Claude Code run (claude -p sets
 # CLAUDE_CODE_ENTRYPOINT=sdk-cli; the Agent SDK sets sdk-ts / sdk-py)
 touch_prompt "$CR" cp-6; work "$CR" cp-6
-out=$(CHING_NO_CHECKPOINT=1 stop "$CR" cp-6)
-assert_eq "CHING_NO_CHECKPOINT=1: no checkpoint block" "" "$out"
+out=$(KACHING_NO_CHECKPOINT=1 stop "$CR" cp-6)
+assert_eq "KACHING_NO_CHECKPOINT=1: no checkpoint block" "" "$out"
 touch_prompt "$CR" cp-7; work "$CR" cp-7
 out=$(CLAUDE_CODE_ENTRYPOINT=sdk-cli stop "$CR" cp-7)
 assert_eq "claude -p (CLAUDE_CODE_ENTRYPOINT=sdk-cli): no checkpoint block" "" "$out"
@@ -512,14 +512,14 @@ out1=$(stop_active "$CF" f7-g); out2=$(stop_active "$CF" f7-g); out3=$(stop_acti
 assert_eq "stop_hook_active true: block, block, allow" "block block allow" "$(cp_decision "$out1") $(cp_decision "$out2") $(cp_decision "$out3")"
 # opt-outs: placeholders are fine for scripted runs, before and after a block
 touch_prompt "$CF" f7-h; work "$CF" f7-h; use_template "$CF"
-out=$(CHING_NO_CHECKPOINT=1 stop "$CF" f7-h)
-assert_eq "CHING_NO_CHECKPOINT=1 with a placeholder block: allowed" "" "$out"
+out=$(KACHING_NO_CHECKPOINT=1 stop "$CF" f7-h)
+assert_eq "KACHING_NO_CHECKPOINT=1 with a placeholder block: allowed" "" "$out"
 touch_prompt "$CF" f7-i; work "$CF" f7-i; use_template "$CF"
 out=$(CLAUDE_CODE_ENTRYPOINT=sdk-ts stop "$CF" f7-i)
 assert_eq "sdk entrypoint with a placeholder block: allowed" "" "$out"
 touch_prompt "$CF" f7-j; work "$CF" f7-j; use_template "$CF"
 stop "$CF" f7-j >/dev/null
-out=$(CHING_NO_CHECKPOINT=1 stop "$CF" f7-j)
+out=$(KACHING_NO_CHECKPOINT=1 stop "$CF" f7-j)
 assert_eq "opt-out after the first block: allowed, no second block" "" "$out"
 assert_eq "opt-outs: no checkpoint_unmet, no extra blocks" ":1 " "$(cp_unmet f7-j):$(cp_blocks f7-j)"
 assert_eq "opt-outs: nothing blocked for h and i" "" "$(cp_blocks f7-h)$(cp_blocks f7-i)"
@@ -615,9 +615,9 @@ assert_no_file "sid '..': no retries file in AGENT_HOME" "$AGENT_HOME/retries"
 assert_eq "unsafe sids map to their own sid-<hash> dirs" "3" "$(ls "$AGENT_HOME/sessions" | grep -c '^sid-')"
 out=$(stop "$SR" "../escape-a")
 assert_contains "the same unsafe sid keeps its own counter" "$(printf '%s' "$out" | jq -r .reason)" "attempt 2 of 3"
-# ---------- the learner's own model calls (CHING_LEARNER=1): no check, no gate, no notification ----------
+# ---------- the learner's own model calls (KACHING_LEARNER=1): no check, no gate, no notification ----------
 LRS=$(mk_repo learnstop); write_goal "$LRS" "false"
-out=$(CHING_LEARNER=1 "$BIN/stop-check.sh" 2>&1 <<<"$(hook_json Stop "$LRS" s-learner)"); rc=$?
+out=$(KACHING_LEARNER=1 "$BIN/stop-check.sh" 2>&1 <<<"$(hook_json Stop "$LRS" s-learner)"); rc=$?
 assert_eq "learner: exit 0" "0" "$rc"
 assert_eq "learner: never blocks (a failing test_command is not run)" "" "$out"
 assert_no_file "learner: no session dir" "$AGENT_HOME/sessions/s-learner"

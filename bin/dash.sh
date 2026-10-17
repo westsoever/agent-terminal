@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # dash.sh [--speak | --inbox | --next | --counts] [--hours N] [--all]
 # Machine-wide view: one line per Claude session on this computer.
-# Sources: (1) ~/.agent/sessions/*/meta written by the hooks and ching-watch.sh, (2) transcripts in
+# Sources: (1) ~/.agent/sessions/*/meta written by the hooks and kaching-watch.sh, (2) transcripts in
 # ~/.claude/projects/*/*.jsonl modified recently (sessions that predate the hooks), (3) worktrees
 # (`git worktree list`) of every repo found, shown when they hold repo state but have no live session,
 # plus the optional extra list in ~/.agent-repos.
@@ -11,7 +11,7 @@
 #   --inbox    NEEDS YOU (blocked/input), READY (release gate passed for the current HEAD, waiting for --approve),
 #              FINISHED (done since the last --inbox), PROPOSALS (the learner's open proposals in $AGENT_HOME/proposals,
 #              "kind id: first sentence (sessions/days)", most sessions first; snoozed and decided ones are hidden;
-#              decide them with bin/ching-proposals). --inbox marks FINISHED as seen: it writes the time to
+#              decide them with bin/kaching-proposals). --inbox marks FINISHED as seen: it writes the time to
 #              $AGENT_HOME/inbox.seen, so the next --inbox does not list those again. One entry per session.
 #   --next     top 5 by urgency x importance x recency (blocked and input sessions stay above working ones),
 #              each with its checkpoint next_action
@@ -48,7 +48,7 @@ ACTIVE_SECS=$(( ${DASH_ACTIVE_MINS:-30} * 60 ))
 REPOS_FILE=${AGENT_REPOS_FILE:-$HOME/.agent-repos}
 TOKDAY="$AGENT_HOME/tokens/$(date -u -r "$NOW" +%Y-%m-%d)"
 
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/ching-dash.XXXXXX")
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/kaching-dash.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 ROWS="$TMP/rows"; : >"$ROWS"
 # fields (0x1f separated): updated sid cwd name branch state note src ctx tok stalled imp next_action
@@ -382,7 +382,7 @@ case "$MODE" in
     lane "NEEDS YOU" "$TMP/needs"
     lane "READY" "$TMP/ready"
     lane "FINISHED (since last look)" "$TMP/fin"
-    echo "PROPOSALS (decide with bin/ching-proposals)"
+    echo "PROPOSALS (decide with bin/kaching-proposals)"
     proposal_rows >"$TMP/props"
     if [ -s "$TMP/props" ]; then sed 's/^/  /' "$TMP/props"; else echo "  (nothing)"; fi
     sync_lane

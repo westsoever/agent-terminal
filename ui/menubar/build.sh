@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# ui/menubar/build.sh - build ChingBar.app (the Ching menu bar dot) from ChingBar.swift.
+# ui/menubar/build.sh - build KachingBar.app (the Kaching menu bar dot) from KachingBar.swift.
 #
-#   build.sh <target-dir> [--force]   builds <target-dir>/ChingBar.app; prints its path
+#   build.sh <target-dir> [--force]   builds <target-dir>/KachingBar.app; prints its path
 #   build.sh --hash                   prints the source hash only (install.sh compares it with the installed app)
 #
-# Idempotent: the bundle's Info.plist carries ChingSourceHash (sha256 of ChingBar.swift, this script and the
+# Idempotent: the bundle's Info.plist carries KachingSourceHash (sha256 of KachingBar.swift, this script and the
 # swiftc version). When the bundle in <target-dir> already has the current hash, nothing is compiled or written
 # ("up to date"); --force rebuilds anyway. A new bundle is built next to the target and swapped in with mv, so a
 # failed build leaves the old one in place. Needs /usr/bin/swiftc (Xcode command line tools); no Xcode project.
 # Env: SWIFTC (default /usr/bin/swiftc, else swiftc on PATH)
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
-SRC="$HERE/ChingBar.swift"
-BUNDLE_ID=org.ching.menubar
-NAME=ChingBar
+SRC="$HERE/KachingBar.swift"
+BUNDLE_ID=org.kaching.menubar
+NAME=KachingBar
 
 SWIFTC=${SWIFTC:-}
 if [ -z "$SWIFTC" ]; then
@@ -43,7 +43,7 @@ APP="$TARGET/$NAME.app"
 HASH=$(src_hash)
 
 if [ "$FORCE" -eq 0 ] && [ -f "$APP/Contents/Info.plist" ] && [ -x "$APP/Contents/MacOS/$NAME" ] \
-   && [ "$(/usr/bin/plutil -extract ChingSourceHash raw "$APP/Contents/Info.plist" 2>/dev/null || true)" = "$HASH" ]; then
+   && [ "$(/usr/bin/plutil -extract KachingSourceHash raw "$APP/Contents/Info.plist" 2>/dev/null || true)" = "$HASH" ]; then
   echo "up to date: $APP"; exit 0
 fi
 
@@ -60,7 +60,7 @@ cat >"$NEW/Contents/Info.plist" <<EOP
 <dict>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
   <key>CFBundleName</key><string>$NAME</string>
-  <key>CFBundleDisplayName</key><string>Ching menu bar dot</string>
+  <key>CFBundleDisplayName</key><string>Kaching menu bar dot</string>
   <key>CFBundleExecutable</key><string>$NAME</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
@@ -69,7 +69,7 @@ cat >"$NEW/Contents/Info.plist" <<EOP
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
-  <key>ChingSourceHash</key><string>$HASH</string>
+  <key>KachingSourceHash</key><string>$HASH</string>
 </dict>
 </plist>
 EOP

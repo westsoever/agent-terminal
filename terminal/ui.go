@@ -196,7 +196,7 @@ func queueShow() {
 }
 
 func queueBin() string {
-	return filepath.Join(os.Getenv("HOME"), ".claude", "ching", "bin", "queue.sh")
+	return filepath.Join(kitDir(), "bin", "queue.sh")
 }
 
 // transcriptAfter: the session wrote to its transcript after t (it reacted to what we sent).
@@ -605,7 +605,7 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 	if m.view == vProposals && m.listSel < len(m.props) {
 		id := propID(m.props[m.listSel])
 		switch ks {
-		case "a": // approve: hand the screen to ching-proposals, which asks for its typed code on /dev/tty
+		case "a": // approve: hand the screen to kaching-proposals, which asks for its typed code on /dev/tty
 			return true, tea.ExecProcess(exec.Command(proposalsBin(), "approve", id), func(err error) tea.Msg { return execDone{err} })
 		case "x":
 			out, err := exec.Command(proposalsBin(), "reject", id).CombinedOutput()
@@ -681,8 +681,25 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// kitDir is the Kaching kit: ~/.claude/kaching, or ~/.claude/ching on a machine where install.sh has not run
+// since the rename (D35).
+func kitDir() string {
+	k := filepath.Join(os.Getenv("HOME"), ".claude", "kaching")
+	if _, err := os.Stat(k); err != nil {
+		if old := filepath.Join(os.Getenv("HOME"), ".claude", "ching"); dirExists(old) {
+			return old
+		}
+	}
+	return k
+}
+
+func dirExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
+}
+
 func proposalsBin() string {
-	return filepath.Join(os.Getenv("HOME"), ".claude", "ching", "bin", "ching-proposals")
+	return filepath.Join(kitDir(), "bin", "kaching-proposals")
 }
 
 func propID(line string) string {

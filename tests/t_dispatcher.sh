@@ -27,8 +27,8 @@ else
   echo "shellcheck not installed: skipped" >"$T_ROOT/skipped.t_dispatcher"
 fi
 
-link_kit   # $CLAUDE_DIR/ching -> the kit, like the real install
-CH="$CLAUDE_DIR/ching"
+link_kit   # $CLAUDE_DIR/kaching -> the kit, like the real install
+CH="$CLAUDE_DIR/kaching"
 
 # ---------------- fixtures ----------------
 PROJ="$WORK/proj"; mkdir -p "$PROJ/.agent" "$PROJ/other" "$PROJ/docs"
@@ -72,57 +72,57 @@ allow_t "converse, MCP server name" mcp__voicemode__converse '{"message":"hello"
 allow_t "converse, plugin name" mcp__plugin_voicemode_voicemode__converse '{"message":"hello"}'
 
 # dash.sh: the only command, with its own flags only
-allow_b "dash.sh --speak via ~" '~/.claude/ching/bin/dash.sh --speak'
-allow_b "dash.sh --inbox via \$HOME" '$HOME/.claude/ching/bin/dash.sh --inbox'
+allow_b "dash.sh --speak via ~" '~/.claude/kaching/bin/dash.sh --speak'
+allow_b "dash.sh --inbox via \$HOME" '$HOME/.claude/kaching/bin/dash.sh --inbox'
 allow_b "dash.sh --next via the absolute installed path" "$DASH_ABS --next"
-allow_b "dash.sh --hours 6 --all" '~/.claude/ching/bin/dash.sh --hours 6 --all'
-allow_b "dash.sh with no flag (the table)" '~/.claude/ching/bin/dash.sh'
+allow_b "dash.sh --hours 6 --all" '~/.claude/kaching/bin/dash.sh --hours 6 --all'
+allow_b "dash.sh with no flag (the table)" '~/.claude/kaching/bin/dash.sh'
 allow_b "dash.sh via the kit's own bin dir" "$KIT/bin/dash.sh --speak"
 deny_b "an ordinary command" 'ls -la'
 deny_b "rm -rf" 'rm -rf /tmp/x'
 deny_b "reading .env through cat" 'cat ~/.miso/.env.local'
 deny_b "git push" 'git push origin main'
 deny_b "gh workflow run" 'gh workflow run deploy.yml'
-deny_b "dash.sh then another command (;)" '~/.claude/ching/bin/dash.sh --speak; ls'
-deny_b "dash.sh then another command (&&)" '~/.claude/ching/bin/dash.sh --speak && ls'
-deny_b "dash.sh piped into a shell" '~/.claude/ching/bin/dash.sh --speak | sh'
-deny_b "dash.sh piped anywhere" '~/.claude/ching/bin/dash.sh --speak | cat'
-deny_b "dash.sh in the background (&)" '~/.claude/ching/bin/dash.sh --speak &'
-deny_b "dash.sh with a command substitution" '~/.claude/ching/bin/dash.sh $(id)'
-deny_b "dash.sh with backticks" '~/.claude/ching/bin/dash.sh `id`'
-deny_b "dash.sh with a redirect" '~/.claude/ching/bin/dash.sh --speak > /tmp/out'
-deny_b "dash.sh with an append redirect" '~/.claude/ching/bin/dash.sh --speak >> ~/.zshrc'
-deny_b "dash.sh with a newline and a second command" $'~/.claude/ching/bin/dash.sh --speak\nrm -rf /tmp/x'
-deny_b "dash.sh with a tab-separated second word" $'~/.claude/ching/bin/dash.sh\t--speak'
-deny_b "dash.sh with an unknown flag" '~/.claude/ching/bin/dash.sh --evil'
-deny_b "dash.sh with a non-numeric --hours" '~/.claude/ching/bin/dash.sh --hours abc'
-deny_b "dash.sh --hours without a value" '~/.claude/ching/bin/dash.sh --hours'
-deny_b "dash.sh with a path argument" '~/.claude/ching/bin/dash.sh /etc/passwd'
-deny_b "a sibling script in the same bin dir" '~/.claude/ching/bin/notify.sh done'
-deny_b "guard.sh itself" '~/.claude/ching/bin/guard.sh'
-deny_b "path traversal out of the bin dir" '~/.claude/ching/bin/../bin/dash.sh --speak'
+deny_b "dash.sh then another command (;)" '~/.claude/kaching/bin/dash.sh --speak; ls'
+deny_b "dash.sh then another command (&&)" '~/.claude/kaching/bin/dash.sh --speak && ls'
+deny_b "dash.sh piped into a shell" '~/.claude/kaching/bin/dash.sh --speak | sh'
+deny_b "dash.sh piped anywhere" '~/.claude/kaching/bin/dash.sh --speak | cat'
+deny_b "dash.sh in the background (&)" '~/.claude/kaching/bin/dash.sh --speak &'
+deny_b "dash.sh with a command substitution" '~/.claude/kaching/bin/dash.sh $(id)'
+deny_b "dash.sh with backticks" '~/.claude/kaching/bin/dash.sh `id`'
+deny_b "dash.sh with a redirect" '~/.claude/kaching/bin/dash.sh --speak > /tmp/out'
+deny_b "dash.sh with an append redirect" '~/.claude/kaching/bin/dash.sh --speak >> ~/.zshrc'
+deny_b "dash.sh with a newline and a second command" $'~/.claude/kaching/bin/dash.sh --speak\nrm -rf /tmp/x'
+deny_b "dash.sh with a tab-separated second word" $'~/.claude/kaching/bin/dash.sh\t--speak'
+deny_b "dash.sh with an unknown flag" '~/.claude/kaching/bin/dash.sh --evil'
+deny_b "dash.sh with a non-numeric --hours" '~/.claude/kaching/bin/dash.sh --hours abc'
+deny_b "dash.sh --hours without a value" '~/.claude/kaching/bin/dash.sh --hours'
+deny_b "dash.sh with a path argument" '~/.claude/kaching/bin/dash.sh /etc/passwd'
+deny_b "a sibling script in the same bin dir" '~/.claude/kaching/bin/notify.sh done'
+deny_b "guard.sh itself" '~/.claude/kaching/bin/guard.sh'
+deny_b "path traversal out of the bin dir" '~/.claude/kaching/bin/../bin/dash.sh --speak'
 deny_b "a dash.sh that is somewhere else" '/tmp/dash.sh --speak'
-deny_b "bash -c around dash.sh" "bash -c '~/.claude/ching/bin/dash.sh --speak'"
-deny_b "an env prefix before dash.sh" 'AGENT_HOME=/tmp/x ~/.claude/ching/bin/dash.sh --speak'
+deny_b "bash -c around dash.sh" "bash -c '~/.claude/kaching/bin/dash.sh --speak'"
+deny_b "an env prefix before dash.sh" 'AGENT_HOME=/tmp/x ~/.claude/kaching/bin/dash.sh --speak'
 deny_b "an empty command" ''
 deny_t "Bash with no command key at all" Bash '{}'
 
 # relay-log.sh: a quoted text, nothing else
-allow_b "relay-log.sh with a single-quoted text" "~/.claude/ching/dispatcher/relay-log.sh $PROJ/.agent yes 'tell miso-app to run the tests again'"
-allow_b "relay-log.sh unconfirmed" "~/.claude/ching/dispatcher/relay-log.sh $AGENT_HOME/sessions/abc123 no 'push miso-workspace'"
-allow_b "relay-log.sh with an apostrophe written as '\\''" "~/.claude/ching/dispatcher/relay-log.sh $PROJ/.agent yes 'don'\\''t push'"
-allow_b "relay-log.sh with dollar signs and backticks inside single quotes" "~/.claude/ching/dispatcher/relay-log.sh $PROJ/.agent yes 'costs \$5 and \`id\` and \$(id)'"
-deny_b "relay-log.sh with a double-quoted text" "~/.claude/ching/dispatcher/relay-log.sh $PROJ/.agent yes \"\$(id)\""
-deny_b "relay-log.sh with an unquoted text" "~/.claude/ching/dispatcher/relay-log.sh $PROJ/.agent yes run the tests"
-deny_b "relay-log.sh then a second command" "~/.claude/ching/dispatcher/relay-log.sh $PROJ/.agent yes 'x'; ls"
-deny_b "relay-log.sh with a quote that closes early" "~/.claude/ching/dispatcher/relay-log.sh $PROJ/.agent yes 'x' 'y'"
-deny_b "relay-log.sh with an early close then a command" "~/.claude/ching/dispatcher/relay-log.sh $PROJ/.agent yes 'x'; id; 'y'"
-deny_b "relay-log.sh with a newline inside the quotes" "$(printf "~/.claude/ching/dispatcher/relay-log.sh %s yes 'a\nb'" "$PROJ/.agent")"
-deny_b "relay-log.sh with a confirmation that is not yes or no" "~/.claude/ching/dispatcher/relay-log.sh $PROJ/.agent maybe 'x'"
-deny_b "relay-log.sh with a state dir holding a substitution" "~/.claude/ching/dispatcher/relay-log.sh \$(id) yes 'x'"
-deny_b "relay-log.sh with a state dir that has a space" "~/.claude/ching/dispatcher/relay-log.sh /tmp/a\\ b yes 'x'"
-deny_b "relay-log.sh with a text over 2000 characters" "~/.claude/ching/dispatcher/relay-log.sh $PROJ/.agent yes '$(head -c 2100 /dev/zero | tr '\0' a)'"
-deny_b "another script in dispatcher/" '~/.claude/ching/dispatcher/launch.sh'
+allow_b "relay-log.sh with a single-quoted text" "~/.claude/kaching/dispatcher/relay-log.sh $PROJ/.agent yes 'tell miso-app to run the tests again'"
+allow_b "relay-log.sh unconfirmed" "~/.claude/kaching/dispatcher/relay-log.sh $AGENT_HOME/sessions/abc123 no 'push miso-workspace'"
+allow_b "relay-log.sh with an apostrophe written as '\\''" "~/.claude/kaching/dispatcher/relay-log.sh $PROJ/.agent yes 'don'\\''t push'"
+allow_b "relay-log.sh with dollar signs and backticks inside single quotes" "~/.claude/kaching/dispatcher/relay-log.sh $PROJ/.agent yes 'costs \$5 and \`id\` and \$(id)'"
+deny_b "relay-log.sh with a double-quoted text" "~/.claude/kaching/dispatcher/relay-log.sh $PROJ/.agent yes \"\$(id)\""
+deny_b "relay-log.sh with an unquoted text" "~/.claude/kaching/dispatcher/relay-log.sh $PROJ/.agent yes run the tests"
+deny_b "relay-log.sh then a second command" "~/.claude/kaching/dispatcher/relay-log.sh $PROJ/.agent yes 'x'; ls"
+deny_b "relay-log.sh with a quote that closes early" "~/.claude/kaching/dispatcher/relay-log.sh $PROJ/.agent yes 'x' 'y'"
+deny_b "relay-log.sh with an early close then a command" "~/.claude/kaching/dispatcher/relay-log.sh $PROJ/.agent yes 'x'; id; 'y'"
+deny_b "relay-log.sh with a newline inside the quotes" "$(printf "~/.claude/kaching/dispatcher/relay-log.sh %s yes 'a\nb'" "$PROJ/.agent")"
+deny_b "relay-log.sh with a confirmation that is not yes or no" "~/.claude/kaching/dispatcher/relay-log.sh $PROJ/.agent maybe 'x'"
+deny_b "relay-log.sh with a state dir holding a substitution" "~/.claude/kaching/dispatcher/relay-log.sh \$(id) yes 'x'"
+deny_b "relay-log.sh with a state dir that has a space" "~/.claude/kaching/dispatcher/relay-log.sh /tmp/a\\ b yes 'x'"
+deny_b "relay-log.sh with a text over 2000 characters" "~/.claude/kaching/dispatcher/relay-log.sh $PROJ/.agent yes '$(head -c 2100 /dev/zero | tr '\0' a)'"
+deny_b "another script in dispatcher/" '~/.claude/kaching/dispatcher/launch.sh'
 
 # Read: only STATE.md and NEXT.md of a session, wherever they really are
 allow_t "Read of <repo>/.agent/STATE.md" Read "$(read_in "$PROJ/.agent/STATE.md")"
@@ -157,7 +157,7 @@ for t in Edit Write MultiEdit NotebookEdit WebFetch WebSearch Agent Task TodoWri
          mcp__voicemode__pause_conversation mcp__plugin_voicemode_voicemode__service mcp__plugin_voicemode_voicemode__connect_status \
          mcp__claude_ai_Gmail__send_message mcp__claude_ai_Slack__authenticate mcp__supabase__execute_sql mcp__voicemode__converse2 \
          converse ListAgentsX Bash2 read; do
-  deny_t "tool $t" "$t" '{"file_path":"'"$PROJ"'/.agent/STATE.md","command":"~/.claude/ching/bin/dash.sh --speak","content":"x"}'
+  deny_t "tool $t" "$t" '{"file_path":"'"$PROJ"'/.agent/STATE.md","command":"~/.claude/kaching/bin/dash.sh --speak","content":"x"}'
 done
 deny_t "an empty tool name" "" '{}'
 deny_t "Edit of STATE.md (the one write the old policy allowed)" Edit "$(jq -nc --arg p "$PROJ/.agent/STATE.md" '{file_path:$p,old_string:"a",new_string:"b"}')"
@@ -254,10 +254,10 @@ SendMessage
 ToolSearch
 mcp__plugin_voicemode_voicemode__converse
 mcp__voicemode__converse" "$(jq -r '.permissions.allow[] | select(startswith("Bash(") or startswith("Read(") | not)' "$ST" | LC_ALL=C sort)"
-assert_eq "settings: Bash is allowed for dash.sh and relay-log.sh only, each as ~ and as the installed path" "Bash(@CHING@/bin/dash.sh:*)
-Bash(@CHING@/dispatcher/relay-log.sh:*)
-Bash(~/.claude/ching/bin/dash.sh:*)
-Bash(~/.claude/ching/dispatcher/relay-log.sh:*)" "$(jq -r '.permissions.allow[] | select(startswith("Bash("))' "$ST" | LC_ALL=C sort)"
+assert_eq "settings: Bash is allowed for dash.sh and relay-log.sh only, each as ~ and as the installed path" "Bash(@KACHING@/bin/dash.sh:*)
+Bash(@KACHING@/dispatcher/relay-log.sh:*)
+Bash(~/.claude/kaching/bin/dash.sh:*)
+Bash(~/.claude/kaching/dispatcher/relay-log.sh:*)" "$(jq -r '.permissions.allow[] | select(startswith("Bash("))' "$ST" | LC_ALL=C sort)"
 assert_eq "settings: Read rules exist for STATE.md and NEXT.md only" "ok" "$(jq -r '[.permissions.allow[] | select(startswith("Read("))] as $r | if ($r | length) >= 2 and ($r | map(select(endswith("STATE.md)"))) | length) >= 1 and ($r | map(select(endswith("NEXT.md)"))) | length) >= 1 then "ok" else "no" end' "$ST")"
 assert_eq "settings: every Read rule names STATE.md or NEXT.md" "0" "$(jq '[.permissions.allow[] | select(startswith("Read(") and (endswith("STATE.md)") or endswith("NEXT.md)") | not))] | length' "$ST")"
 for t in Edit Write NotebookEdit WebFetch WebSearch Agent Skill Monitor; do   # MultiEdit is not a tool name in this Claude Code version (it warns)
@@ -265,7 +265,7 @@ for t in Edit Write NotebookEdit WebFetch WebSearch Agent Skill Monitor; do   # 
 done
 assert_eq "settings: one PreToolUse hook for every tool" "1" "$(jq '.hooks.PreToolUse | length' "$ST")"
 assert_eq "settings: ...its matcher is empty, so it sees every tool" "" "$(jq -r '.hooks.PreToolUse[0].matcher' "$ST")"
-assert_eq "settings: ...and it runs tool-gate.sh" "@CHING@/dispatcher/tool-gate.sh" "$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$ST")"
+assert_eq "settings: ...and it runs tool-gate.sh" "@KACHING@/dispatcher/tool-gate.sh" "$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$ST")"
 assert_eq "settings: ...under 15 s (a timed-out hook lets the call through)" "ok" "$(jq -r 'if .hooks.PreToolUse[0].hooks[0].timeout <= 10 then "ok" else "too long" end' "$ST")"
 assert_eq "settings: no other hook events" '["PreToolUse"]' "$(jq -c '.hooks | keys' "$ST")"
 assert_eq "settings: no enabled plugins" "null" "$(jq -c '.enabledPlugins' "$ST")"
@@ -292,15 +292,15 @@ out=$(inst --install-dispatcher --yes); rc=$?
 assert_eq "install-dispatcher --yes exits 0" "0" "$rc"
 assert_file "installed: .claude/settings.json" "$DD/.claude/settings.json"
 assert_file "installed: mcp.json" "$DD/mcp.json"
-assert_eq "installed: AGENTS.md links to the kit's policy through the ching link" "$CH/dispatcher/AGENTS.md" "$(readlink "$DD/AGENTS.md")"
+assert_eq "installed: AGENTS.md links to the kit's policy through the kaching link" "$CH/dispatcher/AGENTS.md" "$(readlink "$DD/AGENTS.md")"
 assert_eq "installed: CLAUDE.md links to AGENTS.md" "AGENTS.md" "$(readlink "$DD/CLAUDE.md")"
 assert_ok "installed settings are valid JSON" jq -e . "$DD/.claude/settings.json"
 assert_not_contains "installed settings have no placeholder left" "$(cat "$DD/.claude/settings.json" "$DD/mcp.json")" "@"
-assert_eq "installed hook command points at the gate through the ching link" "$CH/dispatcher/tool-gate.sh" "$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$DD/.claude/settings.json")"
+assert_eq "installed hook command points at the gate through the kaching link" "$CH/dispatcher/tool-gate.sh" "$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$DD/.claude/settings.json")"
 assert_contains "installed Bash rule names the installed dash.sh" "$(jq -r '.permissions.allow[]' "$DD/.claude/settings.json")" "Bash($CH/bin/dash.sh:*)"
 assert_eq "installed mcp command is a voicemode executable name or path" "voicemode" "$(basename "$(jq -r '.mcpServers.voicemode.command' "$DD/mcp.json")")"
 assert_eq "install-dispatcher leaves settings.json alone" "$S_BEFORE" "$(shasum -a 256 "$CLAUDE_DIR/settings.json" | cut -d' ' -f1)"
-assert_no_file "install-dispatcher makes no backup of settings.json" "$(ls "$CLAUDE_DIR"/settings.json.bak.ching.* 2>/dev/null | head -1)"
+assert_no_file "install-dispatcher makes no backup of settings.json" "$(ls "$CLAUDE_DIR"/settings.json.bak.kaching.* 2>/dev/null | head -1)"
 assert_no_file "install-dispatcher does not load a launchd job" "$WORK/launchctl.log"
 # the installed hook command works through the link, and the policy file it points at reads
 HC=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$DD/.claude/settings.json")
@@ -325,9 +325,9 @@ out=$(inst --install-dispatcher --yes); assert_contains "a foreign AGENTS.md is 
 assert_eq "...and kept" "mine" "$(cat "$DD/AGENTS.md")"
 rm -f "$DD/AGENTS.md"; inst --install-dispatcher --yes >/dev/null
 # the real thing: the fixed paths with special characters survive rendering
-XH="$WORK/we&ird#dir"; mkdir -p "$XH/claude" "$XH/agent"; ln -sfn "$KIT" "$XH/claude/ching"
+XH="$WORK/we&ird#dir"; mkdir -p "$XH/claude" "$XH/agent"; ln -sfn "$KIT" "$XH/claude/kaching"
 out=$(env CLAUDE_DIR="$XH/claude" AGENT_HOME="$XH/agent" SETTINGS_FILE="$XH/claude/settings.json" AGENT_REPOS_FILE="$XH/repos" "$KIT/install.sh" --install-dispatcher --yes </dev/null 2>&1); assert_eq "special characters in paths: install exits 0" "0" "$?"
-assert_eq "special characters: the hook path survives rendering" "$XH/claude/ching/dispatcher/tool-gate.sh" "$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$XH/agent/dispatcher/.claude/settings.json")"
+assert_eq "special characters: the hook path survives rendering" "$XH/claude/kaching/dispatcher/tool-gate.sh" "$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$XH/agent/dispatcher/.claude/settings.json")"
 
 # ---------------- launcher ----------------
 cat >"$WORK/fake-claude" <<'EOS'

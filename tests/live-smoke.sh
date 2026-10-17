@@ -5,17 +5,17 @@
 # settings are excluded with --setting-sources project. install.sh is fully sandboxed under /tmp: it gets
 # CLAUDE_DIR, SETTINGS_FILE, AGENT_REPOS_FILE, AGENT_HOME, LAUNCH_AGENTS_DIR and a no-op LAUNCHCTL, so it
 # cannot touch the real ~/.claude (hook symlink, settings), ~/.agent-repos, ~/Library/LaunchAgents or launchd.
-# The generated hooks run through $S/claude/ching -> this checkout, so the smoke test exercises this
+# The generated hooks run through $S/claude/kaching -> this checkout, so the smoke test exercises this
 # checkout's hooks, not the installed ones. HOME is left alone on purpose: `claude -p` needs it for auth.
 # Section 4 speaks one sentence (day time only). Section 5 is silent: tests/live-watch.sh, read-only, on the real launchd job.
 set -euo pipefail
 KIT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 REAL_AGENT_HOME=${AGENT_HOME:-$HOME/.agent}   # section 5 looks at the real machine, read-only
-S=$(mktemp -d /tmp/ching-live.XXXXXX)
+S=$(mktemp -d /tmp/kaching-live.XXXXXX)
 export AGENT_HOME="$S/agent-home" NOTIFY_DRY_RUN=1 NOTIFY_LOG="$S/notify.log"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@e GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@e
 # the smoke test checks hooks, not model escalation, and must not start paid Haiku/Sonnet fix attempts
-export CHING_TEST_MODELS=""
+export KACHING_TEST_MODELS=""
 mkdir -p "$S/claude" "$S/repo"
 CLAUDE_DIR="$S/claude" SETTINGS_FILE="$S/claude/settings.json" AGENT_REPOS_FILE="$S/agent-repos" \
   LAUNCH_AGENTS_DIR="$S/LaunchAgents" LAUNCHCTL=/usr/bin/true "$KIT/install.sh" --yes >/dev/null
@@ -40,7 +40,7 @@ git remote add origin "$S/remote.git"; git init -q --bare "$S/remote.git"
 run 'Run exactly this command with the Bash tool and report what happened in one line: git push --force origin HEAD:scratch'
 echo "remote has scratch: $(git --git-dir="$S/remote.git" rev-parse -q --verify refs/heads/scratch >/dev/null && echo YES-BAD || echo no-good)"
 echo "== 4. check-in nudge: real voice and idle read (you should hear one short sentence)"
-if "$KIT/bin/speak.sh" "Ching check-in test."; then echo "speak.sh: ok"; else echo "speak.sh: FAILED (is Kokoro running on port 8880?)"; fi
+if "$KIT/bin/speak.sh" "Kaching check-in test."; then echo "speak.sh: ok"; else echo "speak.sh: FAILED (is Kokoro running on port 8880?)"; fi
 # ioreg lives in /usr/sbin (not on launchd's PATH). awk exits at the first match and ioreg may get SIGPIPE (141):
 # with set -eo pipefail that must not end the script before the idle value and the sandbox line are printed.
 idle=$(/usr/sbin/ioreg -c IOHIDSystem | awk '/"HIDIdleTime"/ { print int($NF / 1000000000); exit }' || true)

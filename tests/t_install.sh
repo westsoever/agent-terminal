@@ -28,21 +28,21 @@ export AGENT_REPOS_FILE="$WORK/fixture-agent-repos"
 sum() { shasum -a 256 "$SETTINGS_FILE" | cut -d' ' -f1; }
 inst() { "$KIT/install.sh" "$@" </dev/null 2>&1; }
 BEFORE=$(sum)
-LA="$LAUNCH_AGENTS_DIR/org.ching.watch.plist"   # LAUNCH_AGENTS_DIR is exported by lib.sh
+LA="$LAUNCH_AGENTS_DIR/org.kaching.watch.plist"   # LAUNCH_AGENTS_DIR is exported by lib.sh
 
 # dry run: shows a diff, writes nothing
 out=$(inst --dry-run); rc=$?
 assert_eq "dry-run exits 0" "0" "$rc"
 assert_contains "dry-run shows a unified diff" "$out" "+++ $D/settings.json (after install)"
-assert_contains "dry-run lists the guard hook" "$out" "$D/ching/bin/guard.sh"
+assert_contains "dry-run lists the guard hook" "$out" "$D/kaching/bin/guard.sh"
 assert_eq "dry-run: settings untouched" "$BEFORE" "$(sum)"
-assert_no_file "dry-run: no symlink" "$D/ching"
-assert_no_file "dry-run: no backup" "$(ls "$D"/settings.json.bak.ching.* 2>/dev/null | head -1)"
+assert_no_file "dry-run: no symlink" "$D/kaching"
+assert_no_file "dry-run: no backup" "$(ls "$D"/settings.json.bak.kaching.* 2>/dev/null | head -1)"
 assert_no_file "dry-run: no ~/.agent-repos" "$AGENT_REPOS_FILE"
 assert_contains "dry-run lists the plist write and load" "$out" "would: write $LA and launchctl bootstrap it"
 assert_contains "dry-run shows the plist diff header" "$out" "+++ $LA (after install)"
 assert_contains "dry-run plist diff shows the interval" "$out" "+  <key>StartInterval</key><integer>300</integer>"
-assert_contains "dry-run plist diff shows the script path" "$out" "$D/ching/bin/ching-watch.sh"
+assert_contains "dry-run plist diff shows the script path" "$out" "$D/kaching/bin/kaching-watch.sh"
 assert_no_file "dry-run: no plist" "$LA"
 assert_no_file "dry-run: launchctl never called" "$WORK/launchctl.log"
 
@@ -55,13 +55,13 @@ assert_contains "refusal previews the plist write" "$out" "would: write $LA and 
 assert_contains "refusal shows the plist diff" "$out" "+++ $LA (after install)"
 assert_no_file "refusal: no plist written" "$LA"
 assert_no_file "refusal: launchctl never called" "$WORK/launchctl.log"
-assert_no_file "refusal: no symlink" "$D/ching"
+assert_no_file "refusal: no symlink" "$D/kaching"
 
 # apply
 out=$(inst --yes); assert_eq "apply exits 0" "0" "$?"
 S=$(cat "$SETTINGS_FILE")
 for ev in SessionStart UserPromptSubmit SessionEnd PreCompact Stop PreToolUse Notification; do
-  n=$(printf '%s' "$S" | jq --arg e "$ev" '[.hooks[$e][]?.hooks[]?.command | select(contains("/ching/bin/"))] | length')
+  n=$(printf '%s' "$S" | jq --arg e "$ev" '[.hooks[$e][]?.hooks[]?.command | select(contains("/kaching/bin/"))] | length')
   assert_eq "hook added for $ev" "1" "$n"
 done
 assert_eq "guard matcher covers Bash, Monitor, Read, Edit, Supabase and messaging MCP" "Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit|Monitor|mcp__.*[Ss]upabase.*|mcp__.*([Gg]mail|[Ss]lack|[Dd]iscord|[Tt]elegram).*" \
@@ -69,7 +69,7 @@ assert_eq "guard matcher covers Bash, Monitor, Read, Edit, Supabase and messagin
 assert_eq "Notification entry uses the idle_prompt matcher" "idle_prompt" "$(printf '%s' "$S" | jq -r '.hooks.Notification[] | select(.hooks[0].command | contains("notify.sh")) | .matcher')"
 assert_eq "vscode-session-manager entries untouched (5 of them)" "5" "$(printf '%s' "$S" | jq --arg v "$VS" '[.. | objects | select(.command? != null) | select(.command | startswith($v))] | length')"
 assert_eq "popup still present by default" "1" "$(printf '%s' "$S" | jq '[.. | objects | select(.command? != null) | select(.command | contains("Session finished"))] | length')"
-assert_eq "non-hook, non-allowlist settings untouched" "$(printf '%s' "$(cat "$D/settings.json.bak.ching."*)" | jq -S -c 'del(.hooks, .permissions.allow)')" "$(printf '%s' "$S" | jq -S -c 'del(.hooks, .permissions.allow)')"
+assert_eq "non-hook, non-allowlist settings untouched" "$(printf '%s' "$(cat "$D/settings.json.bak.kaching."*)" | jq -S -c 'del(.hooks, .permissions.allow)')" "$(printf '%s' "$S" | jq -S -c 'del(.hooks, .permissions.allow)')"
 
 # ---------- voice permissions (Phase 3.1): converse is allowed, nothing else is added ----------
 CONV1=mcp__voicemode__converse; CONV2=mcp__plugin_voicemode_voicemode__converse
@@ -77,9 +77,9 @@ assert_eq "allowlist: the existing entry stays first, both converse names follow
 assert_eq "allowlist: defaultMode untouched" "bypassPermissions" "$(printf '%s' "$S" | jq -r '.permissions.defaultMode')"
 assert_eq "allowlist: no deny list appears" "null" "$(printf '%s' "$S" | jq -c '.permissions.deny')"
 assert_contains "apply output: the diff names the allowlist addition" "$out" "+      \"$CONV1\""
-assert_eq "exactly one backup" "1" "$(ls "$D"/settings.json.bak.ching.* | wc -l | tr -d ' ')"
+assert_eq "exactly one backup" "1" "$(ls "$D"/settings.json.bak.kaching.* | wc -l | tr -d ' ')"
 KITP=$(cd "$KIT" && pwd -P)   # install.sh links the physical path; a kit under a symlinked folder (/tmp) must not fail
-assert_eq "ching symlink points at the kit" "$KITP" "$(readlink "$D/ching")"
+assert_eq "kaching symlink points at the kit" "$KITP" "$(readlink "$D/kaching")"
 assert_eq "handoff command linked" "$KITP/commands/handoff.md" "$(readlink "$D/commands/handoff.md")"
 assert_eq "next command linked" "$KITP/commands/next.md" "$(readlink "$D/commands/next.md")"
 assert_eq "dash command linked" "$KITP/commands/dash.md" "$(readlink "$D/commands/dash.md")"
@@ -91,13 +91,13 @@ AFTER=$(sum)
 out=$(inst --yes); assert_eq "second run exits 0" "0" "$?"
 assert_contains "second run reports nothing to do" "$out" "nothing to do"
 assert_eq "second run: settings byte-identical" "$AFTER" "$(sum)"
-assert_eq "second run: still one backup" "1" "$(ls "$D"/settings.json.bak.ching.* | wc -l | tr -d ' ')"
+assert_eq "second run: still one backup" "1" "$(ls "$D"/settings.json.bak.kaching.* | wc -l | tr -d ' ')"
 out=$(inst --yes --dry-run); assert_contains "dry-run after install: nothing to do" "$out" "nothing to do"
 
 # ---------- launchd watcher (Phase 1.5) ----------
 assert_file "watcher plist installed" "$LA"
 assert_contains "plist runs every 300 s" "$(cat "$LA")" "<integer>300</integer>"
-assert_contains "plist points at the kit symlink" "$(cat "$LA")" "/ching/bin/ching-watch.sh"
+assert_contains "plist points at the kit symlink" "$(cat "$LA")" "/kaching/bin/kaching-watch.sh"
 assert_ok "plist is valid XML plist" plutil -lint "$LA"
 assert_contains "launchctl bootstrap called" "$(cat "$WORK/launchctl.log")" "bootstrap gui/"
 n=$(wc -l <"$WORK/launchctl.log")
@@ -133,20 +133,20 @@ out=$(inst --yes); assert_eq "plist missing: --yes repairs it" "0" "$?"
 assert_eq "plist missing: --yes restores the same plist" "$GOODP" "$(psum)"
 assert_contains "plist missing: --yes loads it" "$(tail -n +$((n + 1)) "$WORK/launchctl.log")" "bootstrap gui/"
 assert_contains "guard matcher covers messaging MCP tools" "$(jq -r '.hooks.PreToolUse[].matcher' "$SETTINGS_FILE")" "[Gg]mail"
-jq '(.hooks.PreToolUse[] | select(.hooks[0].command | contains("/ching/bin/guard.sh")) | .matcher) = "Bash"' "$SETTINGS_FILE" >"$SETTINGS_FILE.t" && mv "$SETTINGS_FILE.t" "$SETTINGS_FILE"
+jq '(.hooks.PreToolUse[] | select(.hooks[0].command | contains("/kaching/bin/guard.sh")) | .matcher) = "Bash"' "$SETTINGS_FILE" >"$SETTINGS_FILE.t" && mv "$SETTINGS_FILE.t" "$SETTINGS_FILE"
 inst --yes >/dev/null
-assert_contains "re-install widens an old guard matcher" "$(jq -r '.hooks.PreToolUse[] | select(.hooks[0].command | contains("/ching/bin/guard.sh")) | .matcher' "$SETTINGS_FILE")" "[Ss]lack"
-assert_eq "re-install keeps a single guard entry" "1" "$(jq '[.hooks.PreToolUse[] | select(.hooks[0].command | contains("/ching/bin/guard.sh"))] | length' "$SETTINGS_FILE")"
+assert_contains "re-install widens an old guard matcher" "$(jq -r '.hooks.PreToolUse[] | select(.hooks[0].command | contains("/kaching/bin/guard.sh")) | .matcher' "$SETTINGS_FILE")" "[Ss]lack"
+assert_eq "re-install keeps a single guard entry" "1" "$(jq '[.hooks.PreToolUse[] | select(.hooks[0].command | contains("/kaching/bin/guard.sh"))] | length' "$SETTINGS_FILE")"
 
 # installed commands work through the symlink path that settings.json references
 GCMD=$(printf '%s' "$S" | jq -r '.hooks.PreToolUse[] | select(.hooks[0].command | contains("guard.sh")) | .hooks[0].command')
 out=$(printf '%s' "$(bash_json "$WORK" 'git push --force origin x')" | $GCMD)
 assert_contains "installed guard command denies through the symlink" "$out" '"permissionDecision": "deny"'
 out=$(printf '%s' "$(bash_json "$WORK" 'ls')" | $GCMD); assert_eq "installed guard command allows ls" "" "$out"
-SCMD=$(printf '%s' "$S" | jq -r '.hooks.SessionStart[] | select(.hooks[0].command | contains("ching")) | .hooks[0].command')
+SCMD=$(printf '%s' "$S" | jq -r '.hooks.SessionStart[] | select(.hooks[0].command | contains("kaching")) | .hooks[0].command')
 out=$(printf '%s' "$(hook_json SessionStart "$WORK" via-install '{}')" | $SCMD)
 assert_eq "installed SessionStart command runs through the symlink" "SessionStart" "$(printf '%s' "$out" | jq -r .hookSpecificOutput.hookEventName)"
-TCMD=$(printf '%s' "$S" | jq -r '.hooks.UserPromptSubmit[] | select(.hooks[0].command | contains("ching")) | .hooks[0].command')
+TCMD=$(printf '%s' "$S" | jq -r '.hooks.UserPromptSubmit[] | select(.hooks[0].command | contains("kaching")) | .hooks[0].command')
 printf '%s' "$(hook_json UserPromptSubmit "$WORK" via-install)" | $TCMD
 assert_contains "installed touch hook works" "$(cat "$AGENT_HOME/sessions/via-install/meta")" "state=working"
 
@@ -155,7 +155,7 @@ out=$(inst --yes --replace-popup); assert_eq "--replace-popup exits 0" "0" "$?"
 S=$(cat "$SETTINGS_FILE")
 assert_eq "popup removed with the flag" "0" "$(printf '%s' "$S" | jq '[.. | objects | select(.command? != null) | select(.command | contains("Session finished"))] | length')"
 assert_eq "vscode entries still all there" "5" "$(printf '%s' "$S" | jq --arg v "$VS" '[.. | objects | select(.command? != null) | select(.command | startswith($v))] | length')"
-assert_eq "ching Stop hook still there" "1" "$(printf '%s' "$S" | jq '[.hooks.Stop[].hooks[] | select(.command | contains("stop-check.sh"))] | length')"
+assert_eq "kaching Stop hook still there" "1" "$(printf '%s' "$S" | jq '[.hooks.Stop[].hooks[] | select(.command | contains("stop-check.sh"))] | length')"
 AFTER=$(sum); inst --yes --replace-popup >/dev/null; assert_eq "--replace-popup is idempotent" "$AFTER" "$(sum)"
 
 # uninstall needs --yes without a tty too, and then changes nothing (settings, plist, launchd)
@@ -170,12 +170,12 @@ assert_eq "uninstall refusal does not call launchctl" "$n" "$(wc -l <"$WORK/laun
 # uninstall removes only our entries
 out=$(inst --uninstall --yes); assert_eq "uninstall exits 0" "0" "$?"
 S=$(cat "$SETTINGS_FILE")
-assert_eq "uninstall: no ching entries left" "0" "$(printf '%s' "$S" | jq '[.. | objects | select(.command? != null) | select(.command | contains("/ching/bin/"))] | length')"
+assert_eq "uninstall: no kaching entries left" "0" "$(printf '%s' "$S" | jq '[.. | objects | select(.command? != null) | select(.command | contains("/kaching/bin/"))] | length')"
 assert_eq "uninstall: vscode entries kept" "5" "$(printf '%s' "$S" | jq --arg v "$VS" '[.. | objects | select(.command? != null) | select(.command | startswith($v))] | length')"
 assert_eq "uninstall: empty events removed" "false" "$(printf '%s' "$S" | jq 'has("hooks") and (.hooks | has("PreCompact"))')"
 assert_eq "uninstall: the converse allowlist entries are left in place" "mcp__pencil $CONV1 $CONV2" "$(printf '%s' "$S" | jq -r '.permissions.allow | join(" ")')"
 assert_contains "uninstall: says the allowlist entries stay" "$out" "permissions.allow"
-assert_no_file "uninstall removes the watcher plist" "$HOME/Library/LaunchAgents/org.ching.watch.plist"
+assert_no_file "uninstall removes the watcher plist" "$HOME/Library/LaunchAgents/org.kaching.watch.plist"
 assert_contains "uninstall boots the watcher out (last launchctl call)" "$(tail -1 "$WORK/launchctl.log")" "bootout gui/"
 
 # a failed launchctl bootstrap must not leave a plist that makes the next run say "nothing to do"
@@ -198,7 +198,7 @@ assert_eq "failure flag: not left in the test environment" "" "$(env | grep '^LA
 rm -f "$LA"; n=$(wc -l <"$WORK/launchctl.log")
 out=$(inst --uninstall --yes); rc=$?
 assert_eq "uninstall with an absent plist exits 0" "0" "$rc"
-assert_eq "uninstall with an absent plist: no ching entries left" "0" "$(jq '[.. | objects | select(.command? != null) | select(.command | contains("/ching/bin/"))] | length' "$SETTINGS_FILE")"
+assert_eq "uninstall with an absent plist: no kaching entries left" "0" "$(jq '[.. | objects | select(.command? != null) | select(.command | contains("/kaching/bin/"))] | length' "$SETTINGS_FILE")"
 assert_no_file "uninstall with an absent plist: no plist appears" "$LA"
 assert_no_file "uninstall with an absent plist: no stray temp plist" "$LA.tmp"
 assert_not_contains "uninstall with an absent plist: launchctl never bootstraps" "$(tail -n +$((n + 1)) "$WORK/launchctl.log" 2>/dev/null)" "bootstrap"
@@ -232,10 +232,10 @@ assert_eq "allowlist: both names already present in another order stay in that o
 XD="$WORK/x&y<z>"; XA="$WORK/a&b<c>"; XLA="$WORK/la-escape"; mkdir -p "$XD"; printf '{}\n' >"$XD/settings.json"
 xinst() { env SETTINGS_FILE="$XD/settings.json" CLAUDE_DIR="$XD" AGENT_HOME="$XA" AGENT_REPOS_FILE="$WORK/escape-repos" LAUNCH_AGENTS_DIR="$XLA" "$KIT/install.sh" "$@" </dev/null 2>&1; }
 out=$(xinst --yes); assert_eq "special characters in paths: install exits 0" "0" "$?"
-XP="$XLA/org.ching.watch.plist"
+XP="$XLA/org.kaching.watch.plist"
 assert_ok "special characters: the plist is valid" plutil -lint "$XP"
 assert_eq "special characters: AGENT_HOME survives the round trip" "$XA" "$(plutil -extract EnvironmentVariables.AGENT_HOME raw -o - "$XP")"
-assert_eq "special characters: the script path survives the round trip" "$XD/ching/bin/ching-watch.sh" "$(plutil -extract ProgramArguments.1 raw -o - "$XP")"
+assert_eq "special characters: the script path survives the round trip" "$XD/kaching/bin/kaching-watch.sh" "$(plutil -extract ProgramArguments.1 raw -o - "$XP")"
 assert_eq "special characters: the log path survives the round trip" "$XA/watch.log" "$(plutil -extract StandardOutPath raw -o - "$XP")"
 assert_contains "special characters: the file holds the escaped form" "$(cat "$XP")" "a&amp;b&lt;c&gt;/watch.log"
 assert_not_contains "special characters: no raw ampersand-path in the file" "$(cat "$XP")" "a&b"
@@ -263,26 +263,26 @@ if [ "$(uname)" = Darwin ] && printf '' | script -q /dev/null true >/dev/null 2>
   tty_inst n; rc=$?
   assert_eq "tty, answer n: exits 1" "1" "$rc"
   assert_contains "tty, answer n: says aborted" "$(cat "$WORK/tty.out")" "aborted"
-  assert_contains "tty: the prompt follows the plist diff" "$(cat "$WORK/tty.out")" "+++ $TLA/org.ching.watch.plist (after install)"
+  assert_contains "tty: the prompt follows the plist diff" "$(cat "$WORK/tty.out")" "+++ $TLA/org.kaching.watch.plist (after install)"
   assert_eq "tty, answer n: settings untouched" "{}" "$(jq -c . "$TD/settings.json")"
-  assert_no_file "tty, answer n: no plist" "$TLA/org.ching.watch.plist"
-  assert_no_file "tty, answer n: no symlink" "$TD/ching"
+  assert_no_file "tty, answer n: no plist" "$TLA/org.kaching.watch.plist"
+  assert_no_file "tty, answer n: no symlink" "$TD/kaching"
   assert_eq "tty, answer n: launchctl not called" "$n" "$(wc -l <"$WORK/launchctl.log")"
   tty_inst y; rc=$?
   assert_eq "tty, answer y: exits 0" "0" "$rc"
-  assert_file "tty, answer y: plist written" "$TLA/org.ching.watch.plist"
-  assert_eq "tty, answer y: hooks installed" "1" "$(jq '[.hooks.PreToolUse[]?.hooks[]?.command | select(contains("/ching/bin/guard.sh"))] | length' "$TD/settings.json")"
+  assert_file "tty, answer y: plist written" "$TLA/org.kaching.watch.plist"
+  assert_eq "tty, answer y: hooks installed" "1" "$(jq '[.hooks.PreToolUse[]?.hooks[]?.command | select(contains("/kaching/bin/guard.sh"))] | length' "$TD/settings.json")"
   assert_contains "tty, answer y: launchctl bootstrap called" "$(tail -n +$((n + 1)) "$WORK/launchctl.log")" "bootstrap gui/"
 else
   echo "no usable script(1) pty: tty prompt tests skipped" >"$T_ROOT/skipped.t_install"
 fi
 
-# ---------- Phase 6: the learner job (org.ching.learn) and the claude-mem exclusion (D27) ----------
+# ---------- Phase 6: the learner job (org.kaching.learn) and the claude-mem exclusion (D27) ----------
 LD="$WORK/learn-claude"; LLA="$WORK/learn-la"; LAH="$WORK/learn-ah"; CMS="$WORK/cm/settings.json"
 mkdir -p "$LD" "$WORK/cm"; printf '{}\n' >"$LD/settings.json"
 linst() { env SETTINGS_FILE="$LD/settings.json" CLAUDE_DIR="$LD" AGENT_HOME="$LAH" AGENT_REPOS_FILE="$WORK/learn-repos" \
   LAUNCH_AGENTS_DIR="$LLA" CLAUDE_MEM_SETTINGS="$CMS" "$KIT/install.sh" "$@" </dev/null 2>&1; }
-LP="$LLA/org.ching.learn.plist"
+LP="$LLA/org.kaching.learn.plist"
 # claude-mem is not installed: its settings are neither created nor mentioned as a change
 out=$(linst --dry-run); rc=$?
 assert_eq "learn: dry-run exits 0" "0" "$rc"
@@ -294,19 +294,19 @@ n=$(wc -l <"$WORK/launchctl.log")
 out=$(linst --yes); rc=$?
 assert_eq "learn: install exits 0" "0" "$rc"
 assert_ok "learn: the plist is valid" plutil -lint "$LP"
-assert_eq "learn: label" "org.ching.learn" "$(plutil -extract Label raw -o - "$LP")"
-assert_eq "learn: runs learn.sh through the kit link" "$LD/ching/bin/learn.sh" "$(plutil -extract ProgramArguments.1 raw -o - "$LP")"
+assert_eq "learn: label" "org.kaching.learn" "$(plutil -extract Label raw -o - "$LP")"
+assert_eq "learn: runs learn.sh through the kit link" "$LD/kaching/bin/learn.sh" "$(plutil -extract ProgramArguments.1 raw -o - "$LP")"
 assert_eq "learn: no argument (learn.sh decides the weekly part)" "2" "$(plutil -extract ProgramArguments raw -o - "$LP")"
 assert_eq "learn: every day at 05:30" "5 30" "$(plutil -extract StartCalendarInterval.Hour raw -o - "$LP") $(plutil -extract StartCalendarInterval.Minute raw -o - "$LP")"
 assert_eq "learn: no weekday (daily)" "" "$(plutil -extract StartCalendarInterval.Weekday raw -o - "$LP" 2>/dev/null)"
 assert_eq "learn: not run at load" "" "$(plutil -extract RunAtLoad raw -o - "$LP" 2>/dev/null)"
-assert_eq "learn: CHING_LEARNER=1" "1" "$(plutil -extract EnvironmentVariables.CHING_LEARNER raw -o - "$LP")"
+assert_eq "learn: KACHING_LEARNER=1" "1" "$(plutil -extract EnvironmentVariables.KACHING_LEARNER raw -o - "$LP")"
 assert_eq "learn: CLAUDE_MEM_INTERNAL=1" "1" "$(plutil -extract EnvironmentVariables.CLAUDE_MEM_INTERNAL raw -o - "$LP")"
 assert_eq "learn: AGENT_HOME" "$LAH" "$(plutil -extract EnvironmentVariables.AGENT_HOME raw -o - "$LP")"
 assert_contains "learn: PATH reaches claude in ~/.local/bin" "$(plutil -extract EnvironmentVariables.PATH raw -o - "$LP")" "$HOME/.local/bin"
 assert_eq "learn: launchd output goes to AGENT_HOME/learn.log" "$LAH/learn.log" "$(plutil -extract StandardOutPath raw -o - "$LP")"
 assert_contains "learn: bootstrapped" "$(tail -n +$((n + 1)) "$WORK/launchctl.log")" "bootstrap gui/$(id -u) $LP"
-assert_file "learn: the watcher is installed too" "$LLA/org.ching.watch.plist"
+assert_file "learn: the watcher is installed too" "$LLA/org.kaching.watch.plist"
 n=$(wc -l <"$WORK/launchctl.log")
 out=$(linst --yes)
 assert_contains "learn: a second run has nothing to do" "$out" "nothing to do"
@@ -332,13 +332,13 @@ out=$(linst --yes); rc=$?
 assert_eq "claude-mem: install exits 0" "0" "$rc"
 assert_eq "claude-mem: the entry is appended, the old one kept" "/Users/x/secret/**,$LAH/proposals/.work" "$(jq -r .CLAUDE_MEM_EXCLUDED_PROJECTS "$CMS")"
 assert_eq "claude-mem: other settings untouched" "worker" "$(jq -r .CLAUDE_MEM_RUNTIME "$CMS")"
-assert_eq "claude-mem: a backup holds the old file" "$CM_BEFORE" "$(cat "$CMS".bak.ching.*)"
+assert_eq "claude-mem: a backup holds the old file" "$CM_BEFORE" "$(cat "$CMS".bak.kaching.*)"
 assert_eq "claude-mem: the file keeps its mode" "640" "$(stat -f %Lp "$CMS")"
 CMA=$(cat "$CMS")
 out=$(linst --yes)
 assert_contains "claude-mem: a second run has nothing to do" "$out" "nothing to do"
 assert_eq "claude-mem: ... and leaves the file byte for byte" "$CMA" "$(cat "$CMS")"
-assert_eq "claude-mem: ... with one backup" "1" "$(ls "$CMS".bak.ching.* | wc -l | tr -d ' ')"
+assert_eq "claude-mem: ... with one backup" "1" "$(ls "$CMS".bak.kaching.* | wc -l | tr -d ' ')"
 printf '{"CLAUDE_MEM_RUNTIME":"worker"}\n' >"$CMS"; linst --yes >/dev/null
 assert_eq "claude-mem: no key yet: the key is created" "$LAH/proposals/.work" "$(jq -r .CLAUDE_MEM_EXCLUDED_PROJECTS "$CMS")"
 printf '{"CLAUDE_MEM_EXCLUDED_PROJECTS":["not","a string"]}\n' >"$CMS"; CMODD=$(cat "$CMS")
@@ -352,7 +352,54 @@ printf '{"CLAUDE_MEM_EXCLUDED_PROJECTS":"/a,%s"}\n' "$LAH/proposals/.work" >"$CM
 out=$(linst --uninstall --yes); rc=$?
 assert_eq "learn: uninstall exits 0" "0" "$rc"
 assert_no_file "learn: uninstall removes the learner plist" "$LP"
-assert_contains "learn: uninstall boots the learner out" "$(cat "$WORK/launchctl.log")" "bootout gui/$(id -u)/org.ching.learn"
+assert_contains "learn: uninstall boots the learner out" "$(cat "$WORK/launchctl.log")" "bootout gui/$(id -u)/org.kaching.learn"
 assert_eq "claude-mem: uninstall takes only our entry out" "/a" "$(jq -r .CLAUDE_MEM_EXCLUDED_PROJECTS "$CMS")"
 assert_not_contains "learn: the real claude-mem settings are never the target in tests" "$CMS" "/Users/clyde/.claude-mem"
+
+# ---------- D35: upgrading a machine installed under the old name (Ching) ----------
+# The old link, hook entries under it, the org.ching.* jobs and a moved repo folder (the old path is a symlink to the
+# new one): install replaces the hooks and jobs, keeps the old link leading here, and a second run has nothing to do.
+MD="$WORK/mig-claude"; MLA="$WORK/mig-la"; MAH="$WORK/mig-ah"; MOVED="$WORK/old-folder-name"
+mkdir -p "$MD" "$MLA"; ln -s "$KIT" "$MOVED"; ln -s "$MOVED" "$MD/ching"
+jq -n --arg o "$MD/ching/bin" '{hooks: {
+  SessionStart: [{matcher: "", hooks: [{type: "command", command: ($o + "/session-start.sh"), timeout: 10}]}],
+  Stop: [{matcher: "", hooks: [{type: "command", command: ($o + "/stop-check.sh"), timeout: 900},
+                                 {type: "command", command: "sh ~/mine.sh"}]}]}}' >"$MD/settings.json"
+printf '<plist>old watch</plist>\n' >"$MLA/org.ching.watch.plist"
+printf '<plist>old learn</plist>\n' >"$MLA/org.ching.learn.plist"
+printf '<plist>old dot</plist>\n' >"$MLA/org.ching.menubar.plist"
+minst() { env SETTINGS_FILE="$MD/settings.json" CLAUDE_DIR="$MD" AGENT_HOME="$MAH" AGENT_REPOS_FILE="$WORK/mig-repos" \
+  LAUNCH_AGENTS_DIR="$MLA" CLAUDE_MEM_SETTINGS="$WORK/mig-no-cm.json" "$KIT/install.sh" "$@" </dev/null 2>&1; }
+out=$(minst --dry-run)
+assert_contains "rename: dry run removes the old watch job" "$out" "would: launchctl bootout org.ching.watch and remove $MLA/org.ching.watch.plist"
+assert_contains "rename: dry run removes the old learner job" "$out" "would: launchctl bootout org.ching.learn and remove $MLA/org.ching.learn.plist"
+assert_contains "rename: the old dot is left to --install-menubar" "$out" "Run install.sh --install-menubar to replace it with KachingBar"
+assert_contains "rename: dry run shows the old hook going" "$(printf '%s\n' "$out" | grep '^-')" "$MD/ching/bin/stop-check.sh"
+assert_not_contains "rename: the old link through the moved folder is ours, not a warning" "$out" "is not our symlink"
+assert_file "rename: dry run keeps the old job" "$MLA/org.ching.watch.plist"
+out=$(minst --yes); rc=$?
+assert_eq "rename: install exits 0" "0" "$rc"
+cmds=$(jq -r '[.hooks[][] | .hooks[] | .command] | join("\n")' "$MD/settings.json")
+assert_not_contains "rename: no hook left under the old link" "$cmds" "$MD/ching/bin/"
+assert_contains "rename: the hooks run under the new link" "$cmds" "$MD/kaching/bin/stop-check.sh"
+assert_contains "rename: the owner's own hook stays" "$cmds" "sh ~/mine.sh"
+assert_eq "rename: each hook once" "1" "$(printf '%s\n' "$cmds" | grep -c 'kaching/bin/stop-check.sh$')"
+assert_eq "rename: the new link" "$KIT" "$(readlink "$MD/kaching")"
+assert_eq "rename: the old link still leads to the kit" "$(cd -P "$KIT" && pwd -P)" "$(cd -P "$MD/ching" && pwd -P)"
+assert_no_file "rename: old watch job removed" "$MLA/org.ching.watch.plist"
+assert_no_file "rename: old learner job removed" "$MLA/org.ching.learn.plist"
+assert_file "rename: new watch job" "$MLA/org.kaching.watch.plist"
+assert_file "rename: new learner job" "$MLA/org.kaching.learn.plist"
+assert_file "rename: the old dot stays until --install-menubar" "$MLA/org.ching.menubar.plist"
+assert_contains "rename: the old watch job was booted out" "$(cat "$WORK/launchctl.log")" "bootout gui/$(id -u)/org.ching.watch"
+assert_contains "rename: the hook works through the old link" "$(echo '{}' | "$MD/ching/bin/session-start.sh" touch 2>&1; echo rc=$?)" "rc=0"
+out=$(minst --yes)
+assert_contains "rename: second run has nothing to do" "$out" "nothing to do"
+# an old link that leads somewhere else (an old checkout) is pointed here again, by rename (never missing)
+rm "$MD/ching"; mkdir -p "$WORK/stale-checkout"; ln -s "$WORK/stale-checkout" "$MD/ching"
+out=$(minst --yes)
+assert_contains "rename: a stale old link is pointed at the kit" "$out" "pointed $MD/ching at $KIT"
+assert_eq "rename: ... and leads here" "$KIT" "$(readlink "$MD/ching")"
+out=$(minst --uninstall --yes)
+assert_no_file "rename: uninstall removes the old dot's job too" "$MLA/org.ching.menubar.plist"
 exit 0

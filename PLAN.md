@@ -4,7 +4,7 @@ Status: **DRAFT v2 for review** (v2 applies your first review: agents may push t
 
 > **v3 scope change (from the user):** the kit manages the **whole computer**, not just miso, miso-app and miso-workspace. Any open Claude session, in any repo or plain folder (including `~`), is in scope. Consequences built in Phase 1: global state in `~/.agent/` (sessions registry, per-session `STATE.md`/`NEXT.md`, optional defaults; override with `AGENT_HOME`); a repo's own `.agent/` is an optional override that is active only when it contains a `GOAL.md`; hooks and `guard.sh` work in any cwd with no git repo or `GOAL.md` assumed; `dash.sh` discovers sessions machine-wide (registry + `~/.claude/projects` transcripts + `git worktree list`), `~/.agent-repos` is an optional extra; the release gate and migrate gate stay per repo and are opt-in by a repo `GOAL.md` (elsewhere `guard.sh` still denies pushes to the default branch without a token); the dispatcher manages all sessions, not a fixed list. D6 and Phase 2 are adjusted below; everything else is unchanged.
 
-> **v4 (2026-10-05): Hermes harvest.** Four Hermes Agent repos were evaluated (read-only, nothing installed). Ching takes ideas only, and Claude Code stays the only engine (D15). A new **Phase 1.5** goes in before the pilot: coordination upgrades (event log, notification routing and budget, stall/context/token watcher, `dash.sh --inbox/--next`) and review hardening (review before every release, "not examined" footer, guard rules 8-11). The learning-loop ideas are recorded for **Phase 6**. Full design: `docs/superpowers/specs/2026-10-05-hermes-harvest-design.md`; plain-language summary: `ching-functions.md`. Ching is now the main AI operations layer for all local files (D14).
+> **v4 (2026-10-05): Hermes harvest.** Four Hermes Agent repos were evaluated (read-only, nothing installed). Kaching takes ideas only, and Claude Code stays the only engine (D15). A new **Phase 1.5** goes in before the pilot: coordination upgrades (event log, notification routing and budget, stall/context/token watcher, `dash.sh --inbox/--next`) and review hardening (review before every release, "not examined" footer, guard rules 8-11). The learning-loop ideas are recorded for **Phase 6**. Full design: `docs/superpowers/specs/2026-10-05-hermes-harvest-design.md`; plain-language summary: `kaching-functions.md`. Kaching is now the main AI operations layer for all local files (D14).
 
 How to use this file: read sections 1-5 (the design), correct anything wrong, then we work through section 6 one phase at a time. Every phase ends with a **checkpoint**: I show you results and stop until you say go.
 
@@ -34,14 +34,14 @@ Success is measured in the pilot (section 7), not by whether the scripts exist.
 | D7 | The **director loop** (`claude -p` rewriting NEXT.md) is deferred until the pilot shows a gap. | My recommendation, pending your OK |
 | D8 | Agents **can push to production** (`main`), but only through the **release gate** (section 5.2): tests green, change verified in the real app, evidence recorded for that exact commit. | Your review comment; gate design is mine |
 | D9 | Agents **can create, apply and follow up on migrations** against the shared Supabase project, only through the numbered-file ledger runner (section 5.3). "Update" means a new numbered file. | Your review comment; guardrails are mine |
-| D10-D13 | Split big phases across parallel agents with a separate verifier (D10); Ching is a learning system (D11, Phase 6); mem0 excluded (D12); Checkpoint 1 approved and hooks installed (D13). Full text in `DECISIONS.md`. | User |
-| D14 | Ching is the **main AI operations layer for all local files**. Review before release is required by default in every repo, with or without `GOAL.md`; only a human-written `review: off` disables it. | User, v4 |
-| D15 | Hermes repos are **a source of ideas only**. No Hermes runtime, plugin, skill or GUI runs in Ching. | User, v4 |
+| D10-D13 | Split big phases across parallel agents with a separate verifier (D10); Kaching is a learning system (D11, Phase 6); mem0 excluded (D12); Checkpoint 1 approved and hooks installed (D13). Full text in `DECISIONS.md`. | User |
+| D14 | Kaching is the **main AI operations layer for all local files**. Review before release is required by default in every repo, with or without `GOAL.md`; only a human-written `review: off` disables it. | User, v4 |
+| D15 | Hermes repos are **a source of ideas only**. No Hermes runtime, plugin, skill or GUI runs in Kaching. | User, v4 |
 | D16 | Phase 1.5 (coordination + review hardening) is built **before** the pilot; the learning-loop ideas wait for Phase 6 and real pilot data. | User, v4 |
 | D17 | Stay in bash: an append-only event log (`~/.agent/events.jsonl`) plus a one-shot launchd watcher. No daemon, no cloud scheduler, no AI calls in Phase 1.5. | User, v4 |
 | D18 | Sessions may write **drafts only**. They never send email or chat messages (guard rule 10). | User, v4 |
 | D20-D22 | Sessions never push `v*` release tags (rule 8). The pilot-affecting gaps are fixed before the pilot. miso opts in first, in the `ching-pilot` worktree. Details in `DECISIONS.md`. | User, 2026-10-06 |
-| D23 | Ching is **not** ported to a Claude Code mod. Enforcement stays in bash, settings hooks and launchd; a read-only `ching-ui` mod may follow the pilot. Details in `DECISIONS.md`. | User, 2026-10-06 |
+| D23 | Kaching is **not** ported to a Claude Code mod. Enforcement stays in bash, settings hooks and launchd; a read-only `ching-ui` mod may follow the pilot. Details in `DECISIONS.md`. | User, 2026-10-06 |
 
 Items marked "pending your OK" are the ones to challenge when you review.
 
@@ -93,7 +93,7 @@ Items marked "pending your OK" are the ones to challenge when you review.
 ## 5. Architecture
 
 ```
-~/bbq/ching/                  source of truth (local git repo; remote only if you ask, never technobbq)
+~/bbq/kaching/                  source of truth (local git repo; remote only if you ask, never technobbq)
   install.sh                  idempotent: backs up settings.json, merges hooks with jq, symlinks scripts
   bin/
     session-start.sh          injects .agent/STATE.md + NEXT.md (additionalContext)
@@ -105,7 +105,7 @@ Items marked "pending your OK" are the ones to challenge when you review.
     post-release.sh           watches the deploy run, reports result, flags failure (5.2)
     migrate-gate.sh           dry run + migration lint before `db-migrate.ts --apply` is allowed (5.3)
     dash.sh                   one line per session; --speak, --inbox (needs you / ready / finished), --next (ranked)  [v4]
-    ching-watch.sh            launchd every 5 min, one-shot: stall, context pressure, token totals, log rotation  [v4]
+    kaching-watch.sh            launchd every 5 min, one-shot: stall, context pressure, token totals, log rotation  [v4]
     lib.sh                    shared helpers, incl. ev (event log) and checkpoint_get  [v4]
   commands/handoff.md next.md installed to ~/.claude/commands/
   templates/                  GOAL.md STATE.md NEXT.md VERIFY.md REVIEW.md review-lenses/, AGENTS.md autonomy block, gitignore lines
@@ -215,7 +215,7 @@ Work in `/tmp/agent-sandbox` (a fresh git repo). Back up `~/.claude/settings.jso
 
 ### Phase 1: Build the core kit (still no real repos)
 
-- [x] **1.1** Create the project structure from section 5. Version it with a **local** `git init` in `ching` (see question 3). No GitHub remote is created in this step.
+- [x] **1.1** Create the project structure from section 5. Version it with a **local** `git init` in `kaching` (see question 3). No GitHub remote is created in this step.
 - [x] **1.2** `brew install terminal-notifier`; write `notify.sh`; find the Claude app bundle id for click-to-activate.
 - [x] **1.3** Write `session-start.sh`, `pre-compact.sh`, `stop-check.sh`, `guard.sh`, using the schemas confirmed in Phase 0.
 - [x] **1.4** Write `handoff.md` and `next.md` slash commands.
@@ -234,7 +234,7 @@ Built per D10: the shared contracts land first, then parallel implementers on di
 - [x] **1.5.1** Contracts: `ev` and `checkpoint_get` in `lib.sh`; checkpoint block in `templates/STATE.md` and `/handoff`; `t_events.sh`.
 - [x] **1.5.2** Events from every hook and gate (session-start, pre-compact, stop-check, guard after its decision, release/migrate/post-release).
 - [x] **1.5.3** `notify.sh`: `done` goes to the inbox instead of a push; budget of 4 non-urgent alerts a day, 09:00-21:00, 45-minute cooldown; `input`/`blocked`/`ready` always delivered.
-- [x] **1.5.4** `ching-watch.sh` + launchd plist via `install.sh`: stall after 20 minutes, context levels (healthy under 60%, watch, handoff over 80%), daily token totals with optional `TOKEN_BUDGET_DAILY`, event-log rotation.
+- [x] **1.5.4** `kaching-watch.sh` + launchd plist via `install.sh`: stall after 20 minutes, context levels (healthy under 60%, watch, handoff over 80%), daily token totals with optional `TOKEN_BUDGET_DAILY`, event-log rotation.
 - [x] **1.5.5** `dash.sh`: `ctx` and `tok` columns, `--inbox`, `--next` (U×I×R), new `--speak` wording; dispatcher policy uses the inbox.
 - [x] **1.5.6** `stop-check.sh`: in repo mode, block once per prompt when the checkpoint is missing or stale. (Sequence after the in-flight `test-escalate` edits to this file.)
 - [x] **1.5.7** Review hardening: `## not examined` in VERIFY.md, `templates/REVIEW.md`, three lens prompts, review checks in `release-gate.sh`, `review: required` in the defaults `GOAL.md`.
@@ -248,15 +248,15 @@ Built per D10: the shared contracts land first, then parallel implementers on di
 
 - [x] **1.6.1** `speak.sh`: say a sentence through the local Kokoro service.
 - [x] **1.6.2** `notify.sh`: the budgeted `waiting` kind.
-- [x] **1.6.3** `ching-watch.sh`: detect waiting sessions and send the banner for finished sessions with open work.
-- [x] **1.6.4** `ching-watch.sh`: one spoken note per waiting spell (presence, voice lock, quiet hours, speech gap).
+- [x] **1.6.3** `kaching-watch.sh`: detect waiting sessions and send the banner for finished sessions with open work.
+- [x] **1.6.4** `kaching-watch.sh`: one spoken note per waiting spell (presence, voice lock, quiet hours, speech gap).
 - [x] **1.6.5** Live smoke section, docs, and the real-machine check from launchd. (silent launchd check done 2026-10-16, docs/live-checks.md and tests/live-watch.sh; the spoken check from launchd is still open and must run in the daytime)
 
-**Checkpoint 1.6:** test output, the `ching-watch.sh` diff and the real-machine check. You approve before `nudge` merges into `main`.
+**Checkpoint 1.6:** test output, the `kaching-watch.sh` diff and the real-machine check. You approve before `nudge` merges into `main`.
 
 ### Phase 2: Pilot on a couple of real sessions across different folders (2-3 days of real use)
 
-- [x] **2.1** Run `install.sh` on your real `~/.claude/settings.json` (machine-wide from this point; no per-repo setup is needed for hooks, state, notifications, `dash.sh` or the guardrails). *Done 2026-10-06 10:01 after the user chose "install as designed" (rule 10 denies Telegram/Discord/Gmail/Slack reply and send tools for sessions). Backup `~/.claude/settings.json.bak.ching.20261006-100147`; launchd job `org.ching.watch` loaded; a second run changed nothing; the watcher logged `context` events.*
+- [x] **2.1** Run `install.sh` on your real `~/.claude/settings.json` (machine-wide from this point; no per-repo setup is needed for hooks, state, notifications, `dash.sh` or the guardrails). *Done 2026-10-06 10:01 after the user chose "install as designed" (rule 10 denies Telegram/Discord/Gmail/Slack reply and send tools for sessions). Backup `~/.claude/settings.json.bak.ching.20261006-100147`; launchd job `org.kaching.watch` loaded; a second run changed nothing; the watcher logged `context` events.*
 - [x] **2.2** *(prepared 2026-10-06: miso opted in through the worktree `~/bbq/.worktrees/miso-ching-pilot`, branch `ching-pilot`, `release_mode: confirm`. miso's `bun test` has failed on main since 2026-10-02 (7 local-registry tests), so the first pilot task there is getting CI green. First task done locally 2026-10-06: the failing tests came from the root `overrides: { zod: ^4.4.3 }` forcing zod 4 onto shadcn, which needs zod 3 (`deepPartial`); dropping the override gives shadcn its own zod 3.25.76 and leaves everything else on zod 4.4.3. Commit 70b0869 on `ching-pilot` (not pushed; the full miso gate is green, 2612 tests). It still has to reach main through a normal feature branch and PR, since `ching-pilot` is never pushed. Pilot folders picked 2026-10-06: the miso worktree above, plus `~/bbq/bbqos` (plain repo on main, not opted in, so it exercises the machine-wide hooks without a `GOAL.md`). No real non-repo working folder exists on this machine (the AIW shared drive is a git repo), so the third slot stays open until real non-repo work comes up.)* Pick two or three real sessions in different folders (for example one repo, one worktree, one non-repo folder). Optionally, in one repo on a branch: add the autonomy block to `AGENTS.md`, add gitignore lines, write `.agent/GOAL.md` with the real test command (from `package.json`) to opt that repo into the Stop check and the release/migrate gates. *(2026-10-16: 70b0869 reached miso main as 643d6ad on 2026-10-06, CI green. The third slot can be a real non-repo folder such as ~/Downloads/tricount_v2.)*
 - [ ] **2.3** Work normally with those sessions. Record the three metrics in section 7. *(tooling done 2026-10-16: `bin/metrics.sh --days N`; stays open until the Checkpoint 2 review)*
 - [ ] **2.4** Read miso's `release.yml` and fill in its release path in 5.2 *(done 2026-10-06; it is a tag-triggered npm publish, see 5.2)*. Run the browser verification step for real on one change *(open: needs a real change)*.
@@ -310,7 +310,7 @@ Everything writes only to `~/.agent/proposals/`. The model call is a local `clau
 - [x] **6.1** Extractor and weekly report with the feedback section (`learn-extract.sh`, `learn-report.sh`).
 - [x] **6.2** Correction detector and eval runner (`learn-corrections.sh`, `learn-eval.sh`); the labelling policy was updated from the owner's spot-check (D28).
 - [x] **6.3** Skill-candidate miner (`learn-skills.sh`).
-- [x] **6.4** Plumbing: `learn.sh`, the proposals CLI (approve is human-only), the PROPOSALS lane, guard learner mode, the `org.ching.learn` plist, the claude-mem exclusion.
+- [x] **6.4** Plumbing: `learn.sh`, the proposals CLI (approve is human-only), the PROPOSALS lane, guard learner mode, the `org.kaching.learn` plist, the claude-mem exclusion.
 - [x] **6.5** Event fields: `checkpoint` gets `not_examined`/`task_type`, a new `tests` event.
 - [x] **6.6** Verifier round 1 (2026-10-17): the fixes are merged (the learner calls are isolated from the owner's hooks, a hard token cap, a human-only approve).
 - [ ] **6.7** Verifier round 2 (session Ching01), then install on the real machine and check the first nightly run.
@@ -320,7 +320,7 @@ Everything writes only to `~/.agent/proposals/`. The model call is a local `clau
 
 - Phone voice via VoiceMode Connect (routes audio through voicemode.dev's cloud; needs your explicit decision).
 - ~~Director loop~~: replaced by the Phase 6 learning loop (D11).
-- Replace claude-mem with Ching's own memory (D27): events, checkpoints, transcripts and approved lessons.
+- Replace claude-mem with Kaching's own memory (D27): events, checkpoints, transcripts and approved lessons.
 - Cloud sessions for long migrations. Hooks may not fire there; test first.
 - `ching-ui` Claude Code mod (D23), only if the pilot shows visibility or notification as the weak spot: read-only pane for `dash.sh --inbox`/`--next`, status-line entry, toasts for other sessions' events. Never enforcement.
 
@@ -360,7 +360,7 @@ Reading the results: too many questions means a vague `GOAL.md` or a missing tes
 
 1. **D4/D5/D6/D7:** are you happy with voice on the dispatcher only, local-only audio, miso as pilot, and the director deferred?
 2. **Guardrail list (5.1) and release gate (5.2):** anything to add or remove? Do you want `confirm` for the first release per repo, then `auto`, or `auto` from day one?
-3. **Where does the kit live?** It is personal tooling, not product code. Options: (a) local `git init` in `ching` only, no remote (recommended: history and rollback, nothing published); (b) a **private** repo under `westsoever/` for backup and a second machine, created only when you say so; (c) no git at all, `install.sh` copies from the folder. `gh` is already signed in as `westsoever`, so (b) needs no setup. It will not go under `technobbq/`.
+3. **Where does the kit live?** It is personal tooling, not product code. Options: (a) local `git init` in `kaching` only, no remote (recommended: history and rollback, nothing published); (b) a **private** repo under `westsoever/` for backup and a second machine, created only when you say so; (c) no git at all, `install.sh` copies from the folder. `gh` is already signed in as `westsoever`, so (b) needs no setup. It will not go under `technobbq/`.
 4. **Supabase access (5.3):** is a narrower token than the current personal access token possible for you, and does your plan include database branching?
 5. **Notification click:** should clicking a notification focus the Claude Desktop app, or VS Code?
 6. **The "Session finished" popup:** OK to remove it once `notify.sh` replaces it? (v4: `done` no longer pushes at all, so the popup would be the only "finished" signal left.)

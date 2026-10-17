@@ -39,14 +39,14 @@ gdeny "rm -rf . at the repo root" "$R" 'rm -rf .'
 gdeny "rm -rf .git" "$R" 'rm -rf .git'
 gdeny "rm -rf glob on /" "$R" 'rm -rf /*'
 gdeny "rm -rf glob on /tmp itself" "$R" 'rm -rf /tmp/*'
-gallow "rm -rf named glob inside /tmp" "$R" 'rm -rf /tmp/ching-f1-probe.*'
+gallow "rm -rf named glob inside /tmp" "$R" 'rm -rf /tmp/kaching-f1-probe.*'
 gallow "rm -rf named glob inside /private/tmp" "$R" 'rm -rf /private/tmp/verify-run.*'
 gdeny "rm -rf short-prefix glob in /tmp" "$R" 'rm -rf /tmp/a*'
 gdeny "rm -rf glob hitting every session's scratch (/tmp/claude-501)" "$R" 'rm -rf /tmp/cla*'
 gdeny "rm -rf glob on the claude scratch name" "$R" 'rm -rf /tmp/claude-501*'
 gdeny "rm -rf 3-letter glob in /tmp" "$R" 'rm -rf /tmp/chi*'
 gdeny "rm -rf short glob without a separator" "$R" 'rm -rf /tmp/cv2*'
-gdeny "rm -rf glob on other test sandboxes" "$R" 'rm -rf /tmp/ching-tests.*'
+gdeny "rm -rf glob on other test sandboxes" "$R" 'rm -rf /tmp/kaching-tests.*'
 gdeny "rm -rf named glob with a deeper segment" "$R" 'rm -rf /tmp/run*/../../etc'
 gdeny "rm -rf named glob outside tmp" "$R" 'rm -rf /etc/old*'
 gdeny "rm -rf with a variable" "$R" 'rm -rf $HOME/x'
@@ -125,11 +125,11 @@ gdeny "chmod -x a hook" "$R" 'chmod -x .git/hooks/pre-push'
 gdeny "mv .githooks away" "$R" 'mv .githooks .githooks.off'
 gdeny "edit settings.json via sed" "$R" "sed -i '' 's/guard//' $HOME/.claude/settings.json"
 gdeny "redirect into settings.json" "$R" "echo '{}' > $HOME/.claude/settings.json"
-gdeny "modify the guard itself" "$R" "echo 'exit 0' >> $KIT/bin/guard.sh && : $CLAUDE_DIR/ching/bin/guard.sh"
-gdeny "write through the ching symlink" "$R" "cp /tmp/x $CLAUDE_DIR/ching/bin/guard.sh"
+gdeny "modify the guard itself" "$R" "echo 'exit 0' >> $KIT/bin/guard.sh && : $CLAUDE_DIR/kaching/bin/guard.sh"
+gdeny "write through the kaching symlink" "$R" "cp /tmp/x $CLAUDE_DIR/kaching/bin/guard.sh"
 tdeny "Edit tool on settings.json" Edit "$R" "$(jq -n --arg p "$HOME/.claude/settings.json" '{file_path:$p,old_string:"a",new_string:"b"}')"
 tdeny "Write tool into .git/hooks" Write "$R" "$(jq -n --arg p "$RP/.git/hooks/pre-push" '{file_path:$p,content:"exit 0"}')"
-tdeny "Edit tool on guard.sh via symlink path" Edit "$R" "$(jq -n --arg p "$CLAUDE_DIR/ching/bin/guard.sh" '{file_path:$p,old_string:"a",new_string:"b"}')"
+tdeny "Edit tool on guard.sh via symlink path" Edit "$R" "$(jq -n --arg p "$CLAUDE_DIR/kaching/bin/guard.sh" '{file_path:$p,old_string:"a",new_string:"b"}')"
 tallow "Edit tool on a normal file" Edit "$R" "$(jq -n --arg p "$RP/README.md" '{file_path:$p,old_string:"a",new_string:"b"}')"
 tallow "Write tool on a normal new file" Write "$P" "$(jq -n --arg p "$P/notes.md" '{file_path:$p,content:"x"}')"
 
@@ -229,7 +229,7 @@ gdeny "bun run db:migrate --apply" "$R" 'bun run db:migrate --apply'
 gallow "db-migrate dry run (no --apply)" "$R" 'bun scripts/db-migrate.ts'
 
 # ---------- gate commands reserved for the human ----------
-gdeny "agent runs release-gate --approve" "$R" "$CLAUDE_DIR/ching/bin/release-gate.sh --approve"
+gdeny "agent runs release-gate --approve" "$R" "$CLAUDE_DIR/kaching/bin/release-gate.sh --approve"
 gdeny "agent runs migrate-gate --confirm" "$R" "migrate-gate.sh --confirm db/migrations/0002_x.sql"
 gdeny "agent writes a release token by hand" "$R" 'echo abc > .agent/release-token'
 gdeny "agent reads the signing secret" "$R" "cat $AGENT_HOME/.agent/secret"
@@ -1194,31 +1194,31 @@ env FOO="a;b" echo ok
 NODE_OPTIONS="--max-old-space-size=4096 --enable-source-maps" bun run build
 EOF
 
-# ---------- running a ching script with a redirect is not a write to it (2026-10-06: dash.sh 2>&1 | head was denied) ----------
+# ---------- running a kaching script with a redirect is not a write to it (2026-10-06: dash.sh 2>&1 | head was denied) ----------
 while IFS= read -r c; do
-  [ -n "$c" ] && gallow "redirect while running a ching script: $c" "$QD" "$c"
+  [ -n "$c" ] && gallow "redirect while running a kaching script: $c" "$QD" "$c"
 done <<'EOF'
-~/.claude/ching/bin/dash.sh 2>&1 | head -8
-~/.claude/ching/bin/dash.sh 2>/dev/null
-~/.claude/ching/bin/dash.sh --next >/tmp/dash-out.txt
-~/.claude/ching/bin/dash.sh > /tmp/dash-out.txt 2>&1
-~/.claude/ching/bin/dash.sh >&2
-bash ~/.claude/ching/bin/dash.sh --inbox 2>&1 | tail -3
+~/.claude/kaching/bin/dash.sh 2>&1 | head -8
+~/.claude/kaching/bin/dash.sh 2>/dev/null
+~/.claude/kaching/bin/dash.sh --next >/tmp/dash-out.txt
+~/.claude/kaching/bin/dash.sh > /tmp/dash-out.txt 2>&1
+~/.claude/kaching/bin/dash.sh >&2
+bash ~/.claude/kaching/bin/dash.sh --inbox 2>&1 | tail -3
 cat ~/.claude/settings.json > /tmp/settings-copy.json
 EOF
 while IFS= read -r c; do
   [ -n "$c" ] && gdeny_why "write to a protected path: $c" "$QD" "$c" "editing hooks, settings or the guard"
 done <<'EOF'
-echo x > ~/.claude/ching/bin/dash.sh
+echo x > ~/.claude/kaching/bin/dash.sh
 cat a >> ~/.claude/settings.json
-tee ~/.claude/ching/bin/x
+tee ~/.claude/kaching/bin/x
 echo x >~/.claude/settings.json
-echo x 2>~/.claude/ching/bin/dash.sh
+echo x 2>~/.claude/kaching/bin/dash.sh
 echo x &> ~/.claude/settings.json
 echo x >& ~/.claude/settings.json
 exec 3<>~/.claude/settings.json
-cp /tmp/x ~/.claude/ching/bin/dash.sh 2>/dev/null
-~/.claude/ching/bin/dash.sh > ~/.claude/ching/bin/dash.sh
+cp /tmp/x ~/.claude/kaching/bin/dash.sh 2>/dev/null
+~/.claude/kaching/bin/dash.sh > ~/.claude/kaching/bin/dash.sh
 sed -i '' 's/a/b/' ~/.claude/settings.json 2>&1
 EOF
 
@@ -1232,7 +1232,7 @@ while IFS= read -r c; do
     pass "decided, no internal error: $c"
   else fail "decided, no internal error: $c" "  rc=$rc"$'\n'"  guard said: $out"; fi
 done <<'EOF'
-cd sub && export T_ROOT=$(mktemp -d /tmp/ching-focus.XXXXXX) && TNAME=t_stop bash tests/t_stop.sh >"$T_ROOT/log" 2>&1; echo "rc=$?"; grep -E 'checkpoint|^FAIL' "$T_ROOT"/results.t_stop | head -20; rm -rf "$T_ROOT"
+cd sub && export T_ROOT=$(mktemp -d /tmp/kaching-focus.XXXXXX) && TNAME=t_stop bash tests/t_stop.sh >"$T_ROOT/log" 2>&1; echo "rc=$?"; grep -E 'checkpoint|^FAIL' "$T_ROOT"/results.t_stop | head -20; rm -rf "$T_ROOT"
 W=/tmp/x/t_dash && export HOME=$W/home AGENT_HOME=$W/agent-home && ls $AGENT_HOME && bin/dash.sh --next
 EOF
 while IFS= read -r c; do
@@ -1243,35 +1243,42 @@ sed -n 1,60p node_modules/x/README.md | head -80; grep -n "readSheet\b\|readShee
 cd sub && export SPACES_ROOT=/tmp/x && echo "== typecheck" && (bun run typecheck 2>&1 | tail -15; echo "typecheck exit=${pipestatus[1]}")
 ls db/test | head -20; f=$(ls db/test | grep -iE "foundation|enrich" | head -1); [ -n "$f" ] && sed -n 1,70p db/test/$f | cut -c1-170; grep -nE "usage|--apply|export (async )?function|export const" scripts/db-migrate.ts | head -20
 grep -nE '^(write_goal|mk_repo|hook_json|assert_[a-z_]+)\(\)|NOTIFY_DRY_RUN|export ' tests/lib.sh | head -40; sed -n "$(grep -n '^write_goal()' tests/lib.sh | cut -d: -f1),+12p" tests/lib.sh
-export T_ROOT=$(mktemp -d /tmp/ching-tests.XXXXXX) && TNAME=t_install bash tests/t_install.sh >"$T_ROOT/t_install.log" 2>&1; echo "rc=$?"; grep '^FAIL' "$T_ROOT/results.t_install"
+export T_ROOT=$(mktemp -d /tmp/kaching-tests.XXXXXX) && TNAME=t_install bash tests/t_install.sh >"$T_ROOT/t_install.log" 2>&1; echo "rc=$?"; grep '^FAIL' "$T_ROOT/results.t_install"
 EOF
 
-# ---------- Phase 6: `ching-proposals approve` is for the human; learner mode (CHING_LEARNER=1) ----------
-gdeny "ching-proposals approve from a session" "$R" 'ching-proposals approve rule-x'
-gdeny "approve through the kit path" "$R" "$HOME/.claude/ching/bin/ching-proposals approve rule-x"
-gdeny "approve under a fake pty" "$R" 'script -q /dev/null ching-proposals approve rule-x'
-gdeny "approve after a cd and &&" "$R" 'cd /tmp && bin/ching-proposals approve skill-y'
-gdeny "approve with the word quoted apart" "$R" "ching-proposals ap'prove' rule-x"
-gdeny "approve inside bash -c" "$R" "bash -c 'ching-proposals approve rule-x'"
-gdeny_why "approve: the reason names the person at a terminal" "$R" 'ching-proposals approve rule-x' "approving a learner proposal is for the person at a terminal"
-gallow "ching-proposals list" "$R" 'ching-proposals list'
-gallow "ching-proposals show" "$R" 'ching-proposals show rule-x'
-gallow "ching-proposals reject" "$R" 'ching-proposals reject rule-x not useful'
-gallow "ching-proposals snooze" "$R" 'ching-proposals snooze rule-x 7'
-gallow "grep for approve in the CLI" "$R" 'grep -n approve bin/ching-proposals'
-gallow "a proposal id that contains approve" "$R" 'ching-proposals show rule-approve-merges'
+# ---------- Phase 6: `kaching-proposals approve` is for the human; learner mode (KACHING_LEARNER=1) ----------
+gdeny "kaching-proposals approve from a session" "$R" 'kaching-proposals approve rule-x'
+gdeny "approve through the kit path" "$R" "$HOME/.claude/kaching/bin/kaching-proposals approve rule-x"
+gdeny "approve under a fake pty" "$R" 'script -q /dev/null kaching-proposals approve rule-x'
+gdeny "approve after a cd and &&" "$R" 'cd /tmp && bin/kaching-proposals approve skill-y'
+# D35: the old name is a wrapper around the same CLI, and the old link still leads to the kit
+O=ching-pro""posals
+gdeny "approve under the pre-D35 name" "$R" "$O approve rule-x"
+gdeny "approve through the old kit path" "$R" "$HOME/.claude/ching/bin/$O approve rule-x"
+gallow "the pre-D35 name may still list" "$R" "$O list"
+tdeny "Edit tool on a hook under the old link" Edit "$R" "$(jq -n --arg p "$HOME/.claude/ching/bin/guard.sh" '{file_path:$p,old_string:"a",new_string:"b"}')"
+tdeny "Edit tool on a hook under the new link" Edit "$R" "$(jq -n --arg p "$HOME/.claude/kaching/bin/guard.sh" '{file_path:$p,old_string:"a",new_string:"b"}')"
+gdeny "approve with the word quoted apart" "$R" "kaching-proposals ap'prove' rule-x"
+gdeny "approve inside bash -c" "$R" "bash -c 'kaching-proposals approve rule-x'"
+gdeny_why "approve: the reason names the person at a terminal" "$R" 'kaching-proposals approve rule-x' "approving a learner proposal is for the person at a terminal"
+gallow "kaching-proposals list" "$R" 'kaching-proposals list'
+gallow "kaching-proposals show" "$R" 'kaching-proposals show rule-x'
+gallow "kaching-proposals reject" "$R" 'kaching-proposals reject rule-x not useful'
+gallow "kaching-proposals snooze" "$R" 'kaching-proposals snooze rule-x 7'
+gallow "grep for approve in the CLI" "$R" 'grep -n approve bin/kaching-proposals'
+gallow "a proposal id that contains approve" "$R" 'kaching-proposals show rule-approve-merges'
 # the verifier's bypasses of the old token match (stage 6a): the allowlist denies every one
-gdeny "bypass: echo approve | xargs ching-proposals" "$R" 'echo approve rule-x | xargs ching-proposals'
-gdeny "bypass: xargs with options" "$R" 'echo rule-x | xargs -n1 ching-proposals approve'
-gdeny "bypass: a=approve; ching-proposals \$a" "$R" 'a=approve; ching-proposals $a rule-x'
-gdeny "bypass: \$(echo approve)" "$R" 'ching-proposals $(echo approve) rule-x'
-gdeny "bypass: backticks" "$R" 'ching-proposals `echo approve` rule-x'
-gdeny "bypass: appr\${x}ove" "$R" 'x=; ching-proposals appr${x}ove rule-x'
-gdeny "bypass: perl exec" "$R" "perl -e 'exec \"ching-proposals\", \"approve\", \"rule-x\"'"
-gdeny "bypass: eval" "$R" 'eval ching-proposals approve rule-x'
-gdeny "bypass: env wrapper" "$R" 'env ching-proposals approve rule-x'
-gdeny "bypass: the name in capitals (a case-insensitive volume)" "$R" 'CHING-PROPOSALS approve rule-x'
-gdeny "bypass: a glob that expands to the name" "$R" 'bin/ching-propos*ls approve rule-x'
+gdeny "bypass: echo approve | xargs kaching-proposals" "$R" 'echo approve rule-x | xargs kaching-proposals'
+gdeny "bypass: xargs with options" "$R" 'echo rule-x | xargs -n1 kaching-proposals approve'
+gdeny "bypass: a=approve; kaching-proposals \$a" "$R" 'a=approve; kaching-proposals $a rule-x'
+gdeny "bypass: \$(echo approve)" "$R" 'kaching-proposals $(echo approve) rule-x'
+gdeny "bypass: backticks" "$R" 'kaching-proposals `echo approve` rule-x'
+gdeny "bypass: appr\${x}ove" "$R" 'x=; kaching-proposals appr${x}ove rule-x'
+gdeny "bypass: perl exec" "$R" "perl -e 'exec \"kaching-proposals\", \"approve\", \"rule-x\"'"
+gdeny "bypass: eval" "$R" 'eval kaching-proposals approve rule-x'
+gdeny "bypass: env wrapper" "$R" 'env kaching-proposals approve rule-x'
+gdeny "bypass: the name in capitals (a case-insensitive volume)" "$R" 'KACHING-PROPOSALS approve rule-x'
+gdeny "bypass: a glob that expands to the name" "$R" 'bin/kaching-propos*ls approve rule-x'
 gdeny "bypass: a glob with a short literal part" "$R" 'bin/chi*s approve rule-x'
 gdeny "bypass: a two-letter glob" "$R" 'bin/c*s approve rule-x'
 gdeny "bypass: a one-letter glob" "$R" 'bin/*s approve rule-x'
@@ -1284,34 +1291,34 @@ gallow "a case arm with a bracket class is no CLI call" "$R" "python3 - <<'EOF'
 s=\"case \\\"\$lim\\\" in ''|*[!0-9]*) lim=300 ;; esac\"
 EOF"
 gallow "an all-pattern word is no CLI call" "$R" 'x=1; *[!0-9]* ; echo b'
-gdeny "bypass: find -exec" "$R" 'find bin -name ching-proposals -exec {} approve rule-x ;'
-gdeny "bypass: python" "$R" "python3 -c 'import os; os.execvp(\"ching-proposals\", [\"ching-proposals\", \"approve\", \"rule-x\"])'"
-gdeny "bypass: a copy of the CLI" "$R" 'cp bin/ching-proposals /tmp/cp2'
-gdeny "bypass: echo into a shell" "$R" 'echo ching-proposals approve rule-x | sh'
-gdeny "bypass: git -c core.pager" "$R" "git -c core.pager='ching-proposals approve rule-x' log"
-gdeny "bypass: an option before the subcommand" "$R" 'ching-proposals --x approve rule-x'
-gdeny "bypass: no subcommand at all" "$R" 'ching-proposals'
-gdeny_why "bypass: the reason names the allowlist" "$R" 'echo approve rule-x | xargs ching-proposals' "approving a learner proposal is for the person at a terminal. A session may only call ching-proposals directly"
-# what a session (and work on ching itself) still does
-gallow "ching-proposals diff" "$R" 'ching-proposals diff rule-x'
-gallow "ching-proposals help" "$R" 'ching-proposals --help'
-gallow "ching-proposals list with NO_COLOR=1" "$R" 'NO_COLOR=1 ching-proposals list --all'
-gallow "ching-proposals show by kit path, piped to head" "$R" "$HOME/.claude/ching/bin/ching-proposals show rule-x | head -20"
-gallow "list then show" "$R" 'ching-proposals list && ching-proposals show rule-x'
-gallow "shellcheck the CLI" "$R" 'cd bin && shellcheck -x -S warning ching-proposals'
-gallow "bash -n the CLI" "$R" 'bash -n bin/ching-proposals'
-gallow "sed -n the CLI" "$R" "sed -n '1,40p' bin/ching-proposals"
-gallow "git add the CLI" "$R" 'git add bin/ching-proposals tests/t_learn_plumbing.sh'
-gallow "a commit message that mentions approve" "$R" 'git commit -m "ching-proposals: approve asks for a code"'
-gallow "git log of the CLI" "$R" 'git log --oneline -- bin/ching-proposals'
-gallow "the README mentions it" "$R" 'grep -n "ching-proposals approve" README.md'
+gdeny "bypass: find -exec" "$R" 'find bin -name kaching-proposals -exec {} approve rule-x ;'
+gdeny "bypass: python" "$R" "python3 -c 'import os; os.execvp(\"kaching-proposals\", [\"kaching-proposals\", \"approve\", \"rule-x\"])'"
+gdeny "bypass: a copy of the CLI" "$R" 'cp bin/kaching-proposals /tmp/cp2'
+gdeny "bypass: echo into a shell" "$R" 'echo kaching-proposals approve rule-x | sh'
+gdeny "bypass: git -c core.pager" "$R" "git -c core.pager='kaching-proposals approve rule-x' log"
+gdeny "bypass: an option before the subcommand" "$R" 'kaching-proposals --x approve rule-x'
+gdeny "bypass: no subcommand at all" "$R" 'kaching-proposals'
+gdeny_why "bypass: the reason names the allowlist" "$R" 'echo approve rule-x | xargs kaching-proposals' "approving a learner proposal is for the person at a terminal. A session may only call kaching-proposals directly"
+# what a session (and work on kaching itself) still does
+gallow "kaching-proposals diff" "$R" 'kaching-proposals diff rule-x'
+gallow "kaching-proposals help" "$R" 'kaching-proposals --help'
+gallow "kaching-proposals list with NO_COLOR=1" "$R" 'NO_COLOR=1 kaching-proposals list --all'
+gallow "kaching-proposals show by kit path, piped to head" "$R" "$HOME/.claude/kaching/bin/kaching-proposals show rule-x | head -20"
+gallow "list then show" "$R" 'kaching-proposals list && kaching-proposals show rule-x'
+gallow "shellcheck the CLI" "$R" 'cd bin && shellcheck -x -S warning kaching-proposals'
+gallow "bash -n the CLI" "$R" 'bash -n bin/kaching-proposals'
+gallow "sed -n the CLI" "$R" "sed -n '1,40p' bin/kaching-proposals"
+gallow "git add the CLI" "$R" 'git add bin/kaching-proposals tests/t_learn_plumbing.sh'
+gallow "a commit message that mentions approve" "$R" 'git commit -m "kaching-proposals: approve asks for a code"'
+gallow "git log of the CLI" "$R" 'git log --oneline -- bin/kaching-proposals'
+gallow "the README mentions it" "$R" 'grep -n "kaching-proposals approve" README.md'
 # a wrapper script file shows the guard nothing to match; the CLI refuses it (t_learn_plumbing.sh "bypass a wrapper")
 gallow "a wrapper script file: not visible to the guard (the CLI refuses it)" "$R" 'bash /tmp/wrap.sh'
 
 PRL="$AGENT_HOME/proposals"; mkdir -p "$PRL/.work"
-ldeny() { local out; out=$(printf '%s' "$(guard_json "$2" "$3" "$4")" | CHING_LEARNER=1 "$BIN/guard.sh" 2>&1)
+ldeny() { local out; out=$(printf '%s' "$(guard_json "$2" "$3" "$4")" | KACHING_LEARNER=1 "$BIN/guard.sh" 2>&1)
   if is_deny "$out"; then pass "learner deny: $1"; else fail "learner deny: $1" "  input: $4"$'\n'"  guard said: ${out:-<allowed>}"; fi; }
-lallow() { local out; out=$(printf '%s' "$(guard_json "$2" "$3" "$4")" | CHING_LEARNER=1 "$BIN/guard.sh" 2>&1)
+lallow() { local out; out=$(printf '%s' "$(guard_json "$2" "$3" "$4")" | KACHING_LEARNER=1 "$BIN/guard.sh" 2>&1)
   if [ -z "$out" ]; then pass "learner allow: $1"; else fail "learner allow: $1" "  input: $4"$'\n'"  guard said: $out"; fi; }
 fp_json() { jq -nc --arg p "$1" '{file_path: $p, content: "x"}'; }
 lallow "Write under proposals/" Write "$PRL/.work" "$(fp_json "$PRL/rule-x.md")"
@@ -1342,15 +1349,15 @@ ldeny "WebFetch" WebFetch "$PRL/.work" '{"url":"https://example.com"}'
 ldeny "WebSearch" WebSearch "$PRL/.work" '{"query":"x"}'
 ldeny "Task (a subagent)" Task "$PRL/.work" '{"prompt":"x"}'
 mkdir -p "$WORK/sl-learner"; ln -s "$WORK/outside" "$WORK/sl-learner/proposals"
-out=$(printf '%s' "$(guard_json Write "$WORK" "$(fp_json "$WORK/sl-learner/proposals/x.md")")" | CHING_LEARNER=1 AGENT_HOME="$WORK/sl-learner" "$BIN/guard.sh" 2>&1)
+out=$(printf '%s' "$(guard_json Write "$WORK" "$(fp_json "$WORK/sl-learner/proposals/x.md")")" | KACHING_LEARNER=1 AGENT_HOME="$WORK/sl-learner" "$BIN/guard.sh" 2>&1)
 if is_deny "$out"; then pass "learner deny: a symlinked proposals root"; else fail "learner deny: a symlinked proposals root" "$out"; fi
-why=$(printf '%s' "$(guard_json Skill "$PRL/.work" '{"skill":"x"}')" | CHING_LEARNER=1 "$BIN/guard.sh" | jq -r .hookSpecificOutput.permissionDecisionReason)
-assert_contains "learner deny: the reason names learner mode" "$why" "learner mode (CHING_LEARNER=1)"
-# without CHING_LEARNER=1 nothing changes (D24 push gate default stays off; tools the guard does not rule stay allowed)
+why=$(printf '%s' "$(guard_json Skill "$PRL/.work" '{"skill":"x"}')" | KACHING_LEARNER=1 "$BIN/guard.sh" | jq -r .hookSpecificOutput.permissionDecisionReason)
+assert_contains "learner deny: the reason names learner mode" "$why" "learner mode (KACHING_LEARNER=1)"
+# without KACHING_LEARNER=1 nothing changes (D24 push gate default stays off; tools the guard does not rule stay allowed)
 tallow "normal session: Skill" Skill "$R" '{"skill":"commit"}'
 tallow "normal session: an MCP tool" mcp__plugin_claude-mem_mcp-search__search "$R" '{}'
 tallow "normal session: Write outside proposals/" Write "$R" "$(fp_json "$R/notes.md")"
 gallow "normal session: Bash ls" "$R" 'ls'
-out=$(printf '%s' "$(guard_json Skill "$R" '{"skill":"x"}')" | CHING_LEARNER=0 "$BIN/guard.sh" 2>&1)
-assert_eq "CHING_LEARNER=0 is not learner mode" "" "$out"
+out=$(printf '%s' "$(guard_json Skill "$R" '{"skill":"x"}')" | KACHING_LEARNER=0 "$BIN/guard.sh" 2>&1)
+assert_eq "KACHING_LEARNER=0 is not learner mode" "" "$out"
 exit 0

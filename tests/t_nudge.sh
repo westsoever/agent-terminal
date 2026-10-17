@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# ching-watch.sh check-in nudges: who counts as waiting, the banner for finished sessions with open work,
+# kaching-watch.sh check-in nudges: who counts as waiting, the banner for finished sessions with open work,
 # and (Task 4) the spoken note. The clock, the voice, the idle read and the conch are all faked.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 # shellcheck source=../bin/lib.sh
 . "$BIN/lib.sh"
-W="$BIN/ching-watch.sh"
+W="$BIN/kaching-watch.sh"
 NOON=$(date -j -f '%Y-%m-%d %H:%M:%S' "2026-10-05 12:00:00" +%s)
 EVF="$AGENT_HOME/events.jsonl"
 NLOG="$AGENT_HOME/notify.log"

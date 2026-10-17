@@ -37,7 +37,7 @@
 # Env: QUEUE_TERM (the Terminal helper; default osascript -l JavaScript queue-term.js), QUEUE_TTY (skip the
 #      tty lookup; "none" = no tty), QUEUE_SYNC=1 (no background fork), AGENT_HOME
 set -euo pipefail
-[ "${CHING_LEARNER:-}" != 1 ] || exit 0
+[ "${KACHING_LEARNER:-${CHING_LEARNER:-}}" != 1 ] || exit 0
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"

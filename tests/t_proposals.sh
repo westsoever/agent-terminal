@@ -378,7 +378,7 @@ assert_eq "stub: CLAUDE_STUB_TOKENS sets input tokens" "999" "$(printf 'ching-le
 assert_fails "stub: unknown task fails" bash -c "printf 'ching-learn-task: nope\n' | '$STUB' -p"
 assert_fails "stub: no task line fails" bash -c "printf 'hello\n' | '$STUB' -p"
 # ---------- learn_model_call: the one model call every component makes (spec 5.6), against the stub ----------
-export CHING_CLAUDE_BIN="$STUB" CLAUDE_STUB_LOG="$WORK/call.log"
+export KACHING_CLAUDE_BIN="$STUB" CLAUDE_STUB_LOG="$WORK/call.log"
 ncalls() { grep -c '^ARGS:' "$WORK/call.log" 2>/dev/null || echo 0; }
 TOKF="$P/.work/tokens-$(date +%Y-%m-%d)"
 rm -f "$TOKF"
@@ -388,7 +388,7 @@ assert_eq "model call: prints the model's JSON answer" "$(jq -c . "$FX/stub/skil
 log=$(cat "$WORK/call.log")
 assert_contains "model call: flags (-p, model, no tools, json)" "$log" 'ARGS: -p --model sonnet --tools  --output-format json'
 assert_contains "model call: runs in the learner's .work" "$log" "PWD: $(cd "$P" && pwd -P)/.work"
-assert_contains "model call: CHING_LEARNER=1 and CLAUDE_MEM_INTERNAL=1" "$log" "ENV: CHING_LEARNER=1 CLAUDE_MEM_INTERNAL=1"
+assert_contains "model call: KACHING_LEARNER=1 and CLAUDE_MEM_INTERNAL=1" "$log" "ENV: KACHING_LEARNER=1 CLAUDE_MEM_INTERNAL=1"
 assert_contains "model call: prompt on stdin" "$log" "sequences..."
 assert_eq "model call: tokens counted for the local day" "1500" "$(cat "$TOKF")"
 assert_contains "model call: logged" "$(cat "$P/.work/learn.log")" "model=sonnet rc=0 tokens=1500"
@@ -417,7 +417,7 @@ exec "$STUB" "\$@"
 EOS
 chmod +x "$WORK/argv-stub"
 rm -f "$TOKF"
-printf 'ching-learn-task: skills\n' | CHING_CLAUDE_BIN="$WORK/argv-stub" learn_model_call haiku >/dev/null
+printf 'ching-learn-task: skills\n' | KACHING_CLAUDE_BIN="$WORK/argv-stub" learn_model_call haiku >/dev/null
 argv=$(cat "$WORK/argv.txt")
 assert_contains "isolation: --no-session-persistence" "$argv" "--no-session-persistence"
 assert_contains "isolation: --setting-sources \"\" (no user, project or local settings: no user hooks, no plugins)" "$argv" $'--setting-sources\n\n--settings'
@@ -431,7 +431,7 @@ assert_eq "isolation: ... for every tool, running guard.sh beside lib.sh (learne
 assert_eq "isolation: auto-memory off (no ~/.claude/projects/<.work>/memory)" "false" "$(jq -r .autoMemoryEnabled <<<"$settings")"
 # a guard path with a space still runs as one command
 lib_sp="$WORK/lib with space"; mkdir -p "$lib_sp"; cp "$BIN"/*.sh "$BIN"/*.pl "$BIN"/*.jq "$lib_sp/" 2>/dev/null
-cmd=$( (. "$lib_sp/lib.sh"; printf 'ching-learn-task: skills\n' | CHING_CLAUDE_BIN="$WORK/argv-stub" learn_model_call haiku >/dev/null; \
+cmd=$( (. "$lib_sp/lib.sh"; printf 'ching-learn-task: skills\n' | KACHING_CLAUDE_BIN="$WORK/argv-stub" learn_model_call haiku >/dev/null; \
   sed -n '/^--settings$/{n;p;}' "$WORK/argv.txt" | jq -r '.hooks.PreToolUse[0].hooks[0].command') )
 assert_eq "isolation: the guard path is shell-quoted" "$lib_sp/guard.sh" "$(eval "printf '%s' $cmd")"
 
@@ -472,7 +472,7 @@ assert_eq "budget: ... and the day holds their real usage" "3000" "$(cat "$TOKF"
 printf '0\n' >"$TOKF"
 printf 'ching-learn-task: skills\n' | CLAUDE_STUB_EXIT=1 learn_model_call haiku >/dev/null 2>&1
 assert_eq "budget: a failed call counts what it reported" "1500" "$(cat "$TOKF")"
-unset CHING_CLAUDE_BIN CLAUDE_STUB_LOG
+unset KACHING_CLAUDE_BIN CLAUDE_STUB_LOG
 
 # the canned labels speak about the golden prompts (id = <sid>@<ts>)
 assert_eq "stub: every classify id is a golden prompt" "" \
