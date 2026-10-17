@@ -40,6 +40,9 @@ func main() {
 			m = mm.(model)
 			if m.view == vPaperclip {
 				m.pc = loadPaperclip()
+				if it := m.pcSelected(); it != nil {
+					m.pcDet[it.ID] = loadPCDetail(it.ID, m.pc.Names)
+				}
 			}
 		}
 		fmt.Println(m.View())

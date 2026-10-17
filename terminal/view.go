@@ -701,36 +701,200 @@ func (m model) proposalsView(h int) []string {
 	return m.listBox("PROPOSALS   enter show · a approve · x reject · z snooze 7d", items, h, "no open proposals")
 }
 
+// pcWidths: the PC view's issue list and side panel outer widths for a screen w wide.
+func pcWidths(w int) (lw, rw int) {
+	lw = min(max(w*40/100, 40), 72)
+	return lw, w - lw - 2
+}
+
+// paperclipView: the issues on the left (j/l), the selected issue's context on the right: its request to you
+// with numbered answers, the thread, the comment box.
 func (m model) paperclipView(h int) []string {
 	if m.pc.Err != "" {
 		return m.listBox("PAPERCLIP", nil, h, m.pc.Err)
 	}
-	var items [][]seg
-	for _, it := range m.pc.Items {
-		st := cGrey
+	lw, rw := pcWidths(m.w)
+	left := m.pcList(lw, h)
+	right := m.pcPanel(rw, h)
+	out := make([]string, h)
+	for i := range out {
+		l, r := "", ""
+		if i < len(left) {
+			l = left[i]
+		}
+		if i < len(right) {
+			r = right[i]
+		}
+		out[i] = " " + l + " " + r
+	}
+	return out
+}
+
+func (m model) pcList(w, h int) []string {
+	in := w - 2
+	var body []string
+	if len(m.pc.Items) == 0 {
+		body = append(body, row(in, s(" loading…", cDark)))
+	}
+	first := 0
+	if vis := h - 2; m.listSel >= vis {
+		first = m.listSel - vis + 1
+	}
+	for i := first; i < len(m.pc.Items); i++ {
+		it := m.pc.Items[i]
+		status := strings.ReplaceAll(it.Status, "_", " ")
+		if i == m.listSel {
+			body = append(body, row(in, s(padTo(fmt.Sprintf(" > %-8s %-11s %s", it.Ref, status, it.Title), in), cSel)))
+			continue
+		}
+		st, tt := cGrey, cGrey
 		if it.Needs {
-			st = cOrange
+			st, tt = cOrange, cWhite
 		}
-		items = append(items, []seg{
-			s(padTo(it.Ref, 9), cWhite), s(padTo(it.Status, 12), st), s(padTo(it.Agent, 14), cGrey),
-			s(padTo(it.Cost, 7), cDark), s(it.Title, cGrey), s("  "+it.Detail, cDark),
-		})
+		body = append(body, row(in, s("   ", cPlain), s(padTo(it.Ref, 8)+" ", cWhite), s(padTo(status, 11)+" ", st), s(it.Title, tt)))
 	}
-	var details []string
-	for _, it := range m.pc.Items {
-		details = append(details, it.Detail)
+	return box(w, h, []seg{s("PAPERCLIP", cGrey)}, cDark, body)
+}
+
+// pcPanel: the selected issue. The scroll keys move through its description, thread and request; its question
+// and the numbered answers stay at the bottom.
+func (m model) pcPanel(w, h int) []string {
+	in := w - 4
+	it := m.pcSelected()
+	if it == nil {
+		return box(w, h, []seg{s("no issue", cGrey)}, cDark, nil)
 	}
-	if m.mode == mTyping && m.listSel < len(m.pc.Items) {
-		ed := m.ed.lines(m.w - 6)
-		eh := len(ed) + 2
-		var body []string
-		for _, l := range ed {
-			body = append(body, " "+l+" ")
+	title := []seg{s(it.Ref, cWhite), s(" · "+strings.ReplaceAll(it.Status, "_", " "), cGrey)}
+	if it.Agent != "" {
+		title = append(title, s(" · "+it.Agent, cGrey))
+	}
+	var right []seg
+	if it.Cost != "" {
+		right = []seg{s(it.Cost, cGrey)}
+	}
+	d, loaded := m.pcDet[it.ID]
+	var msg, tail []string
+	msg = append(msg, row(in, s(it.Title, cWhite)))
+	if it.Detail != "" {
+		msg = append(msg, row(in, s("why it waits: "+it.Detail, cDark)))
+	}
+	switch {
+	case !loaded:
+		msg = append(msg, "", row(in, s("loading…", cDark)))
+	case d.Err != "":
+		msg = append(msg, "", row(in, s(d.Err, cOrange)))
+	default:
+		if d.Description != "" {
+			msg = append(msg, "", row(in, s("DESCRIPTION", cDark)))
+			msg = append(msg, textRows(d.Description, in, m.cfg.Tables)...)
 		}
-		list := m.listBox("PAPERCLIP   "+m.cfg.Keys.Reply+" comment · enter open in browser", items, h-eh, "loading…", details...)
-		return append(list, indent(box(m.w-2, eh, []seg{s("COMMENT ON "+m.pc.Items[m.listSel].Ref, cWhite)}, cOrange, body))...)
+		if len(d.Comments) > 0 {
+			msg = append(msg, "", row(in, s("─ thread ", cDark), s(strings.Repeat("─", max(0, in-9)), cDark)))
+		}
+		for i, c := range d.Comments {
+			if i > 0 {
+				msg = append(msg, row(in))
+			}
+			who := cGrey
+			if c.Board {
+				who = cOrange
+			}
+			msg = append(msg, row(in, s(c.Author, who), s(" · "+age(c.At)+" ago", cDark)))
+			if c.Board {
+				for _, l := range collapse(wrap(plain(c.Body), in)) {
+					msg = append(msg, row(in, s(padTo(l, in), cWhite.Background(promptBg))))
+				}
+				continue
+			}
+			msg = append(msg, textRows(c.Body, in, m.cfg.Tables)...)
+		}
+		if a := d.Ask; a != nil && a.Details != "" {
+			msg = append(msg, "", row(in, s("─ the request ", cOrange), s(strings.Repeat("─", max(0, in-14)), cOrange)))
+			msg = append(msg, textRows(a.Details, in, m.cfg.Tables)...)
+		}
 	}
-	return m.listBox("PAPERCLIP   "+m.cfg.Keys.Reply+" comment · enter open in browser", items, h, "loading…", details...)
+	// the bottom: what it asks, the answers, the comment box
+	K := m.cfg.Keys
+	if loaded && d.Ask != nil {
+		a := d.Ask
+		head := "IT ASKS YOU"
+		if a.Kind == "recovery" {
+			head = "RECOVERY WAITS FOR YOU"
+		}
+		tail = append(tail, "", row(in, s(head, cDark)))
+		if a.Title != "" {
+			tail = append(tail, row(in, s(a.Title, cWhite)))
+		}
+		if a.Prompt != "" {
+			pl := wrap(a.Prompt, in)
+			if len(pl) > 3 {
+				pl = append(pl[:2:2], trunc(pl[2], in-1)+"…")
+			}
+			for _, l := range pl {
+				tail = append(tail, row(in, s(l, cText)))
+			}
+		}
+		for i, o := range a.Options {
+			tail = append(tail, row(in, s(fmt.Sprint(i+1), cOrange), s(" "+o.Label, cWhite)))
+		}
+		if len(a.Options) == 0 {
+			tail = append(tail, row(in, s("kaching can't answer a "+strings.ReplaceAll(a.Kind, "_", " ")+": enter opens it in Paperclip", cDark)))
+		}
+	}
+	box := "─ comment "
+	if m.mode == mTyping && strings.HasPrefix(m.ed.target, "pcno:") {
+		box = "─ why you decline (enter declines) "
+	}
+	tail = append(tail, "", row(in, s(box, cDark), s(strings.Repeat("─", max(0, in-width(box))), cDark)))
+	if m.mode == mTyping && (m.ed.target == "pc:"+it.ID || m.ed.target == "pcno:"+it.ID) {
+		tail = append(tail, m.ed.lines(in)...)
+	} else {
+		scroll := K.Older + "/" + K.Newer
+		if K.Older == "up" && K.Newer == "down" {
+			scroll = "↑↓"
+		}
+		hint := K.Reply + " comment · enter opens in Paperclip · " + scroll + " scroll"
+		if loaded && d.Ask != nil && len(d.Ask.Options) > 0 {
+			hint = "1-" + fmt.Sprint(len(d.Ask.Options)) + " answer · " + hint
+		}
+		tail = append(tail, row(in, s("> ", cOrange), s(hint, cDark)))
+	}
+	avail := max(1, h-2-len(tail))
+	// bottom-anchored like the desk: off lines back from the end; a new issue starts at the end
+	most := max(0, len(msg)-avail)
+	c := m.pcScroll
+	if c == nil {
+		c = &chatScroll{}
+	}
+	if c.sid != it.ID {
+		*c = chatScroll{sid: it.ID}
+	}
+	c.max, c.page = most, avail
+	c.off = min(c.off, most)
+	end := len(msg) - c.off
+	start := max(0, end-avail)
+	msg = msg[start:end]
+	if start > 0 && len(msg) > 1 {
+		msg[0] = row(in, s(fmt.Sprintf("↑ %d earlier lines", start), cDark))
+	}
+	if c.off > 0 && len(msg) > 1 {
+		msg[len(msg)-1] = row(in, s(fmt.Sprintf("↓ %d newer lines", c.off), cOrange))
+	}
+	var body []string
+	for _, l := range msg {
+		body = append(body, " "+l+" ")
+	}
+	for len(body) < h-2-len(tail) {
+		body = append(body, "")
+	}
+	for _, t := range tail {
+		body = append(body, " "+t+" ")
+	}
+	border := cDark
+	if it.Needs {
+		border = cOrange
+	}
+	return boxR(w, h, title, right, border, body)
 }
 
 func (m model) textView(title string, lines []string, h int) []string {
@@ -770,7 +934,7 @@ func (m model) helpView(h int) []string {
 		row2("RP", "repos with work that you can lose"),
 		row2("RC", "recaps: what each agent summed up while you were away (enter goes to it)"),
 		row2("PR", "proposals: enter shows, a approve, x reject, z hide 7 days (the tab is orange while some are open)"),
-		row2("PC", "Paperclip issues: "+K.Reply+" comment, enter opens in the browser (orange while one needs you)"),
+		row2("PC", "Paperclip issues, the selected one's thread on the right: 1-9 answer what it asks (approve, decline, …), "+K.Reply+" comment, enter opens it in the browser (orange while one needs you)"),
 		row2("NW [folder]", "start a background agent: write its first message, enter starts it (folder: a path, a folder in ~/bbq, an agent's name; none: the selected agent's)"),
 		row2("STOP", "stop the selected background agent (its conversation stays)"),
 		row2("A3, or a name", "select agent 3, or the first agent whose name starts so"),
@@ -838,7 +1002,14 @@ func (m model) footer() []string {
 		add(&r1, K.Next+" "+K.Prev, "next/prev")
 		add(&r1, key(K.Waiting), "longest input")
 		add(&r1, "esc", "desk")
-	case vFiles, vProposals, vRecaps, vPaperclip, vRepos:
+	case vPaperclip:
+		add(&r1, K.Next+" "+K.Prev, "issue")
+		add(&r1, "1-9", "answer")
+		add(&r1, key(K.Older)+key(K.Newer), "scroll")
+		add(&r1, K.Reply, "comment")
+		add(&r1, "enter", "in browser")
+		add(&r1, "esc", "desk")
+	case vFiles, vProposals, vRecaps, vRepos:
 		add(&r1, K.Next+" "+K.Prev, "move")
 		add(&r1, "enter", "open")
 		add(&r1, "esc", "desk")
