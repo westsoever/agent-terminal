@@ -16,6 +16,8 @@ var (
 	cOrange = lipgloss.NewStyle().Foreground(lipgloss.Color("202"))
 	cSel    = lipgloss.NewStyle().Background(lipgloss.Color("202")).Foreground(lipgloss.Color("16")).Bold(true)
 	cPlain  = lipgloss.NewStyle()
+	// promptBg: the band behind the owner's prompts in a conversation, a shade lighter than the screen
+	promptBg = lipgloss.Color("236")
 )
 
 // seg is a run of plain text with one style. Rows are built from segs so widths are counted on plain text

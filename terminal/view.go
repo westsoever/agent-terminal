@@ -63,22 +63,36 @@ func (m model) counts() (live, need int) {
 func (m model) tabBar() []string {
 	_, need := m.counts()
 	type cell struct {
-		segs []seg
+		segs  []seg
+		alert bool
 	}
-	nums := map[view]string{vDesk: fmt.Sprint(need), vWall: fmt.Sprint(len(m.agents))}
+	pcNeeds := 0
+	for _, it := range m.pc.Items {
+		if it.Needs {
+			pcNeeds++
+		}
+	}
+	nums := map[view]string{vDesk: fmt.Sprint(need), vWall: fmt.Sprint(len(m.agents)),
+		vProposals: fmt.Sprint(len(m.props)), vPaperclip: fmt.Sprint(pcNeeds)}
+	// a view with work that waits for the owner is filled orange: open proposals, Paperclip issues that need you
+	alert := map[view]bool{vProposals: len(m.props) > 0, vPaperclip: pcNeeds > 0}
 	var cells []cell
-	cells = append(cells, cell{[]seg{s("kaching", cWhite)}})
+	cells = append(cells, cell{[]seg{s("kaching", cWhite)}, false})
 	for _, t := range tabs {
 		active := m.view == t.v || (t.v == vWall && m.view == vWall)
 		lbl := cGrey
 		if active {
 			lbl = cWhite
 		}
-		segs := []seg{s(t.code, cOrange), s(" "+t.label, lbl)}
+		code := cOrange
+		if alert[t.v] {
+			code, lbl = cSel, cSel
+		}
+		segs := []seg{s(t.code, code), s(" "+t.label, lbl)}
 		if n := nums[t.v]; n != "" && n != "0" {
 			segs = append(segs, s("  "+n, lbl))
 		}
-		cells = append(cells, cell{segs})
+		cells = append(cells, cell{segs, alert[t.v]})
 	}
 	n := len(cells)
 	inner := m.w - (n + 1) // borders
@@ -108,9 +122,13 @@ func (m model) tabBar() []string {
 		if l < 0 {
 			l = 0
 		}
-		midSegs = append(midSegs, s(strings.Repeat(" ", l), cPlain))
+		fill := cPlain
+		if c.alert {
+			fill = cSel
+		}
+		midSegs = append(midSegs, s(strings.Repeat(" ", l), fill))
 		midSegs = append(midSegs, c.segs...)
-		midSegs = append(midSegs, s(strings.Repeat(" ", max(0, cw-tw-l)), cPlain), s("│", cDark))
+		midSegs = append(midSegs, s(strings.Repeat(" ", max(0, cw-tw-l)), fill), s("│", cDark))
 	}
 	_ = mid
 	return []string{cDark.Render(top), row(m.w, midSegs...), cDark.Render(bot)}
@@ -137,6 +155,9 @@ func (m model) commandLine() string {
 			target = m.pc.Items[m.listSel].Ref
 		}
 		left = []seg{s(" writing to ", cGrey), s(target, cWhite)}
+		if dir, ok := strings.CutPrefix(m.ed.target, "nw:"); ok {
+			left = []seg{s(" new background agent in ", cGrey), s(tildify(dir), cWhite), s("  enter starts it", cGrey)}
+		}
 	case mOpen:
 		left = []seg{s(" open file: press its letter", cOrange)}
 	default:
@@ -285,10 +306,13 @@ func (m model) queueRow(in, i int, a Agent) string {
 	case a.Group() == 2:
 		st, ns = cDark, cDark
 	}
-	if !a.InTerminal {
+	if !a.canSend() {
 		ns = cDark
 	}
 	mark := "   "
+	if a.Bg { // a background session: no window
+		mark = " ◦ "
+	}
 	if a.Lead != "" { // a sub-session: indented under its lead
 		mark = "   └ "
 		nameW -= 2
@@ -310,7 +334,8 @@ func (m model) queueRow(in, i int, a Agent) string {
 	return row(in, s(mark, cPlain), s(padTo(name, nameW), ns), s(" "+padTo(label, stateW), st), s(" "+fmt.Sprintf("%*s", ageW, age(a.Since)), cDark))
 }
 
-// chatLines is the conversation as panel rows, oldest first: the owner's prompts in white after "› ", the agent's
+// chatLines is the conversation as panel rows, oldest first: the owner's prompts in white after "› " on a
+// slightly lighter band (promptBg), so they stand out from the replies; the agent's
 // texts in grey (their tables drawn as tables, in the tables style), a blank row between messages. Only the last
 // message when the tail has no conversation.
 func chatLines(l Last, in int, tables string) []string {
@@ -333,7 +358,7 @@ func chatLines(l Last, in int, tables string) []string {
 				if j == 0 {
 					lead = "› "
 				}
-				out = append(out, row(in, s(lead, cOrange), s(ml, cWhite)))
+				out = append(out, row(in, s(lead, cOrange.Background(promptBg)), s(padTo(ml, in-2), cWhite.Background(promptBg))))
 			}
 			continue
 		}
@@ -364,11 +389,21 @@ func trunc(t string, w int) string {
 func (m model) agentPanel(w, h int) []string {
 	a := m.sel()
 	in := w - 4 // 2 borders + 1 space margin each side
+	newAgent := m.mode == mTyping && strings.HasPrefix(m.ed.target, "nw:")
 	if a == nil {
-		return box(w, h, []seg{s("no agent", cGrey)}, cDark, nil)
+		var body []string
+		if newAgent {
+			for _, el := range m.ed.lines(in) {
+				body = append(body, " "+el+" ")
+			}
+		}
+		return box(w, h, []seg{s("no agent", cGrey)}, cDark, body)
 	}
 	l := m.last(a)
 	title := []seg{s(a.Name, cWhite), s(" · "+tildify(a.Cwd), cGrey)}
+	if a.Bg {
+		title = append(title, s(" · background "+a.Job, cGrey))
+	}
 	if a.Branch != "" {
 		title = append(title, s(" · "+a.Branch, cGrey))
 	}
@@ -421,8 +456,20 @@ func (m model) agentPanel(w, h int) []string {
 			tail = append(tail, row(in, s(string(rune('a'+i)), cOrange), s("  "+tildify(f), cGrey)))
 		}
 	}
-	tail = append(tail, "", row(in, s("─ reply ", cDark), s(strings.Repeat("─", max(0, in-8)), cDark)))
+	if newAgent { // /NW: the first message of a new background agent, written below the selected agent
+		dir := tildify(strings.TrimPrefix(m.ed.target, "nw:"))
+		hd := "─ new background agent in " + dir + " "
+		tail = append(tail, "", row(in, s(hd, cOrange), s(strings.Repeat("─", max(0, in-width(hd))), cOrange)))
+		tail = append(tail, m.ed.lines(in)...)
+	} else {
+		tail = append(tail, "", row(in, s("─ reply ", cDark), s(strings.Repeat("─", max(0, in-8)), cDark)))
+	}
 	switch {
+	case newAgent:
+	case a.Bg && m.mode == mTyping && m.ed.target == a.SID:
+		tail = append(tail, m.ed.lines(in)...)
+	case a.Bg:
+		tail = append(tail, row(in, s("> ", cOrange), s(m.cfg.Keys.Reply+" to write · "+m.cfg.Keys.Goto+" attaches a window · /STOP stops it", cDark)))
 	case !a.InTerminal:
 		tail = append(tail, row(in, s("not a Terminal tab: look only", cDark)))
 	case m.mode == mTyping && m.ed.target == a.SID:
@@ -627,9 +674,10 @@ func indent(lines []string) []string {
 func (m model) filesView(h int) []string {
 	var items [][]seg
 	for _, f := range m.allFiles() {
-		items = append(items, []seg{s(padTo(tildify(f.path), m.w-30), cGrey), s("  "+f.agent, cDark)})
+		items = append(items, []seg{s(padTo(tildify(f.path), m.w-36), cGrey), s("  "+padTo(f.agent, 18), cDark),
+			s(fmt.Sprintf(" %4s", age(f.at)), cDark)})
 	}
-	return m.listBox("FILES AGENTS MENTIONED", items, h, "no files mentioned yet")
+	return m.listBox(fmt.Sprintf("FILES AGENTS MENTIONED   the last %d, newest first", histMax), items, h, "no files mentioned yet")
 }
 
 // recapsView: every agent's latest recap, newest first; the selected one shows it in full.
@@ -718,11 +766,13 @@ func (m model) helpView(h int) []string {
 		"## Go to a view: push " + K.Command + ", write the code, push enter. esc goes back to the desk.",
 		row2("IN", "inbox (the desk): all agents and the selected agent"),
 		row2("AG or "+K.Wall, "agents (the wall): all agents as tiles"),
-		row2("FL", "files the agents wrote about (enter opens)"),
+		row2("FL", "the last 30 files the agents wrote about, newest first (enter opens)"),
 		row2("RP", "repos with work that you can lose"),
 		row2("RC", "recaps: what each agent summed up while you were away (enter goes to it)"),
-		row2("PR", "proposals: enter shows, a approve, x reject, z hide 7 days"),
-		row2("PC", "Paperclip issues: "+K.Reply+" comment, enter opens in the browser"),
+		row2("PR", "proposals: enter shows, a approve, x reject, z hide 7 days (the tab is orange while some are open)"),
+		row2("PC", "Paperclip issues: "+K.Reply+" comment, enter opens in the browser (orange while one needs you)"),
+		row2("NW [folder]", "start a background agent: write its first message, enter starts it (folder: a path, a folder in ~/bbq, an agent's name; none: the selected agent's)"),
+		row2("STOP", "stop the selected background agent (its conversation stays)"),
 		row2("A3, or a name", "select agent 3, or the first agent whose name starts so"),
 		row2("HELP, QUIT", "this page; stop kaching (ctrl+c also stops it)"),
 		"",
@@ -735,7 +785,7 @@ func (m model) helpView(h int) []string {
 		row2("enter, ←, →", "when the agent asks: confirm, previous / next part"),
 		row2(K.Reply, "write a message (keys below); esc keeps it as a draft; sending it sends a window on monitor 1 back"),
 		row2(K.Open+" then a-i", "open that file"),
-		row2(K.Goto, "show the agent's own Terminal window, where it is"),
+		row2(K.Goto, "show the agent's own Terminal window, where it is; a background agent (◦) gets a new window attached to it"),
 		row2(K.Here, "bring its window to monitor 1 and into focus, to type in it; a prompt sends it back"),
 		row2(K.Dismiss, "remove a waiting agent from the list, no answer"),
 		row2(K.Refresh, "read all data again"),

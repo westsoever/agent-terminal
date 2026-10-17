@@ -13,22 +13,24 @@ import (
 
 // Last is what the desk shows for the selected agent, read from the tail of its transcript.
 type Last struct {
-	Text     string    // the agent's last message
-	Question string    // an open AskUserQuestion, '' when none
-	Options  []string  // numbered options: from the open question, else "1. ..." lines in the last message
-	Menu     bool      // true: the options are a menu in Claude Code (answer with a key press, no Enter)
-	Files    []string  // paths the last message mentions that exist, absolute
-	Recap    string    // Claude Code's latest recap (the "while you were away" summary), '' when none
-	RecapAt  time.Time // when Claude Code wrote it
-	Chat     []Turn    // the conversation in the transcript tail, oldest first, at most maxTurns
-	Model    string    // the model of its latest reply, as Claude Code names it ("claude-opus-5-5"), '' when none
-	Effort   string    // the effort that reply ran at ("high"), '' when the transcript doesn't say
+	Text     string        // the agent's last message
+	Question string        // an open AskUserQuestion, '' when none
+	Options  []string      // numbered options: from the open question, else "1. ..." lines in the last message
+	Menu     bool          // true: the options are a menu in Claude Code (answer with a key press, no Enter)
+	Files    []string      // paths the last message mentions that exist, absolute
+	Recap    string        // Claude Code's latest recap (the "while you were away" summary), '' when none
+	RecapAt  time.Time     // when Claude Code wrote it
+	Chat     []Turn        // the conversation in the transcript tail, oldest first, at most maxTurns
+	Model    string        // the model of its latest reply, as Claude Code names it ("claude-opus-5-5"), '' when none
+	Effort   string        // the effort that reply ran at ("high"), '' when the transcript doesn't say
+	Mentions []fileMention // the files its recent messages name (newest message last), for the FL view
 }
 
 // Turn is one message of the conversation: the owner's prompt (User) or a text the agent wrote.
 type Turn struct {
 	User bool
 	Text string
+	At   time.Time
 }
 
 const maxTurns = 300
@@ -119,7 +121,7 @@ func readLast(path, cwd string) Last {
 			var p string // a plain-string user prompt
 			if e.Type == "user" && !e.IsMeta && json.Unmarshal(e.Message.Content, &p) == nil {
 				if t := promptText(p); t != "" {
-					chat = append(chat, Turn{User: true, Text: t})
+					chat = append(chat, Turn{User: true, Text: t, At: e.Timestamp})
 				}
 			}
 			continue
@@ -128,10 +130,10 @@ func readLast(path, cwd string) Last {
 			switch {
 			case e.Type == "assistant" && b.Type == "text" && strings.TrimSpace(b.Text) != "":
 				lastText = b.Text
-				chat = append(chat, Turn{Text: strings.TrimSpace(b.Text)})
+				chat = append(chat, Turn{Text: strings.TrimSpace(b.Text), At: e.Timestamp})
 			case e.Type == "user" && !e.IsMeta && b.Type == "text":
 				if t := promptText(b.Text); t != "" {
-					chat = append(chat, Turn{User: true, Text: t})
+					chat = append(chat, Turn{User: true, Text: t, At: e.Timestamp})
 				}
 			case e.Type == "assistant" && b.Type == "tool_use" && b.Name == "AskUserQuestion":
 				var in askInput
@@ -159,14 +161,59 @@ func readLast(path, cwd string) Last {
 		l.Options = numbered(l.Text)
 	}
 	l.Files = mentionedFiles(l.Text, cwd)
+	l.Mentions = recentMentions(chat, cwd)
 	return l
 }
 
-// promptText is what the owner typed, ” for user entries that are machinery: slash-command records, command
-// output, system reminders and task notifications all start with a tag, and Claude Code's "Caveat:" note.
+// mentionTurns: how many of the agent's latest messages the FL view takes its files from.
+const mentionTurns = 40
+
+// recentMentions: the files the agent's latest messages name, each dated by its message (a message's later
+// files a millisecond later, so they keep their order).
+func recentMentions(chat []Turn, cwd string) []fileMention {
+	var out []fileMention
+	n := 0
+	for i := len(chat) - 1; i >= 0 && n < mentionTurns; i-- {
+		t := chat[i]
+		if t.User || t.At.IsZero() {
+			continue
+		}
+		n++
+		for j, f := range mentionedFiles(t.Text, cwd) {
+			out = append(out, fileMention{Path: f, At: t.At.Add(time.Duration(j) * time.Millisecond)})
+		}
+	}
+	return out
+}
+
+var (
+	machineRe = regexp.MustCompile(`(?s)<(system-reminder|local-command-stdout|local-command-stderr|bash-stdout|bash-stderr|task-notification|command-message)>.*?</(?:system-reminder|local-command-stdout|local-command-stderr|bash-stdout|bash-stderr|task-notification|command-message)>`)
+	pastedRe  = regexp.MustCompile(`</?pasted_content[^>]*>`)
+	cmdNameRe = regexp.MustCompile(`(?s)<command-name>(.*?)</command-name>`)
+	cmdArgsRe = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
+	bashInRe  = regexp.MustCompile(`(?s)<bash-input>(.*?)</bash-input>`)
+)
+
+// promptText is what the owner typed, ” for user entries that are machinery (command output, system reminders,
+// task notifications, Claude Code's "Caveat:" note). A paste shows as its text, a slash command as "/name args"
+// and a ! command as "! cmd".
 func promptText(t string) string {
 	t = strings.TrimSpace(t)
-	if strings.HasPrefix(t, "<") || strings.HasPrefix(t, "Caveat:") {
+	if strings.HasPrefix(t, "Caveat:") {
+		return ""
+	}
+	if m := cmdNameRe.FindStringSubmatch(t); m != nil {
+		cmd := strings.TrimSpace(m[1])
+		if a := cmdArgsRe.FindStringSubmatch(t); a != nil && strings.TrimSpace(a[1]) != "" {
+			cmd += " " + strings.TrimSpace(a[1])
+		}
+		return cmd
+	}
+	if m := bashInRe.FindStringSubmatch(t); m != nil {
+		return "! " + strings.TrimSpace(m[1])
+	}
+	t = strings.TrimSpace(pastedRe.ReplaceAllString(machineRe.ReplaceAllString(t, ""), ""))
+	if strings.HasPrefix(t, "<") { // any other tag-led entry is machinery too
 		return ""
 	}
 	return t

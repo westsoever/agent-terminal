@@ -50,34 +50,37 @@ const (
 )
 
 type model struct {
-	w, h      int
-	cfg       Config
-	cfgTime   time.Time
-	agents    []Agent
-	ttys      map[string]tabPos
-	groups    [][]string
-	selSID    string
-	view      view
-	mode      mode
-	buf       string // typing or command buffer
-	leader    bool   // space was pressed, waiting to see if a leader key follows
-	leaderSeq int
-	zoom      bool
-	listSel   int // selection inside FL / PR / PC lists
-	status    string
-	statusErr bool
-	expect    map[string]time.Time // sid -> when we sent; cleared when it turns busy
-	lastCache map[string]cachedLast
-	pc        PCState
-	pcAt      time.Time
-	props     []string
-	sync      []string
-	ed        *editor
-	prompts   map[string]Prompt  // sid -> the menu its screen shows (selected waiting agents only)
-	scroll    *chatScroll        // shared by every copy of the model: View records the limits it drew
-	usage     Usage              // the Claude usage limits, read on every tick
-	asked     map[string]askSeen // sid -> when its menu first showed: a busy agent's wait starts there
-	ticks     int
+	w, h       int
+	cfg        Config
+	cfgTime    time.Time
+	agents     []Agent
+	ttys       map[string]tabPos
+	groups     [][]string
+	selSID     string
+	view       view
+	mode       mode
+	buf        string // typing or command buffer
+	leader     bool   // space was pressed, waiting to see if a leader key follows
+	leaderSeq  int
+	zoom       bool
+	listSel    int // selection inside FL / PR / PC lists
+	status     string
+	statusErr  bool
+	expect     map[string]time.Time // sid -> when we sent; cleared when it turns busy
+	lastCache  map[string]cachedLast
+	pc         PCState
+	pcAt       time.Time
+	badgeAt    time.Time // when the proposals and Paperclip were last read for the tab bar
+	pendingJob string    // a background agent /NW started: selected once it shows in the list
+	props      []string
+	sync       []string
+	ed         *editor
+	prompts    map[string]Prompt  // sid -> the menu its screen shows (selected waiting agents only)
+	scroll     *chatScroll        // shared by every copy of the model: View records the limits it drew
+	usage      Usage              // the Claude usage limits, read on every tick
+	files      *fileHistory       // the FL view: the last files the agents mentioned
+	asked      map[string]askSeen // sid -> when its menu first showed: a busy agent's wait starts there
+	ticks      int
 }
 
 // askSeen is when an agent's menu first and last showed on its screen. A menu missed on one read and back within
@@ -114,11 +117,13 @@ type promptMsg struct {
 	p   Prompt
 }
 type pcMsg PCState
+type propsMsg []string
+type bgStartedMsg struct{ job, dir string }
 type execDone struct{ err error }
 
 func newModel() model {
 	cfg, ct, err := loadConfig()
-	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}}
+	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory()}
 	m.ed.drafts = loadDrafts()
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
@@ -148,6 +153,7 @@ func (m *model) refresh() {
 	m.agents = loadAgents(m.ttys, m.groups)
 	m.usage = loadUsage()
 	m.applyPrompts()
+	m.noteFiles()
 	for sid, at := range m.expect {
 		for _, a := range m.agents {
 			if a.SID == sid && (a.Busy || transcriptAfter(a.Transcript, at)) {
@@ -166,6 +172,13 @@ func (m *model) refresh() {
 			m.setErr("keys.toml: " + err.Error())
 		} else {
 			m.setStatus("keys.toml reloaded")
+		}
+	}
+	if m.pendingJob != "" {
+		for _, a := range m.agents {
+			if a.Bg && a.Job == m.pendingJob {
+				m.selSID, m.pendingJob = a.SID, ""
+			}
 		}
 	}
 	if m.sel() == nil && len(m.agents) > 0 {
@@ -367,11 +380,11 @@ func (m *model) deliver(what string, keys []string) tea.Cmd {
 		m.setErr("no agent selected")
 		return nil
 	}
-	if !a.InTerminal {
+	if !a.canSend() {
 		m.setErr(a.Name + " isn't in a Terminal tab: look only (g opens it)")
 		return nil
 	}
-	sid, name, tty := a.SID, a.Name, a.TTY
+	sid, name, tty, bg, job := a.SID, a.Name, a.TTY, a.Bg, a.Job
 	label := what
 	if keys != nil {
 		label = "key " + strings.Join(keys, " ")
@@ -379,7 +392,9 @@ func (m *model) deliver(what string, keys []string) tea.Cmd {
 	m.setStatus("sending to " + name + "…")
 	return func() tea.Msg {
 		var res string
-		if keys != nil {
+		if bg {
+			res = bgSend(job, what, keys)
+		} else if keys != nil {
 			res = sendKeys(tty, keys...)
 		} else {
 			res = sendText(tty, what)
@@ -433,6 +448,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pcAt = time.Now()
 			cmds = append(cmds, func() tea.Msg { return pcMsg(loadPaperclip()) })
 		}
+		if time.Since(m.badgeAt) > badgeEvery { // the PR and PC tabs turn orange on other views too
+			m.badgeAt = time.Now()
+			cmds = append(cmds, func() tea.Msg { return propsMsg(readProposals()) })
+			if m.view != vPaperclip {
+				m.pcAt = time.Now()
+				cmds = append(cmds, func() tea.Msg { return pcMsg(loadPaperclip()) })
+			}
+		}
 		return m, tea.Batch(cmds...)
 	case ttysMsg:
 		m.ttys, m.groups = msg.tabs, msg.groups
@@ -449,6 +472,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case pcMsg:
 		m.pc = PCState(msg)
+		if m.listSel >= len(m.pc.Items) && m.view == vPaperclip {
+			m.listSel = max(0, len(m.pc.Items)-1)
+		}
+		return m, nil
+	case bgStartedMsg:
+		m.setStatus("✓ background agent " + msg.job + " started in " + tildify(msg.dir) + " · g attaches a window")
+		m.pendingJob = msg.job
+		m.refresh()
+		return m, nil
+	case propsMsg:
+		m.props = msg
+		if m.listSel >= len(m.props) && m.view == vProposals {
+			m.listSel = 0
+		}
 		return m, nil
 	case sentMsg:
 		if msg.res == "ok" {
@@ -614,7 +651,7 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a == nil {
 			return m, nil
 		}
-		if !a.InTerminal {
+		if !a.canSend() {
 			m.setErr(a.Name + " isn't in a Terminal tab: look only (g opens it)")
 			return m, nil
 		}
@@ -634,6 +671,9 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		sid, tty, name := a.SID, a.TTY, a.Name
 		return m, func() tea.Msg { return sentMsg{"", name, "bring here", bringHere(sid, tty)} }
+	case ks == K.Goto && m.sel() != nil && m.sel().Bg: // a background session has no window: open one attached to it
+		job, name := m.sel().Job, m.sel().Name
+		return m, func() tea.Msg { return sentMsg{"", name, "attach in a new window", bgAttachWindow(job)} }
 	case ks == K.Goto:
 		if a := m.sel(); a != nil && a.TTY != "" {
 			tty := a.TTY
@@ -762,6 +802,16 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		target := m.ed.target
 		m.ed.sent()
 		m.mode = mKeys
+		if dir, ok := strings.CutPrefix(target, "nw:"); ok {
+			m.setStatus("starting a background agent in " + tildify(dir) + "…")
+			return m, func() tea.Msg {
+				job, err := bgStart(dir, text)
+				if err != nil {
+					return sentMsg{"", "new agent", "start", "error: " + err.Error()}
+				}
+				return bgStartedMsg{job, dir}
+			}
+		}
 		if strings.HasPrefix(target, "pc:") {
 			id := strings.TrimPrefix(target, "pc:")
 			ref := id
@@ -924,6 +974,28 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case c == "W" || c == "WALL":
 		m.view = vWall
+	case c == "NW": // a new background agent: the folder, then its first message in the reply box
+		_, arg, _ := strings.Cut(strings.TrimSpace(code), " ")
+		dir := m.resolveDir(arg)
+		if dir == "" {
+			m.setErr("NW: no folder " + strings.TrimSpace(arg) + " (a path, a folder in ~/bbq, or an agent's name)")
+			return m, nil
+		}
+		m.view, m.zoom, m.mode = vDesk, false, mTyping
+		return m, m.ed.open("nw:"+dir, dir, m.editorWidth())
+	case c == "STOP":
+		a := m.sel()
+		if a == nil || !a.Bg {
+			m.setErr("STOP stops a background agent; select one first")
+			return m, nil
+		}
+		job, name := a.Job, a.Name
+		return m, func() tea.Msg {
+			if res := bgStop(job); res != "ok" {
+				return sentMsg{"", name, "stop", res}
+			}
+			return statusMsg("stopped " + name + " (claude --resume " + job + " opens it again)")
+		}
 	case len(c) > 1 && c[0] == 'A' && isDigits(c[1:]):
 		if n, _ := strconv.Atoi(c[1:]); n >= 1 && n <= len(m.agents) {
 			m.selSID = m.agents[n-1].SID
@@ -1002,14 +1074,23 @@ func (m *model) recaps() []agentRecap {
 	return out
 }
 
-func (m *model) loadProposals() {
+// badgeEvery: how often the tab bar reads the proposals and Paperclip while their views are not open.
+const badgeEvery = 30 * time.Second
+
+// readProposals: the learner's open proposals, one "kind id: ..." line each.
+func readProposals() []string {
 	out, _ := exec.Command(proposalsBin(), "list").Output()
-	m.props = nil
+	var props []string
 	for _, l := range strings.Split(string(out), "\n") { // open proposals are the indented "kind id: ..." lines
 		if strings.HasPrefix(l, "  ") && !strings.HasPrefix(l, "  (") && strings.Contains(l, ":") {
-			m.props = append(m.props, strings.TrimSpace(l))
+			props = append(props, strings.TrimSpace(l))
 		}
 	}
+	return props
+}
+
+func (m *model) loadProposals() {
+	m.props = readProposals()
 	if m.listSel >= len(m.props) {
 		m.listSel = 0
 	}
@@ -1022,18 +1103,18 @@ func (m *model) loadSync() {
 
 type fileRef struct {
 	path, agent string
+	at          time.Time
 }
 
+// allFiles: the FL view's files, newest mention first; files that are gone are left out.
 func (m *model) allFiles() []fileRef {
 	var out []fileRef
-	seen := map[string]bool{}
-	for i := range m.agents {
-		l := m.last(&m.agents[i])
-		for j := len(l.Files) - 1; j >= 0; j-- {
-			if !seen[l.Files[j]] {
-				seen[l.Files[j]] = true
-				out = append(out, fileRef{l.Files[j], m.agents[i].Name})
-			}
+	if m.files == nil {
+		return out
+	}
+	for _, it := range m.files.items {
+		if _, err := os.Stat(it.Path); err == nil {
+			out = append(out, fileRef{it.Path, it.Agent, it.At})
 		}
 	}
 	return out
