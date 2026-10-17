@@ -2,6 +2,12 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D46 (2026-10-18): kaching lists finished agents with nothing left under DONE (amends D41)
+
+**Decision (user):** "There should be another section for the agents on the left, that is DONE - it puts a session there when it has finished its task and is just completed and there's nothing left to wait for."
+
+**Built:** the queue has five sections: INPUT, WAITING, WORKING, IDLE, DONE. A session whose turn ended as `done` is DONE when its checkpoint (`STATE.md`, in the repo's `.agent` with a GOAL.md, else the session folder) has no `next_action` and no `blocker` (empty, `none`, `(none)` and `none.` count as empty) and its `NEXT.md` is empty or missing. That is the test `kaching-watch.sh` already uses to leave a finished session alone. A finished session with something open stays in WAITING. DONE is last and newest first, so what the owner can ignore stays out of the way; a family sits in its most urgent member's section. `Group()` is unchanged, so DONE agents still count as waiting in the tab badge and `x` can dismiss them.
+
 ## D45 (2026-10-18): A pull request opens on the right in kaching, and a comment on it starts an agent (amends D44)
 
 **Decision (user):** "When I press K, I would want the side panel to open that holds the content of the pull request … I can press again on the side panel, and then I can comment on this … once I hit Enter, it gets sent off to a new session that works through this pull request."

@@ -33,6 +33,7 @@ type Agent struct {
 	Ask                    string // what a "needs input" turn asks the owner (meta ask=), '' when none
 	Bg                     bool   // a background session (claude --bg): no window, kaching types into it by attaching
 	Job                    string // a background session's short id (claude attach <job>)
+	Closed                 bool   // its turn ended as done and nothing is left: no next action, no blocker, no NEXT.md
 }
 
 // canSend: kaching can type into it: a Terminal tab, or a background session.
@@ -145,6 +146,7 @@ func loadAgents(tabs map[string]tabPos, groups [][]string) []Agent {
 		a.Transcript = meta["transcript"]
 		a.CtxPct = meta["ctx_pct"]
 		a.Ask = meta["ask"]
+		a.Closed = a.State == "done" && !a.Busy && nothingLeft(meta["root"], cs.SessionID)
 		if u, err := strconv.ParseInt(meta["updated"], 10, 64); err == nil && !a.Busy {
 			a.Since = time.Unix(u, 0)
 		}
@@ -220,20 +222,64 @@ func linkFamilies(a []Agent, groups [][]string) {
 	}
 }
 
-// sortAgents: waiting first (the ones that need the owner, then the done ones; oldest first, it has
-// waited longest), then working, then idle (newest first). A family stays together: the lead, then its
+// nothingLeft: the session's checkpoint names no next action and no blocker, and its NEXT.md is empty or
+// missing; the same test kaching-watch.sh uses to leave a finished session alone. The state folder is the repo's
+// .agent when it has a GOAL.md, else the session's own folder under ~/.agent.
+func nothingLeft(root, sid string) bool {
+	dir := filepath.Join(agentHome(), "sessions", sid)
+	if root != "" {
+		if _, err := os.Stat(filepath.Join(root, ".agent", "GOAL.md")); err == nil {
+			dir = filepath.Join(root, ".agent")
+		}
+	}
+	for _, k := range []string{"next_action", "blocker"} {
+		if checkpointValue(filepath.Join(dir, "STATE.md"), k) != "" {
+			return false
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "NEXT.md")); err == nil && strings.TrimSpace(string(b)) != "" {
+		return false
+	}
+	return true
+}
+
+// checkpointValue: the first `key:` line inside the ching:checkpoint block of a STATE.md, ” when it is
+// missing, blank or a "nothing here" sentinel (none, (none), none.), as bin/lib.sh checkpoint_get and open_value.
+func checkpointValue(path, key string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	in := false
+	for _, l := range strings.Split(string(b), "\n") {
+		switch {
+		case strings.HasPrefix(l, "<!-- ching:checkpoint -->"):
+			in = true
+		case strings.HasPrefix(l, "<!-- /ching:checkpoint -->"):
+			in = false
+		case in && strings.HasPrefix(l, key+":"):
+			v := strings.TrimSpace(strings.TrimPrefix(l, key+":"))
+			switch strings.ToLower(v) {
+			case "", "none", "(none)", "none.":
+				return ""
+			}
+			return v
+		}
+	}
+	return ""
+}
+
+// sortAgents: by queue section (see sectionOf): INPUT and WAITING oldest first, it has waited longest, then
+// working, idle and done newest first. A family stays together: the lead, then its
 // sub-sessions in tab order. The family sorts by its most urgent member, so a sub-session that waits
 // brings its family up.
 func sortAgents(a []Agent) {
 	sort.SliceStable(a, func(i, j int) bool {
-		gi, gj := a[i].Group(), a[j].Group()
-		if gi != gj {
-			return gi < gj
+		si, sj := sectionOf(a[i]), sectionOf(a[j])
+		if si != sj {
+			return si < sj
 		}
-		if gi == 0 {
-			if ni, nj := a[i].needsYou(), a[j].needsYou(); ni != nj {
-				return ni
-			}
+		if si <= 1 {
 			return a[i].Since.Before(a[j].Since)
 		}
 		return a[i].Since.After(a[j].Since)
