@@ -10,7 +10,7 @@ If you change an interface, change this page, the fixtures and `t_proposals.sh` 
 $AGENT_HOME/proposals/            mode 0700, made by proposals_root
   <kind>-<slug>.md                open proposals, written ONLY by proposal_write (mode 0600)
   report-YYYY-Www.md              weekly report (A), written through proposal_safe_path
-  archive/                        decided proposals, moved here by ching-proposals (D)
+  archive/                        decided proposals, moved here by kaching-proposals (D)
   rejected.txt                    one fingerprint per line, optionally followed by a space and a note
   .work/                          learner scratch, safe to delete; every path goes through proposal_safe_path
     prompts.jsonl  toolseq.jsonl  extractor output (A); format in section 6
@@ -41,8 +41,8 @@ $AGENT_HOME/proposals/            mode 0700, made by proposals_root
 
 Other environment:
 
-- `CHING_CLAUDE_BIN` (default `claude`): the binary `learn_model_call` runs. Tests point it at `tests/fixtures/learn/claude-stub`.
-- `CHING_LEARNER=1` and `CLAUDE_MEM_INTERNAL=1`: `learn_model_call` sets both on every call. D's launchd job sets them too. With `CHING_LEARNER=1`, guard learner mode applies (D builds that), and Ching's own `session-start.sh` (every mode), `stop-check.sh` and `notify.sh` exit 0 at once: a learner call is no session, is never gated and never notifies. That is the second layer under the settings isolation in section 7.
+- `KACHING_CLAUDE_BIN` (default `claude`): the binary `learn_model_call` runs. Tests point it at `tests/fixtures/learn/claude-stub`.
+- `KACHING_LEARNER=1` and `CLAUDE_MEM_INTERNAL=1`: `learn_model_call` sets both on every call. D's launchd job sets them too. With `KACHING_LEARNER=1`, guard learner mode applies (D builds that), and Kaching's own `session-start.sh` (every mode), `stop-check.sh` and `notify.sh` exit 0 at once: a learner call is no session, is never gated and never notifies. That is the second layer under the settings isolation in section 7.
 
 ## 3. Functions in `bin/lib.sh`
 
@@ -108,7 +108,7 @@ Notes:
 ```
 id: <kind>-<slug>
 kind: rule|skill|blindspot|prune|lesson
-status: open                      (ching-proposals sets approved | rejected | snoozed:YYYY-MM-DD)
+status: open                      (kaching-proposals sets approved | rejected | snoozed:YYYY-MM-DD)
 created: YYYY-MM-DDTHH:MM:SSZ     (UTC)
 component: corrections|skills|report|blindspot|lessons
 fingerprint: <40 hex>
@@ -248,8 +248,8 @@ The golden files `tests/fixtures/learn/work/prompts.jsonl` and `toolseq.jsonl` a
 `learn_model_call MODEL < PROMPT` does these steps:
 
 1. Estimates the call (`learn_estimate_tokens` of the prompt) and, holding an flock on `.work/tokens.lock`, reserves that estimate in `.work/tokens-<local day>`. When the day is already at `LEARN_TOKEN_CAP`, or the reservation would pass it, there is no call: exit 5, a `rc=capped ... estimate=<n>` line in `learn.log`. The caller then logs `learn_run{outcome: capped}`.
-2. Runs `"$CHING_CLAUDE_BIN" -p --model MODEL --tools "" --output-format json --strict-mcp-config --disable-slash-commands --no-session-persistence --setting-sources "" --settings '<json>'`, with the prompt on stdin. The `<json>` is `{"autoMemoryEnabled":false,"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"<lib.sh's dir>/guard.sh","timeout":15}]}]}}`.
-3. Runs it with cwd `$(learn_work_dir)`, `CHING_LEARNER=1` and `CLAUDE_MEM_INTERNAL=1`, in its own process group, and kills it after `LEARN_CALL_TIMEOUT` seconds (or when its watchdog is sent TERM, INT or HUP).
+2. Runs `"$KACHING_CLAUDE_BIN" -p --model MODEL --tools "" --output-format json --strict-mcp-config --disable-slash-commands --no-session-persistence --setting-sources "" --settings '<json>'`, with the prompt on stdin. The `<json>` is `{"autoMemoryEnabled":false,"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"<lib.sh's dir>/guard.sh","timeout":15}]}]}}`.
+3. Runs it with cwd `$(learn_work_dir)`, `KACHING_LEARNER=1` and `CLAUDE_MEM_INTERNAL=1`, in its own process group, and kills it after `LEARN_CALL_TIMEOUT` seconds (or when its watchdog is sent TERM, INT or HUP).
 4. Reads the envelope: `{type:"result", subtype, is_error, result:"<text>", usage:{input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens}, ...}`.
 5. Replaces the reservation with the sum of the four usage numbers, again under the lock (a failed call counts what its envelope reports, usually 0).
 6. Takes `.result`, removes a `` ```json `` fence, requires exactly one JSON document, and prints it compact.
@@ -257,7 +257,7 @@ The golden files `tests/fixtures/learn/work/prompts.jsonl` and `toolseq.jsonl` a
 What each flag is for, from live checks on 2026-10-17 (claude 2.1.302, the `stream-json --verbose` init message, AGENT_HOME in /tmp):
 
 - `--tools ""` alone removes only the built-in tools. Every MCP server stayed loaded (Gmail send, Drive share, ...) at 211k prompt tokens per call. `--strict-mcp-config` (no MCP servers) and `--disable-slash-commands` (no skills) leave `tools: []`, `mcp_servers: []`, `skills: []`.
-- Without `--setting-sources ""` every call ran the owner's hooks (found by the stage-6a verifier): Ching's `session-start.sh` (a registry entry), `stop-check.sh`, `notify.sh` (a "Done" line holding the model's JSON, a popup), the settings' osascript "Session finished" popup, and plugin hooks such as `remember` (its SessionEnd summarizer likely starts a model call outside the cap). With it no user, project or local settings load, so no user hooks and no plugins (only the built-in `cc-plugin-*` ones), and no hook fired. Auth is unchanged: HOME stays real and OAuth comes from the keychain (a sandboxed HOME breaks auth).
+- Without `--setting-sources ""` every call ran the owner's hooks (found by the stage-6a verifier): Kaching's `session-start.sh` (a registry entry), `stop-check.sh`, `notify.sh` (a "Done" line holding the model's JSON, a popup), the settings' osascript "Session finished" popup, and plugin hooks such as `remember` (its SessionEnd summarizer likely starts a model call outside the cap). With it no user, project or local settings load, so no user hooks and no plugins (only the built-in `cc-plugin-*` ones), and no hook fired. Auth is unchanged: HOME stays real and OAuth comes from the keychain (a sandboxed HOME breaks auth).
 - `--settings` adds back exactly one hook, `guard.sh` for every tool, so guard learner mode stays the second layer (with no tools it has nothing to see). A SessionStart/Stop/SessionEnd hook passed the same way did fire, so hooks from `--settings` do load under `--setting-sources ""`.
 - `autoMemoryEnabled: false`: otherwise each call makes an empty `~/.claude/projects/<cwd>/memory/`, and the fixed prompt is about 700 tokens larger.
 - `--no-session-persistence`: no transcript under `~/.claude/projects`.
@@ -292,7 +292,7 @@ All events are emitted with `ev KIND DATA_JSON` from `lib.sh`, so strings are ca
   - The components' own events carry a name (`learn-corrections`, `learn-skills`) and the `.work` directory as cwd.
   - `learn.sh` emits the `extract` events (the extractor emits none of its own), `missing` (the component's file does not exist yet), `disabled` (`LEARN_DISABLE`), and `error` with `rc`: the component's exit code, 142 when `LEARN_COMPONENT_TIMEOUT` stopped it, 143 or 130 when `learn.sh` itself was sent TERM or INT (it kills the component's whole process group first).
   - Component `learn` is `learn.sh` itself failing before any component ran (an unusable proposals root, a lock it cannot take), outcome `error`.
-- `proposal`: `{"id":"<proposal id>","action":"approved|rejected|snoozed"}`, emitted by `ching-proposals` (D). `learn-report.sh` counts them per component in its feedback section (spec 6.5): the component comes from the archived file's `component:` line, else from the id's kind (rule: corrections, skill: skills, blindspot: blindspot, lesson and prune: lessons). An archived file that no event names counts on its mtime, with its `status:`. A component whose decisions since its last approval or snooze are all rejections, the first of them in week W-3 or earlier, is flagged with the `LEARN_DISABLE` name that turns it off (`report` for blindspot).
+- `proposal`: `{"id":"<proposal id>","action":"approved|rejected|snoozed"}`, emitted by `kaching-proposals` (D). `learn-report.sh` counts them per component in its feedback section (spec 6.5): the component comes from the archived file's `component:` line, else from the id's kind (rule: corrections, skill: skills, blindspot: blindspot, lesson and prune: lessons). An archived file that no event names counts on its mtime, with its `status:`. A component whose decisions since its last approval or snooze are all rejections, the first of them in week W-3 or earlier, is flagged with the `LEARN_DISABLE` name that turns it off (`report` for blindspot).
 - `learn_event_ok` always keeps these two kinds, even though they carry the `.work` cwd or none.
 - `checkpoint` (extended, `stop-check.sh`, from the STATE.md checkpoint block when the gate accepts it): `{"status":"<status line>","blocker":"...","next_action":"...","not_examined":"...","task_type":"build|fix|research|merge/sync|ops/config|writing|data"}`.
   - `not_examined` is always present (the gate requires the key). `learn-report.sh` reads it as the blind-spot ledger's input.

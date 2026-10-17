@@ -6,8 +6,8 @@ The dispatcher is one slim session that talks. It can run `dash.sh`, read a sess
 
 ## Before you start
 
-1. `ching-b` is merged into `~/bbq/ching` main and `~/.claude/ching` points at it (it does: `~/.claude/ching` is a link to `~/bbq/ching`). Check: `ls ~/.claude/ching/dispatcher/tool-gate.sh`.
-2. `~/.claude/ching/install.sh --install-dispatcher` has been run (it shows what it writes and asks first). Check: `ls ~/.agent/dispatcher/.claude/settings.json`. This does not touch `~/.claude/settings.json`.
+1. `ching-b` is merged into `~/bbq/kaching` main and `~/.claude/kaching` points at it (it does: `~/.claude/kaching` is a link to `~/bbq/kaching`). Check: `ls ~/.claude/kaching/dispatcher/tool-gate.sh`.
+2. `~/.claude/kaching/install.sh --install-dispatcher` has been run (it shows what it writes and asks first). Check: `ls ~/.agent/dispatcher/.claude/settings.json`. This does not touch `~/.claude/settings.json`.
 3. Voice services are up: `voicemode whisper service status` and `voicemode kokoro status` both say running. macOS microphone access is allowed for the terminal app you start it in.
 4. You picked the speed pass line in `MANUAL-STEPS.md`, step 0.6. Write it here before you begin: **pass line: 8 seconds** (picked 2026-10-16, D25) from the end of your sentence to the first spoken word.
 5. Have a stopwatch (a phone) and a second terminal for the checks below.
@@ -15,7 +15,7 @@ The dispatcher is one slim session that talks. It can run `dash.sh`, read a sess
 Start it:
 
 ```
-~/.claude/ching/dispatcher/launch.sh 'Say "Ready" with converse and listen for my first question.'
+~/.claude/kaching/dispatcher/launch.sh 'Say "Ready" with converse and listen for my first question.'
 ```
 
 The first start asks whether to trust the folder `~/.agent/dispatcher`: say yes (without that, Claude Code ignores that folder's permission rules; the gate hook still runs). The launcher refuses to start if the gate is missing or does not deny a test call, and says why.
@@ -31,7 +31,7 @@ Speak in normal sentences. After each phrase, stop the stopwatch at the first sp
 - It leads with the count ("Two need you."), names each blocked session by folder or repo name, and says the blocker in plain words.
 - It never reads out a path, a session id, a hash or a bit of markdown.
 - It stops and listens.
-- The facts match what `~/.claude/ching/bin/dash.sh --speak` prints in your second terminal, run right after.
+- The facts match what `~/.claude/kaching/bin/dash.sh --speak` prints in your second terminal, run right after.
 - First word within the pass line.
 
 **Fail:** answers without running `dash.sh`; misses a session that `dash.sh` shows as blocked; reads ids or paths; goes on past about four sentences; a denial for `dash.sh` itself (the gate's reason names the command it saw).
@@ -73,7 +73,7 @@ A push to `~/.miso` main is a production release. Never answer "yes" to this one
 ### 4b. The "yes" branch, on a throwaway session (optional, 3 minutes)
 
 ```
-mkdir -p /tmp/ching-accept/sandbox && cd /tmp/ching-accept/sandbox && printf 'x\n' > notes.txt
+mkdir -p /tmp/kaching-accept/sandbox && cd /tmp/kaching-accept/sandbox && printf 'x\n' > notes.txt
 claude -n sandbox --permission-mode bypassPermissions
 ```
 

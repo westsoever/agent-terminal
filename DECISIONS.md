@@ -2,6 +2,16 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D35 (2026-10-17): Ching is renamed Kaching
+
+**Decision (user):** the kit is called Kaching, like an old cash register closing. The agent terminal (D33) already carried the name; now the whole kit does.
+
+**What changed:** the link is `~/.claude/kaching` and install.sh writes the hooks under it; the jobs are `org.kaching.watch`, `org.kaching.learn` and `org.kaching.menubar`; the dot is `KachingBar.app`; the CLI is `kaching-proposals` and the watcher `kaching-watch.sh`; the Raycast scripts are `kaching-next.sh`, `kaching-tile.sh` and `kaching-open.sh`; environment variables are `KACHING_*`; the repo folder becomes `~/bbq/kaching`. Text that describes the past (this log, the checkpoints, dated specs and plans) keeps the old name.
+
+**Kept working through the switch:** `~/.claude/ching` stays a second link to the kit (install.sh creates it, or points it here again), so hook entries, launchd jobs and running sessions that still use the old path keep running the same code. `bin/ching-proposals` and `bin/ching-watch.sh` are wrappers around the new names, and the guard treats `ching-proposals approve` exactly like `kaching-proposals approve`. A `CHING_*` variable still counts when its `KACHING_*` name is unset (lib.sh, the early learner checks, KachingBar). install.sh replaces the hook entries under the old link with the same entries under the new one (no hook runs twice), and replaces the `org.ching.*` jobs after their successors have loaded; `--install-menubar` replaces ChingBar.
+
+**Not renamed, on purpose (stored data):** the `<!-- ching:checkpoint -->` and `<!-- ching:snapshot -->` blocks in STATE.md files, the `ching-learn-task:` marker the learner writes into its prompts and filters transcripts by, the `ching-learn` name on learner events, `~/.agent/defaults/ching.env`, `ching-prepush-marker` in installed pre-push hooks, and everything under `~/.agent/`. The GitHub repository keeps its name. Session names such as chingSorter or Ching01 are the owner's.
+
 ## D34 (2026-10-17): The monitor queue serves kaching: one agent at a time while it is open
 
 **Decision (owner, through the agent terminal design, D33):** while kaching runs, the main display shows kaching plus at most one agent window: the one kaching has selected, else the head of the queue. The others keep their waiting records but stay in their cells; answering one brings the next, in the background, never taking focus. With kaching closed, the D29-D32 behaviour applies. Built as one reconcile step that every queue change runs: it works out which windows belong on the main display and moves only the difference. Also for kaching: a tabs map per session, the session id and kind in each waiting record, `queue.sh show` and `queue.sh dismiss`. Not built here: sending text into a tab (kaching's terminal/send.js) and any key layer (Raycast stays the global hotkey layer).

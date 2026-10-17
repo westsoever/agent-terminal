@@ -1,6 +1,6 @@
-# Ching
+# Kaching
 
-Ching keeps track of every Claude Code session on this Mac. It runs as a set of bash hooks plus one launchd job, in any folder, repo or not. It does four jobs:
+Kaching keeps track of every Claude Code session on this Mac. It runs as a set of bash hooks plus one launchd job, in any folder, repo or not. It does four jobs:
 
 - **Remembers where each session is.** Every session gets a `STATE.md` and `NEXT.md`, which are injected when the session starts. A fresh or resumed session knows the goal, what's done and what's next without you re-explaining.
 - **Shows everything at a glance.** One command lists every session, what it's doing, how full its context is, and what needs you.
@@ -9,30 +9,32 @@ Ching keeps track of every Claude Code session on this Mac. It runs as a set of 
 
 It also checks the repos for work you could lose, can talk (a voice dispatcher, see below), and records events for the pilot metrics and the planned learning loop (Phase 6).
 
-Claude Code stays the only engine. Ching doesn't run models of its own, except an optional Haiku/Sonnet step when a stop check fails (`test-escalate.sh`).
+Claude Code stays the only engine. Kaching doesn't run models of its own, except an optional Haiku/Sonnet step when a stop check fails (`test-escalate.sh`).
 
 ## Install, update, remove
 
 ```sh
-cd ~/bbq/ching
+cd ~/bbq/kaching
 ./install.sh --dry-run      # shows the settings.json and launchd diff, changes nothing
 ./install.sh                # asks before applying; --yes applies without asking
 ./install.sh --install-dispatcher --yes   # optional: the voice dispatcher's own folder
-./install.sh --install-menubar --yes      # optional: the menu bar dot (builds ~/Applications/ChingBar.app)
-./install.sh --uninstall    # removes Ching's hook entries, the launchd jobs and the menu bar dot
+./install.sh --install-menubar --yes      # optional: the menu bar dot (builds ~/Applications/KachingBar.app)
+./install.sh --uninstall    # removes Kaching's hook entries, the launchd jobs and the menu bar dot
 ```
 
 `install.sh` is idempotent. It backs up `~/.claude/settings.json` before writing and only adds entries; it never removes your own hooks. A second run should say `nothing to do`.
 
 What it installs:
-- **The link:** `~/.claude/ching`, pointing to this folder.
+- **The links:** `~/.claude/kaching`, pointing to this folder, and `~/.claude/ching`, its name before D35.
 - **The hooks:** SessionStart, UserPromptSubmit, Stop, PreCompact, Notification, SessionEnd, and the PreToolUse guard.
 - **The slash commands:** `/handoff`, `/next` and `/dash`.
-- **The launchd job:** `org.ching.watch`, which runs `bin/ching-watch.sh` every 5 minutes.
+- **The launchd job:** `org.kaching.watch`, which runs `bin/kaching-watch.sh` every 5 minutes.
 
 After pulling new commits, run `./install.sh --dry-run` to see whether anything needs reapplying. Most changes need nothing, because the hooks point at this folder.
 
-**Second Mac:** clone this repo to `~/bbq/ching` and run `./install.sh`. State in `~/.agent/` is per machine and isn't synced.
+**Second Mac:** clone this repo to `~/bbq/kaching` and run `./install.sh`. State in `~/.agent/` is per machine and isn't synced.
+
+**Upgrading from Ching (D35):** after the folder moved to `~/bbq/kaching` (with `~/bbq/ching` left as a symlink to it), run `./install.sh` once, then `./install.sh --install-menubar --yes` if you use the dot. The first replaces the hook entries under `~/.claude/ching/bin/` with the same ones under `~/.claude/kaching/bin/` and the `org.ching.*` jobs with `org.kaching.*`; the second replaces ChingBar with KachingBar. `~/.claude/ching` stays as a second link, so sessions that started before keep working. In Raycast, re-add `~/bbq/kaching/ui/raycast` if the old folder was added, and give the renamed commands their hotkeys again.
 
 ## Daily use
 
@@ -40,11 +42,11 @@ After pulling new commits, run `./install.sh --dry-run` to see whether anything 
 
 | Command | What you get |
 |---|---|
-| `~/.claude/ching/bin/dash.sh` | One line per session: state, age, context (● healthy, ◐ watch, ○ hand off now), today's tokens, folder, blocker. Ends with a `sync:` line when a repo needs attention, and warns above 5 active sessions. |
+| `~/.claude/kaching/bin/dash.sh` | One line per session: state, age, context (● healthy, ◐ watch, ○ hand off now), today's tokens, folder, blocker. Ends with a `sync:` line when a repo needs attention, and warns above 5 active sessions. |
 | `dash.sh --inbox` | **NEEDS YOU**: blocked or waiting for input. **READY**: release gate passed (only with the push gate on). **FINISHED**: done since you last looked; looking marks them as seen. **SYNC**: repos with work you could lose. |
 | `dash.sh --next` | The top 5 sessions to attend to (urgency × importance × recency), each with its next action. |
 | `dash.sh --speak` | The short spoken summary. |
-| `dash.sh --counts` | A few `key=value` lines (sessions, needs, proposals) for the menu bar dot. Reads only Ching's own session records, so it is fast. |
+| `dash.sh --counts` | A few `key=value` lines (sessions, needs, proposals) for the menu bar dot. Reads only Kaching's own session records, so it is fast. |
 | `/dash` | The same from inside any session. It speaks by default; `/dash --text`, `--inbox` and `--next` print instead. |
 
 ### Hand over and pick up
@@ -66,7 +68,7 @@ The watcher also detects stalled sessions (no progress for 20 minutes) and conte
 
 ### The sync check: work you could lose
 
-`bin/sync-check.sh` runs from the watcher every 6 hours, or on demand. For every repo Ching has seen, it reports:
+`bin/sync-check.sh` runs from the watcher every 6 hours, or on demand. For every repo Kaching has seen, it reports:
 - unpushed commits;
 - commits you're behind on;
 - uncommitted files;
@@ -94,17 +96,17 @@ Test and sandbox sessions are left out. The footer says which numbers are exact 
 
 ## Menu bar dot
 
-A small dot in the menu bar at the top of the screen shows whether Ching is running.
+A small dot in the menu bar at the top of the screen shows whether Kaching is running.
 
 | Dot | Meaning |
 |---|---|
-| green | Ching is running: the watcher has checked in within the last 11 minutes. |
-| amber | Ching is running and at least one session needs you (blocked or waiting for your input, the same sessions as NEEDS YOU in `dash.sh --inbox`). |
-| grey ring | Ching isn't running: the watcher isn't installed or hasn't checked in for over 11 minutes. Right after the Mac wakes from sleep it can be grey for a few minutes until the watcher's next run. |
+| green | Kaching is running: the watcher has checked in within the last 11 minutes. |
+| amber | Kaching is running and at least one session needs you (blocked or waiting for your input, the same sessions as NEEDS YOU in `dash.sh --inbox`). |
+| grey ring | Kaching isn't running: the watcher isn't installed or hasn't checked in for over 11 minutes. Right after the Mac wakes from sleep it can be grey for a few minutes until the watcher's next run. |
 
-Click it for the menu: a status line ("Ching running · 3 sessions · 1 needs you"), when the watcher last ran, **Open inbox** (a Terminal window with `dash.sh --inbox`), **Proposals waiting: N** when the learner has open proposals, and **Quit**. The dot checks again every 12 seconds; each check reads a few small files and takes well under a second.
+Click it for the menu: a status line ("Kaching running · 3 sessions · 1 needs you"), when the watcher last ran, **Open inbox** (a Terminal window with `dash.sh --inbox`), **Proposals waiting: N** when the learner has open proposals, and **Quit**. The dot checks again every 12 seconds; each check reads a few small files and takes well under a second.
 
-**Install:** `./install.sh --install-menubar --yes`. It needs the Xcode command line tools (`swiftc`), builds `~/Applications/ChingBar.app` and adds the login job `org.ching.menubar`, which starts the dot at login and restarts it if it crashes. **Quit** from the menu keeps it off until your next login. Running the command again after a pull rebuilds the app only when its code changed. `./install.sh --uninstall` removes both.
+**Install:** `./install.sh --install-menubar --yes`. It needs the Xcode command line tools (`swiftc`), builds `~/Applications/KachingBar.app` and adds the login job `org.kaching.menubar`, which starts the dot at login and restarts it if it crashes. **Quit** from the menu keeps it off until your next login. Running the command again after a pull rebuilds the app only when its code changed. `./install.sh --uninstall` removes both.
 
 **Coming later:** reading back the transcript of a conversation from the menu (the greyed-out "Transcripts (coming soon)" item), and notifications from the dot for sessions that need your input.
 
@@ -112,12 +114,12 @@ Click it for the menu: a status line ("Ching running · 3 sessions · 1 needs yo
 
 Hand a task to an agent, put its Terminal window on your second display, and forget about it. When the session finishes its turn or needs your input, its window moves to the main display (the one with the menu bar). When you prompt it, the window goes back to where it was. So if your main display shows only your own windows, every agent is busy.
 
-- **Next waiting agent:** `bin/queue.sh next` brings the oldest waiting window to the front with the waiting tab selected. Each press after that shows the next one, wrapping around. Bind it to a hotkey with Raycast: Extensions > Script Commands > Add Directories > `~/bbq/ching/ui/raycast`, then give **Next Waiting Agent** a hotkey. It shows "Ching01 (2 more waiting)" as a small message.
+- **Next waiting agent:** `bin/queue.sh next` brings the oldest waiting window to the front with the waiting tab selected. Each press after that shows the next one, wrapping around. Bind it to a hotkey with Raycast: Extensions > Script Commands > Add Directories > `~/bbq/kaching/ui/raycast`, then give **Next Waiting Agent** a hotkey. It shows "Ching01 (2 more waiting)" as a small message.
 - **A lead agent and its workers:** open the workers as tabs of the lead's window (Cmd+T, or Window > Merge All Windows). The window moves as one: it comes over when any of its tabs waits and goes back once none does. `next` selects the tab that is waiting.
 - **Tiling:** your second display is a grid sized by the agent windows that live there: two side by side, three in columns, four as a 2x2 grid, more in a larger grid. A waiting window keeps its cell: while it is on the main display its cell stays empty, and when you answer it goes back to exactly that cell, so each project keeps its place on the screen. Going back to its cell restores the window's exact size, and the main display is never laid out. The grid only changes when a window is opened or closed, and then every window takes the free cell nearest to where it was. It re-lays out when a session starts and on demand with **Tile Terminals** (same Raycast folder; `bin/queue.sh tile`). Windows on a desktop you aren't viewing, and minimised ones, are left alone.
 - **Where a waiting window goes:** a fixed frame on the main display, 460 x 790 with its top-left corner at 320,70 from the display's top-left corner (what the screenshot crosshair shows). Every waiting window gets the same frame, a stack you go through with **Next Waiting Agent**. Change it with `queue_park_frame=X,Y,W,H` in `~/.agent/config`, or `queue_park_frame=off` to keep each window's own size.
 - **Focus:** a window that comes over never takes the focus or jumps in front of what you're typing in. Only the **Next Waiting Agent** hotkey brings one to the front.
-- **What counts as waiting:** the same moments Ching notifies for: done, needs input, blocked, ready, and the idle prompt. A window already on the main display is never moved.
+- **What counts as waiting:** the same moments Kaching notifies for: done, needs input, blocked, ready, and the idle prompt. A window already on the main display is never moved.
 - **Only Terminal.app.** A session inside VS Code or Cursor has no window of its own to move, so it is left alone.
 - **Status:** `bin/queue.sh status` lists the waiting tabs. State is in `~/.agent/queue/`.
 - **With kaching open** (the agent terminal): the main display holds kaching plus one agent window at a time, the one kaching has selected, or else the oldest waiting one. The others wait in their cells, and when you answer one, the next comes over in the background. Close kaching and every waiting window comes over again at the next change. `queue.sh show [SESSION_ID]` puts an agent on the main display (kaching calls it when its selection changes); `queue.sh dismiss SESSION_ID` takes an agent out of the queue without an answer.
@@ -169,8 +171,8 @@ To check the guard is live, ask a session to force-push in a throwaway repo unde
 
 Status: **built and gate-tested, never heard.** No audio has been played yet. Your first run is in `MANUAL-STEPS.md` under "2026-10-16".
 
-- **Level A:** `/dash` says the status aloud through VoiceMode, using local Whisper and Kokoro, so no audio leaves the Mac. Dictation into a session is done with Wispr Flow, your own app outside Ching; Claude Code's `/voice` is not used (D25).
-- **Level B, the dispatcher:** start it with `~/.claude/ching/dispatcher/launch.sh`. It's a slim Haiku session that only:
+- **Level A:** `/dash` says the status aloud through VoiceMode, using local Whisper and Kokoro, so no audio leaves the Mac. Dictation into a session is done with Wispr Flow, your own app outside Kaching; Claude Code's `/voice` is not used (D25).
+- **Level B, the dispatcher:** start it with `~/.claude/kaching/dispatcher/launch.sh`. It's a slim Haiku session that only:
   - reads status (`dash.sh`) and session `STATE.md`/`NEXT.md`;
   - lists sessions and relays messages to them;
   - logs each relay;
@@ -188,7 +190,7 @@ Status: **built and gate-tested, never heard.** No audio has been played yet. Yo
 | `~/.agent/config` | Machine switches (`push_gate`) |
 | `~/.agent/notify.log`, `watch.log` | Delivery log and watcher errors. An empty `watch.log` means no errors. |
 | `~/.agent/watch.heartbeat` | Rewritten by every watcher run; the menu bar dot reads its time |
-| `~/Applications/ChingBar.app`, `~/.agent/menubar.log` | The menu bar dot (optional) and its output |
+| `~/Applications/KachingBar.app`, `~/.agent/menubar.log` | The menu bar dot (optional) and its output |
 | `~/.agent/dispatcher/` | The dispatcher's own settings and MCP config |
 | `~/.agent/proposals/` | Phase 6 output, when it is built. Proposals only, never applied automatically. |
 | `~/.agent-repos` | Extra repos for `dash.sh` and the sync check |
@@ -196,7 +198,7 @@ Status: **built and gate-tested, never heard.** No audio has been played yet. Yo
 ## Checking it works
 
 ```sh
-cd ~/bbq/ching
+cd ~/bbq/kaching
 bash tests/run.sh                  # full suite (run it from here, not from a /tmp checkout)
 bash tests/live-watch.sh           # read-only: launchd job loaded, events flowing
 bash tests/live-smoke.sh           # daytime only: section 4 makes sound, 0-2 call claude -p
@@ -205,9 +207,9 @@ bash tests/live-smoke.sh           # daytime only: section 4 makes sound, 0-2 ca
 
 shellcheck runs inside the suite (`t_lint`). If it isn't on your PATH, the suite looks for it in `/tmp/sc-venv`.
 
-## The learning loop (Phase 6): how Ching learns and improves
+## The learning loop (Phase 6): how Kaching learns and improves
 
-Being built (D26). The idea: Ching watches how you work with Claude across every session on this Mac, and over time makes Claude work more the way you want, without you repeating yourself. It **learns from what's already on disk** (your chats in `~/.claude/projects`, Ching's own event log `~/.agent/events.jsonl`, and session checkpoints) and **only ever proposes**. Nothing changes until you approve it.
+Being built (D26). The idea: Kaching watches how you work with Claude across every session on this Mac, and over time makes Claude work more the way you want, without you repeating yourself. It **learns from what's already on disk** (your chats in `~/.claude/projects`, Kaching's own event log `~/.agent/events.jsonl`, and session checkpoints) and **only ever proposes**. Nothing changes until you approve it.
 
 **What it learns and what it gives you:**
 
@@ -218,7 +220,7 @@ Being built (D26). The idea: Ching watches how you work with Claude across every
 | Your working patterns: sessions and prompts per folder, the hours and weekdays you work, stop retries, stalls, context handoffs, blocked commands, notifications | A **weekly report**, `~/.agent/proposals/report-YYYY-Www.md` | weekly |
 | Things sessions keep listing as "not examined" when they finish | A **blind spot**: a review step to add so it stops being skipped (once enough checkpoints exist) | weekly |
 
-**How you use it:** `dash.sh --inbox` shows open proposals in a PROPOSALS lane, and `/dash` can say "N proposals waiting". `ching-proposals list` / `show <id>` / `diff <id>` let you read them. `approve <id>` shows what will change, then asks you to type back a short code it shows (one line, once). It works only in your own terminal window: it refuses when a Claude Code session started it, including Claude Code's `!` prompt, and a session may only run `list`, `show`, `diff`, `reject` and `snooze`. `reject <id>` makes sure it's never proposed again. `snooze <id> <days>` hides it for a while. The weekly report shows which kinds of proposal you approve and which you reject, so a part that only produces noise can be switched off (`LEARN_DISABLE`).
+**How you use it:** `dash.sh --inbox` shows open proposals in a PROPOSALS lane, and `/dash` can say "N proposals waiting". `kaching-proposals list` / `show <id>` / `diff <id>` let you read them. `approve <id>` shows what will change, then asks you to type back a short code it shows (one line, once). It works only in your own terminal window: it refuses when a Claude Code session started it, including Claude Code's `!` prompt, and a session may only run `list`, `show`, `diff`, `reject` and `snooze`. `reject <id>` makes sure it's never proposed again. `snooze <id> <days>` hides it for a while. The weekly report shows which kinds of proposal you approve and which you reject, so a part that only produces noise can be switched off (`LEARN_DISABLE`).
 
 **What it will not do:**
 - It never edits rules, skills, settings, hooks or the guard by itself.
@@ -228,7 +230,7 @@ Being built (D26). The idea: Ching watches how you work with Claude across every
 
 The guard has a learner mode that blocks any write outside `~/.agent/proposals/`. Deleting `~/.agent/proposals/` wipes everything it has learned.
 
-**Not yet:** lessons injected at session start (stage 6b) stay unbuilt until the weekly report shows that rules alone aren't enough. It stays out of claude-mem, and in the long run Ching's own memory is meant to replace claude-mem (D27).
+**Not yet:** lessons injected at session start (stage 6b) stay unbuilt until the weekly report shows that rules alone aren't enough. It stays out of claude-mem, and in the long run Kaching's own memory is meant to replace claude-mem (D27).
 
 ### The label spot-check (you, about 10 minutes, once)
 
@@ -274,5 +276,5 @@ On 2026-10-16:
 - `PHASE0-RESULTS.md`: what was tested before building.
 - `CHECKPOINT-1.md`, `CHECKPOINT-1.5.md`: review reports.
 - `MANUAL-STEPS.md`: steps only you can do.
-- `ching-functions.md`: plain-language tour of what Ching borrowed and why.
+- `kaching-functions.md`: plain-language tour of what Kaching borrowed and why.
 - `docs/`: voice, dispatcher acceptance, live checks, specs and plans.
