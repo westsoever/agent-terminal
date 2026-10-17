@@ -80,14 +80,17 @@ func (e *editor) open(target, cwd string, width int) tea.Cmd {
 
 // close keeps the text as the target's draft.
 func (e *editor) close() {
-	e.drafts[e.target] = e.ta.Value()
+	e.keep()
 	e.ta.Blur()
 	e.comp = nil
 }
 
 // sent forgets the draft.
 func (e *editor) sent() {
-	delete(e.drafts, e.target)
+	if _, ok := e.drafts[e.target]; ok {
+		delete(e.drafts, e.target)
+		saveDrafts(e.drafts)
+	}
 	e.ta.SetValue("")
 	e.ta.Blur()
 	e.comp = nil
@@ -220,6 +223,53 @@ func (e *editor) key(k tea.KeyMsg, width int) (editorAction, tea.Cmd) {
 func (e *editor) afterEdit(width int) {
 	e.resize(width)
 	e.suggest()
+	e.keep()
+}
+
+// keep records the text being written as the target's draft, and saves the drafts when that changed, so a
+// restart of kaching loses nothing, not even a reply still open in the box (owner, 2026-10-17).
+func (e *editor) keep() {
+	v := e.ta.Value()
+	if e.target == "" || e.drafts[e.target] == v {
+		return
+	}
+	if strings.TrimSpace(v) == "" {
+		delete(e.drafts, e.target)
+	} else {
+		e.drafts[e.target] = v
+	}
+	saveDrafts(e.drafts)
+}
+
+func draftsPath() string { return filepath.Join(agentHome(), "terminal", "drafts.json") }
+
+// loadDrafts reads the saved drafts: target (session id or "pc:" issue id) -> text. Empty when there are none.
+func loadDrafts() map[string]string {
+	d := map[string]string{}
+	if b, err := os.ReadFile(draftsPath()); err == nil {
+		_ = json.Unmarshal(b, &d)
+	}
+	if d == nil {
+		d = map[string]string{}
+	}
+	return d
+}
+
+// saveDrafts writes the drafts (owner-only, replaced in one rename); no file when there are none.
+func saveDrafts(d map[string]string) {
+	p := draftsPath()
+	if len(d) == 0 {
+		_ = os.Remove(p)
+		return
+	}
+	b, err := json.MarshalIndent(d, "", "  ")
+	if err != nil || os.MkdirAll(filepath.Dir(p), 0o700) != nil {
+		return
+	}
+	tmp := p + ".tmp"
+	if os.WriteFile(tmp, b, 0o600) == nil {
+		_ = os.Rename(tmp, p)
+	}
 }
 
 // suggest looks at the token at the end of the text: @path -> the agent's files, a leading /cmd -> commands.
