@@ -30,6 +30,7 @@ type editor struct {
 	compTok  string            // the token being completed, as typed
 	compDesc map[string]string // "/name" -> its description
 
+	peers   []string            // the other live sessions' names, for @ (set by the model before each key)
 	files   map[string][]string // cwd -> its files, for @
 	filesAt map[string]time.Time
 	height  int
@@ -276,17 +277,40 @@ func saveDrafts(d map[string]string) {
 func (e *editor) suggest() {
 	v := e.ta.Value()
 	e.comp = nil
-	if v == "" || strings.HasSuffix(v, " ") || strings.HasSuffix(v, "\n") {
+	// a session name with spaces is quoted: @"release no is a token that is still open
+	quoted := -1
+	if q := strings.LastIndex(v, `@"`); q >= 0 && !strings.Contains(v[q+2:], `"`) && (q == 0 || strings.ContainsAny(v[q-1:q], " \n\t")) {
+		quoted = q
+	}
+	if v == "" || (quoted < 0 && (strings.HasSuffix(v, " ") || strings.HasSuffix(v, "\n"))) {
 		return
 	}
 	tok := v
-	if i := strings.LastIndexAny(v, " \n\t"); i >= 0 {
+	if quoted >= 0 {
+		tok = v[quoted:]
+	} else if i := strings.LastIndexAny(v, " \n\t"); i >= 0 {
 		tok = v[i+1:]
 	}
 	var items []string
 	switch {
 	case strings.HasPrefix(tok, "@"):
-		items = rank(e.cwdFiles(), tok[1:], "@")
+		q := strings.TrimPrefix(tok[1:], `"`)
+		var peers []string // the other sessions first (a few), then files
+		seen := map[string]bool{}
+		for _, n := range rank(e.peers, q, "") {
+			if !seen[n] && len(peers) < 4 {
+				seen[n] = true
+				peers = append(peers, mentionQuote(n))
+			}
+		}
+		e.compDesc = map[string]string{}
+		for _, p := range peers {
+			e.compDesc[p] = "session"
+		}
+		items = peers
+		if quoted < 0 {
+			items = append(items, rank(e.cwdFiles(), tok[1:], "@")...)
+		}
 		e.compKind = '@'
 	case strings.HasPrefix(tok, "/") && tok == v:
 		cmds := slashCommands(e.cwd)
@@ -634,10 +658,7 @@ func (e *editor) lines(w int) []string {
 		nameW = 34
 	}
 	for i, c := range e.comp {
-		desc := ""
-		if e.compKind == '/' {
-			desc = e.compDesc[c]
-		}
+		desc := e.compDesc[c] // a command's description; "session" for a session's name
 		if i == e.compSel {
 			out = append(out, row(w, s(padTo(" "+padTo(c, nameW)+"  "+desc, w), cSel)))
 		} else {

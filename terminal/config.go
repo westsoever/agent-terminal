@@ -33,13 +33,17 @@ type Keys struct {
 	Refresh string `toml:"refresh"`
 	Older   string `toml:"scroll_up"`
 	Newer   string `toml:"scroll_down"`
+	Quick   string `toml:"quick_approve"`
 }
 
 type Config struct {
-	OpenCmd string  `toml:"open_cmd"` // run with the file path as its only argument
-	Tables  string  `toml:"tables"`   // how agents' markdown tables are drawn: auto, grid, rule or records
-	Keys    Keys    `toml:"keys"`
-	Replies []Reply `toml:"reply"`
+	OpenCmd  string  `toml:"open_cmd"`      // run with the file path as its only argument
+	Tables   string  `toml:"tables"`        // how agents' markdown tables are drawn: auto, grid, rule or records
+	NWModel  string  `toml:"nw_model"`      // the model /NW starts an agent with, "" for Claude Code's default
+	NWEffort string  `toml:"nw_effort"`     // its effort level
+	NWPerm   string  `toml:"nw_permission"` // its permission mode: plan, auto, bypass, accept, manual or dontask
+	Keys     Keys    `toml:"keys"`
+	Replies  []Reply `toml:"reply"`
 }
 
 const defaultConfig = `# Kaching agent terminal: keys and pre-written replies.
@@ -52,6 +56,13 @@ open_cmd = "open"
 # How tables in an agent's messages are drawn: "auto" (columns under a rule; each row as a small block when the
 # columns would get too narrow), "rule", "grid" (every cell framed) or "records" (always blocks).
 tables = "auto"
+
+# /NW starts a background agent. These are its defaults; words after /NW override them, e.g. /NW soii sonnet high.
+# Model: opus, sonnet, haiku, fable or a full name. Effort: low, medium, high, xhigh, max. Permission: plan, auto,
+# bypass, accept, manual, dontask. Empty: Claude Code's own default.
+nw_model = ""
+nw_effort = ""
+nw_permission = ""
 
 [keys]
 next = "l"            # next agent (down the list)
@@ -66,6 +77,7 @@ wall = "W"            # every agent as tiles
 zoom = "z"            # in the wall: one tile full screen
 dismiss = "x"         # take a waiting agent out of the queue without answering
 refresh = "R"         # re-read everything now
+quick_approve = "a"   # an agent that asks questions: take every recommended answer and submit
 scroll_up = "up"      # the agent's conversation: 3 lines back (pgup a page, home the start)
 scroll_down = "down"  # 3 lines on (pgdown a page, end the newest)
 
@@ -160,6 +172,7 @@ func loadConfig() (Config, time.Time, error) {
 	fill(&c.Keys.Newer, def.Keys.Newer)
 	fill(&c.Keys.Dismiss, def.Keys.Dismiss)
 	fill(&c.Keys.Refresh, def.Keys.Refresh)
+	fill(&c.Keys.Quick, def.Keys.Quick)
 	for i := range c.Replies {
 		c.Replies[i].Key = strings.TrimSpace(c.Replies[i].Key)
 		if c.Replies[i].Label == "" {
