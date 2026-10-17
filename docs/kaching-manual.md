@@ -27,8 +27,8 @@ Push `Esc` to go back to the desk from any view.
 
 | Key | Result |
 |---|---|
-| `j` or `↓` | Select the next agent. |
-| `k` or `↑` | Select the previous agent. |
+| `k` or `↓` | Select the next agent (down the list). |
+| `j` or `↑` | Select the previous agent (up the list). |
 | `Space` | Select the next agent that waits for you. |
 | `1` to `9` | Send the answer with that number to the selected agent. |
 | `r` | Write a message to the selected agent. `Enter` sends it. `Esc` cancels it. |
@@ -60,7 +60,7 @@ You can change these keys and messages. Refer to section 7.
 |---|---|
 | `1` to `9` | Select the tile with that number. |
 | `z` | Show the selected tile on the full screen. Push `z` again to go back. |
-| `j`, `k`, `Space` | Select the next, previous or next waiting agent. |
+| `k`, `j`, `Space` | Select the next, previous or next waiting agent. |
 | `Esc` | Go back to the desk. |
 
 When a tile shows on the full screen, the number keys send answers, as on the desk.
@@ -69,7 +69,7 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 
 | View | Key | Result |
 |---|---|---|
-| All lists | `j`, `k` | Select the next or previous line. |
+| All lists | `k`, `j` | Select the next or previous line. |
 | `FL` | `Enter` | Open the selected file. |
 | `PR` | `Enter` | Show the full proposal. Push `q` to close it. |
 | `PR` | `a` | Approve the proposal. The screen asks you to write a code. |
@@ -272,7 +272,7 @@ The tiles change size with the window. A wide window shows more tiles in each li
 ### 6.10 Do a proposal of the learner
 
 1. Push `/`, write `PR`, push `Enter`.
-2. Push `j` or `k` to select a proposal.
+2. Push `k` (down) or `j` (up) to select a proposal.
 3. Push `Enter` to read the full proposal. Push `q` to close it.
 4. Do one of these steps:
    - To approve it, push `a`. Write the code that shows on the screen. Push `Enter`.
@@ -284,7 +284,7 @@ Only a person can approve a proposal. An agent cannot approve it.
 ### 6.11 Do work on Paperclip issues
 
 1. Push `/`, write `PC`, push `Enter`.
-2. Push `j` or `k` to select an issue. The lines below the issue show why it waits.
+2. Push `k` (down) or `j` (up) to select an issue. The lines below the issue show why it waits.
 3. To write a comment, push `r`. Write the comment. Push `Enter`.
 4. To open the issue in your browser, push `Enter`.
 
@@ -318,7 +318,7 @@ All keys and fixed messages are in the file `~/.agent/terminal/keys.toml`. Kachi
 3. For a key on the space bar, write `key = "space e"`.
 4. Save the file.
 
-Do not use a key that Kaching uses for an action (for example `j`, `k`, `r`, `o`, `g`, `x`, `W`, `z`, `/`). The action has priority.
+Do not use a key that Kaching uses for an action (for example `k`, `j`, `r`, `o`, `g`, `x`, `W`, `z`, `/`). The action has priority.
 
 ### 7.3 Change an action key
 
