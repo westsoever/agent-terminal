@@ -225,7 +225,7 @@ In command mode and write mode:
 ### 6.1 Find the agents that wait for you
 
 1. Look at the command line. It shows the number of agents that wait for you.
-2. Push `Space`. Kaching selects the agent in `INPUT` that has waited the longest. Agents that are only done (`WAITING`) are skipped.
+2. Push `Space`. Kaching selects the agent in `INPUT` that has waited the longest. Agents that are only done (`WAITING`) are skipped. An agent that shows a question or an approval on its screen waits from the moment that it showed it, not from the start of its turn. Kaching reads the screens of all busy agents, so such an agent is in `INPUT` also when you never selected it.
 3. Read the agent panel and answer it.
 4. Push `Space` again. Kaching selects the agent in `INPUT` that now has waited the longest. Pushing `Space` again before you answer keeps the same agent.
 

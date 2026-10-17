@@ -73,10 +73,18 @@ type model struct {
 	props     []string
 	sync      []string
 	ed        *editor
-	prompts   map[string]Prompt // sid -> the menu its screen shows (selected waiting agents only)
-	scroll    *chatScroll       // shared by every copy of the model: View records the limits it drew
-	usage     Usage             // the Claude usage limits, read on every tick
+	prompts   map[string]Prompt  // sid -> the menu its screen shows (selected waiting agents only)
+	scroll    *chatScroll        // shared by every copy of the model: View records the limits it drew
+	usage     Usage              // the Claude usage limits, read on every tick
+	asked     map[string]askSeen // sid -> when its menu first showed: a busy agent's wait starts there
+	ticks     int
 }
+
+// askSeen is when an agent's menu first and last showed on its screen. A menu missed on one read and back within
+// askGrace is the same menu: its wait keeps counting from first.
+type askSeen struct{ first, last time.Time }
+
+const askGrace = 15 * time.Second
 
 // chatScroll is how far the selected agent's conversation is scrolled back from its newest line. agentPanel
 // sets max and page when it draws; another agent (sid) starts at the newest line again.
@@ -412,6 +420,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tickMsg:
+		m.ticks++
 		m.refresh()
 		cmds := []tea.Cmd{tick()}
 		if c := m.readPrompt(0); c != nil {
@@ -434,6 +443,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			delete(m.prompts, msg.sid)
 		} else {
 			m.prompts[msg.sid] = msg.p
+			m.sawAsk(msg.sid, time.Now())
 		}
 		m.applyPrompts()
 		return m, nil
@@ -448,6 +458,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setErr(msg.name + ": " + msg.res)
 		}
 		delete(m.prompts, msg.sid)
+		delete(m.asked, msg.sid) // answered: a menu after this is a new wait
 		if msg.res == "ok" && msg.sid != "" {
 			return m, tea.Batch(m.readPrompt(500*time.Millisecond), returnWindow(msg.sid, msg.what))
 		}
@@ -663,11 +674,14 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 // readPrompt reads screens for menus: the selected agent's, and every agent Kaching's hooks marked as needing
 // input or blocked, or that showed a menu last time. Busy or not: Claude Code calls a session busy while its
 // question is open, so the screen is the truth.
+// readPrompt reads the screens that can show a menu: the selected agent's, the ones that asked or are blocked,
+// the ones that showed a menu, and every other busy one on every second tick (a permission prompt or a question
+// comes up mid-turn, while Claude Code still calls the session busy). So an agent with a menu is in INPUT whether
+// or not it was ever selected, and one missed read is put right a few seconds later.
 func (m *model) readPrompt(delay time.Duration) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, a := range m.agents {
-		_, asked := m.prompts[a.SID]
-		if !a.InTerminal || !(a.SID == m.selSID || a.State == "input" || a.State == "blocked" || asked) {
+		if !m.screenWanted(a) {
 			continue
 		}
 		sid, tty := a.SID, a.TTY
@@ -680,12 +694,35 @@ func (m *model) readPrompt(delay time.Duration) tea.Cmd {
 }
 
 // applyPrompts marks the agents whose screen shows a menu and sorts them into WAITING.
+func (m *model) screenWanted(a Agent) bool {
+	_, asked := m.prompts[a.SID]
+	busy := a.Busy && m.ticks%2 == 0
+	return a.InTerminal && (a.SID == m.selSID || a.State == "input" || a.State == "blocked" || asked || busy)
+}
+
+// A busy agent that shows a menu has waited since the menu first showed, not since its turn began.
 func (m *model) applyPrompts() {
 	for i := range m.agents {
-		_, ok := m.prompts[m.agents[i].SID]
-		m.agents[i].Asking = ok
+		a := &m.agents[i]
+		_, a.Asking = m.prompts[a.SID]
+		if s, ok := m.asked[a.SID]; ok && a.Asking && a.Busy {
+			a.Since = s.first
+		}
 	}
 	sortAgents(m.agents)
+}
+
+// sawAsk records that sid's screen shows a menu at now.
+func (m *model) sawAsk(sid string, now time.Time) {
+	if m.asked == nil {
+		m.asked = map[string]askSeen{}
+	}
+	s, ok := m.asked[sid]
+	if !ok || now.Sub(s.last) > askGrace {
+		s.first = now
+	}
+	s.last = now
+	m.asked[sid] = s
 }
 
 // typingKey: every key while writing goes to the editor; enter sends to the agent (or the Paperclip issue).

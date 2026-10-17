@@ -374,3 +374,51 @@ func TestNextWaitingLongestInput(t *testing.T) {
 		t.Fatalf("nobody in INPUT: selected %s, status %q", m.selSID, m.status)
 	}
 }
+
+// A busy agent's menu counts from when it first showed, so space doesn't jump to an agent just because its turn
+// began earlier; its screen is read while not selected, so a missed read doesn't drop it out of INPUT.
+func TestSpaceWithMenus(t *testing.T) {
+	cfg, _, _ := loadConfig()
+	now := time.Now()
+	m := model{cfg: cfg, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, prompts: map[string]Prompt{}}
+	m.agents = []Agent{
+		{SID: "A", State: "input", Since: now.Add(-10 * time.Minute), InTerminal: true},
+		{SID: "M", State: "working", Busy: true, Since: now.Add(-30 * time.Minute), InTerminal: true}, // turn began 30m ago
+		{SID: "idle", State: "idle", Since: now.Add(-time.Hour), InTerminal: true},
+	}
+	m.selSID = "idle"
+	// every busy agent's screen is read (every second tick), selected or not; idle ones are not
+	m.ticks = 2
+	m.selSID = "A"
+	if !m.screenWanted(m.agents[1]) || m.screenWanted(m.agents[2]) {
+		t.Fatal("busy M must be read, idle must not")
+	}
+	m.selSID = "idle"
+	// M's menu shows now: it waits since now, so A (10 min) is still the longest
+	menu := Prompt{Options: []string{"Yes", "No"}}
+	mm, _ := m.Update(promptMsg{"M", menu})
+	m = mm.(model)
+	m.nextWaiting()
+	if m.selSID != "A" {
+		t.Fatalf("space chose %s, want A", m.selSID)
+	}
+	m.move(1) // cycle away
+	// one read misses M's menu, the next one finds it again: same menu, same wait
+	mm, _ = m.Update(promptMsg{"M", Prompt{}})
+	m = mm.(model)
+	first := m.asked["M"].first
+	mm, _ = m.Update(promptMsg{"M", menu})
+	m = mm.(model)
+	if !m.asked["M"].first.Equal(first) {
+		t.Fatal("a missed read restarted M's wait")
+	}
+	m.nextWaiting()
+	if m.selSID != "A" {
+		t.Fatalf("space after cycling away chose %s, want A", m.selSID)
+	}
+	// a menu back after the grace is a new wait
+	m.sawAsk("M", first.Add(askGrace+time.Second))
+	if !m.asked["M"].first.After(first) {
+		t.Fatal("a menu after the grace kept the old wait")
+	}
+}
