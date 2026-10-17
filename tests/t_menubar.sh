@@ -94,8 +94,8 @@ bad=ctrl+q
 bad=hyper+n" "$out"
 
 # ---------- the dot's state: KachingBar --status-once on fixtures ----------
-S_AH="$WORK/st-agent"; S_LA="$WORK/st-launchagents"; mkdir -p "$S_AH/sessions" "$S_LA"
-status() { AGENT_HOME="$S_AH" LAUNCH_AGENTS_DIR="$S_LA" KACHING_DIR="$KIT" "$EXE" --status-once 2>&1; }
+S_AH="$WORK/st-agent"; S_LA="$WORK/st-launchagents"; S_CL="$WORK/st-claude"; mkdir -p "$S_AH/sessions" "$S_LA" "$S_CL/sessions"
+status() { AGENT_HOME="$S_AH" LAUNCH_AGENTS_DIR="$S_LA" KACHING_DIR="$KIT" CLAUDE_DIR="$S_CL" "$EXE" --status-once 2>&1; }
 st_sess() { mkdir -p "$S_AH/sessions/$1"; printf 'cwd=%s\nstate=%s\nupdated=%s\n' "$WORK/plain" "$2" "$(date +%s)" >"$S_AH/sessions/$1/meta"; }
 ago() { touch -t "$(date -r $(( $(date +%s) - $2 )) +%Y%m%d%H%M.%S)" "$1"; }
 
@@ -113,8 +113,8 @@ out=$(status)
 assert_eq "status: fresh heartbeat, nobody waiting -> green" "green" "$(kv "$out" state)"
 assert_eq "status: running" "yes" "$(kv "$out" running)"
 assert_eq "status: status line" "Kaching running · 1 session · 0 need you" "$(kv "$out" status)"
-assert_contains "status: Open inbox in the menu" "$out" "menu=Open inbox"
-assert_contains "status: transcripts placeholder is disabled" "$out" "menu=Transcripts (coming soon) [disabled]"
+assert_contains "status: Open Kaching in the menu" "$out" "menu=Open Kaching"
+assert_contains "status: no recaps yet is a disabled line" "$out" "menu=Recaps: none yet [disabled]"
 assert_contains "status: Quit in the menu" "$out" "menu=Quit KachingBar"
 assert_not_contains "status: no proposals line without proposals" "$out" "Proposals waiting"
 st_sess b input
@@ -127,7 +127,29 @@ assert_eq "status: blocked counts as needing you" "2" "$(kv "$(status)" needs)"
 mkdir -p "$S_AH/proposals"
 printf 'id: rule-x\nkind: rule\nstatus: open\nsessions: 3\ndays: 2\n\n## proposal\nAdd a rule.\n' >"$S_AH/proposals/rule-x.md"
 out=$(status)
-assert_contains "status: open proposals get a menu line" "$out" "menu=Proposals waiting: 1"
+assert_contains "status: open proposals get a menu line" "$out" "menu=Proposals waiting: 1 >"
+assert_contains "status: each proposal is a submenu" "$out" "menu=  rule-x >"
+assert_contains "status: approve opens for that id" "$out" "menu=    Approve… [approveProposal rule-x]"
+assert_contains "status: reject for that id" "$out" "menu=    Reject [rejectProposal rule-x]"
+assert_contains "status: snooze for that id" "$out" "menu=    Snooze 7 days [snoozeProposal rule-x]"
+assert_not_contains "status: approved proposals are not in the menu" "$out" "rule-y"
+# recaps: a live interactive session (this shell's pid) with an away_summary in its transcript; a dead one is left out
+mkdir -p "$S_CL/projects/-w"
+printf '{"pid":%s,"sessionId":"s-live","cwd":"/w","name":"Alpha","kind":"interactive"}' $$ >"$S_CL/sessions/1.json"
+printf '{"pid":999999,"sessionId":"s-dead","cwd":"/w","name":"Gone","kind":"interactive"}' >"$S_CL/sessions/2.json"
+printf '%s\n' '{"type":"system","subtype":"away_summary","content":"Old recap.","timestamp":"2026-10-17T10:00:00.000Z"}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}' \
+  '{"type":"system","subtype":"away_summary","content":"We fixed the queue. Next, merge it. (disable recaps in /config)","timestamp":"2026-10-17T15:29:15.319Z"}' \
+  >"$S_CL/projects/-w/s-live.jsonl"
+cp "$S_CL/projects/-w/s-live.jsonl" "$S_CL/projects/-w/s-dead.jsonl"
+out=$(status)
+assert_contains "status: recaps submenu counts live sessions" "$out" "menu=Recaps (1) >"
+assert_contains "status: the newest recap, without the /config hint" "$out" "We fixed the queue. Next, merge it."
+assert_contains "status: the recap names its session" "$out" "menu=  Alpha · "
+assert_not_contains "status: the hint is dropped" "$out" "disable recaps"
+assert_not_contains "status: an older recap is not shown" "$out" "Old recap."
+assert_not_contains "status: a dead session has no recap" "$out" "Gone"
+rm -f "$S_CL/sessions/"*.json
 ago "$S_AH/watch.heartbeat" 600
 assert_eq "status: heartbeat 10 min old is still running (two ticks)" "amber" "$(kv "$(status)" state)"
 ago "$S_AH/watch.heartbeat" 1800
