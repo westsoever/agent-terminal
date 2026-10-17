@@ -310,6 +310,39 @@ func (m model) queueRow(in, i int, a Agent) string {
 	return row(in, s(mark, cPlain), s(padTo(name, nameW), ns), s(" "+padTo(label, stateW), st), s(" "+fmt.Sprintf("%*s", ageW, age(a.Since)), cDark))
 }
 
+// chatLines is the conversation as panel rows, oldest first: the owner's prompts in white after "› ", the agent's
+// texts in grey, a blank row between messages. Only the last message when the tail has no conversation.
+func chatLines(l Last, in int) []string {
+	chat := l.Chat
+	if len(chat) == 0 {
+		text := l.Text
+		if text == "" {
+			text = "(no message yet)"
+		}
+		chat = []Turn{{Text: text}}
+	}
+	var out []string
+	for i, t := range chat {
+		if i > 0 {
+			out = append(out, row(in))
+		}
+		if t.User {
+			for j, ml := range collapse(wrap(plain(t.Text), in-2)) {
+				lead := "  "
+				if j == 0 {
+					lead = "› "
+				}
+				out = append(out, row(in, s(lead, cOrange), s(ml, cWhite)))
+			}
+			continue
+		}
+		for _, ml := range collapse(wrap(plain(t.Text), in)) {
+			out = append(out, row(in, s(ml, cGrey)))
+		}
+	}
+	return out
+}
+
 func padTo(t string, w int) string {
 	if width(t) > w {
 		return trunc(t, w)
@@ -399,16 +432,8 @@ func (m model) agentPanel(w, h int) []string {
 		tail = append(tail, row(in, s("> ", cOrange), s(m.cfg.Keys.Reply+" to write", cDark)))
 	}
 	avail := h - 2 - len(tail)
-	var msg []string
-	text := plain(l.Text)
-	if text == "" {
-		text = "(no message yet)"
-	}
-	for _, ml := range collapse(wrap(text, in)) {
-		msg = append(msg, ml)
-	}
 	var body []string
-	if l.Recap != "" { // the recap goes on top: at most a third of the space, the message keeps the rest
+	if l.Recap != "" { // the recap goes on top: at most a third of the space, the conversation keeps the rest
 		rl := wrap(l.Recap, in)
 		if most := max(1, avail/3-1); len(rl) > most {
 			rl = append(rl[:most-1:most-1], trunc(rl[most-1], in-1)+"…")
@@ -417,18 +442,35 @@ func (m model) agentPanel(w, h int) []string {
 		for _, r := range rl {
 			body = append(body, " "+row(in, s(r, cWhite))+" ")
 		}
-		body = append(body, "")
+		body = append(body, " "+row(in, s("─ session ", cDark), s(strings.Repeat("─", max(0, in-10)), cDark))+" ")
 		avail -= len(rl) + 2
 	}
 	if avail < 1 {
 		avail = 1
 	}
-	if len(msg) > avail { // the end of the message is where the question is
-		msg = msg[len(msg)-avail:]
-		msg[0] = "…"
+	msg := chatLines(l, in)
+	// bottom-anchored: off lines back from the newest; the scroll keys move off, this drawing sets its limits
+	most := max(0, len(msg)-avail)
+	off := 0
+	if c := m.scroll; c != nil {
+		if c.sid != a.SID {
+			*c = chatScroll{sid: a.SID}
+		}
+		c.max, c.page = most, avail
+		c.off = min(c.off, most)
+		off = c.off
+	}
+	end := len(msg) - off
+	start := max(0, end-avail)
+	msg = msg[start:end]
+	if start > 0 && len(msg) > 1 {
+		msg[0] = row(in, s(fmt.Sprintf("↑ %d earlier lines", start), cDark))
+	}
+	if off > 0 && len(msg) > 1 {
+		msg[len(msg)-1] = row(in, s(fmt.Sprintf("↓ %d newer lines", off), cOrange))
 	}
 	for _, ml := range msg {
-		body = append(body, " "+row(in, s(ml, cGrey))+" ")
+		body = append(body, " "+ml+" ")
 	}
 	for len(body) < h-2-len(tail) {
 		body = append(body, "")
@@ -688,6 +730,8 @@ func (m model) helpView(h int) []string {
 		"## Desk",
 		row2(k(K.Next)+" / "+k(K.Prev), "next / previous agent"),
 		row2(k(K.Waiting), "next agent that waits for you"),
+		row2(k(K.Older)+" / "+k(K.Newer), "scroll the agent's conversation 3 lines back / on (also when zoomed)"),
+		row2("pgup / pgdown", "a page back / on   ·   home: its start   ·   end: the newest"),
 		row2("1-9", "send that numbered answer"),
 		row2("enter, ←, →", "when the agent asks: confirm, previous / next part"),
 		row2(K.Reply, "write a message (keys below); esc keeps it as a draft"),
@@ -724,8 +768,13 @@ func (m model) helpView(h int) []string {
 func (m model) footer() []string {
 	K := m.cfg.Keys
 	key := func(k string) string {
-		if k == " " {
+		switch k {
+		case " ":
 			return "␣"
+		case "up":
+			return "↑"
+		case "down":
+			return "↓"
 		}
 		return k
 	}
@@ -748,6 +797,7 @@ func (m model) footer() []string {
 	default:
 		add(&r1, "1-9", "answer")
 		add(&r1, K.Next+" "+K.Prev, "next/prev")
+		add(&r1, key(K.Older)+key(K.Newer), "scroll")
 		add(&r1, key(K.Waiting), "next waiting")
 		add(&r1, K.Open+" a-i", "open file")
 		add(&r1, K.Goto, "go to window")

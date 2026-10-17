@@ -74,6 +74,14 @@ type model struct {
 	sync      []string
 	ed        *editor
 	prompts   map[string]Prompt // sid -> the menu its screen shows (selected waiting agents only)
+	scroll    *chatScroll       // shared by every copy of the model: View records the limits it drew
+}
+
+// chatScroll is how far the selected agent's conversation is scrolled back from its newest line. agentPanel
+// sets max and page when it draws; another agent (sid) starts at the newest line again.
+type chatScroll struct {
+	sid            string
+	off, max, page int
 }
 
 type cachedLast struct {
@@ -101,7 +109,7 @@ type execDone struct{ err error }
 
 func newModel() model {
 	cfg, ct, err := loadConfig()
-	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}}
+	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}}
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
 	}
@@ -242,6 +250,36 @@ func (m *model) last(a *Agent) Last {
 	l := readLast(a.Transcript, a.Cwd)
 	m.lastCache[a.Transcript] = cachedLast{st.Size(), st.ModTime(), l}
 	return l
+}
+
+// scrollChat scrolls the selected agent's conversation for the scroll keys; false for any other key.
+func (m *model) scrollChat(ks string) bool {
+	if m.scroll == nil {
+		return false
+	}
+	c := m.scroll
+	step := 0
+	switch ks {
+	case m.cfg.Keys.Older:
+		step = 3
+	case m.cfg.Keys.Newer:
+		step = -3
+	case "pgup":
+		step = max(1, c.page-1)
+	case "pgdown":
+		step = -max(1, c.page-1)
+	case "home":
+		step = c.max
+	case "end":
+		step = -c.off
+	default:
+		return false
+	}
+	if a := m.sel(); a == nil || a.SID != c.sid {
+		return true // nothing drawn for this agent yet
+	}
+	c.off = min(max(0, c.off+step), c.max)
+	return true
 }
 
 func (m *model) move(d int) {
@@ -531,6 +569,7 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	switch {
+	case (m.view == vDesk || m.zoom) && m.scrollChat(ks):
 	case ks == K.Next || ks == "down":
 		m.move(1)
 	case ks == K.Prev || ks == "up":

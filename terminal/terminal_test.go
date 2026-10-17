@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -190,3 +191,90 @@ func TestQueueSections(t *testing.T) {
 		t.Errorf("an ask from an earlier turn is shown:\n%s", out)
 	}
 }
+
+// The conversation keeps the owner's prompts and the agent's texts in order; tool calls, tool results, meta
+// entries and tagged machinery (slash-command records, reminders) are left out.
+func TestReadLastChat(t *testing.T) {
+	l := readLast(writeTranscript(t,
+		`{"type":"user","message":{"content":"first prompt"}}`,
+		`{"type":"user","isMeta":true,"message":{"content":"Caveat: meta"}}`,
+		`{"type":"user","message":{"content":"<command-name>/rename</command-name>"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Looking."},{"type":"tool_use","id":"t1","name":"Bash","input":{}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"out"}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Done."}]}}`,
+		`{"type":"user","message":{"content":[{"type":"text","text":"second prompt"},{"type":"image"}]}}`,
+	), "/")
+	var got []string
+	for _, c := range l.Chat {
+		who := "agent"
+		if c.User {
+			who = "you"
+		}
+		got = append(got, who+":"+c.Text)
+	}
+	if want := "you:first prompt|agent:Looking.|agent:Done.|you:second prompt"; strings.Join(got, "|") != want {
+		t.Fatalf("chat: got %q want %q", strings.Join(got, "|"), want)
+	}
+}
+
+// The panel shows the newest part of the conversation; the scroll keys go back and forth, the panel says how
+// much is above and below, and another agent starts at its newest line. A recap gets a divider under it.
+func TestChatScroll(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	cfg, _, _ := loadConfig()
+	var lines []string
+	for i := 1; i <= 40; i++ {
+		lines = append(lines, `{"type":"user","message":{"content":"prompt `+itoa(i)+`"}}`,
+			`{"type":"assistant","message":{"content":[{"type":"text","text":"answer `+itoa(i)+`"}]}}`)
+	}
+	lines = append(lines, `{"type":"system","subtype":"away_summary","content":"the recap","timestamp":"2026-10-17T10:00:00Z"}`)
+	tr := writeTranscript(t, lines...)
+	m := model{cfg: cfg, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(),
+		prompts: map[string]Prompt{}, scroll: &chatScroll{}, w: 140, h: 40}
+	m.agents = []Agent{{SID: "a", Name: "one", Cwd: "/tmp", State: "done", Transcript: tr},
+		{SID: "b", Name: "two", Cwd: "/tmp", State: "done", Transcript: tr}}
+	m.selSID = "a"
+	screen := func() string {
+		out := ansiRe.ReplaceAllString(m.View(), "")
+		for i, l := range strings.Split(out, "\n") {
+			if w := runewidth.StringWidth(l); w != m.w && strings.ContainsAny(l, "│") {
+				t.Fatalf("line %d is %d wide: %q", i, w, l)
+			}
+		}
+		return out
+	}
+	out := screen()
+	if !strings.Contains(out, "answer 40") || strings.Contains(out, "answer 1 ") || !strings.Contains(out, "earlier lines") {
+		t.Fatalf("not at the newest line:\n%s", out)
+	}
+	if r, d := strings.Index(out, "the recap"), strings.Index(out, "─ session ─"); r < 0 || d < r {
+		t.Fatalf("no divider under the recap:\n%s", out)
+	}
+	m.scrollChat("up")
+	if out = screen(); !strings.Contains(out, "↓ 3 newer lines") {
+		t.Fatalf("up did not scroll back:\n%s", out)
+	}
+	m.scrollChat("home")
+	if out = screen(); !regexp.MustCompile(`› prompt 1\s`).MatchString(out) {
+		t.Fatalf("home did not reach the start:\n%s", out)
+	}
+	if strings.Contains(out, "earlier lines") {
+		t.Fatalf("at the start but says there is more above:\n%s", out)
+	}
+	m.scrollChat("down")
+	m.scrollChat("end")
+	if out = screen(); strings.Contains(out, "newer lines") || !strings.Contains(out, "answer 40") {
+		t.Fatalf("end did not come back to the newest line:\n%s", out)
+	}
+	m.scrollChat("home")
+	screen()
+	m.selSID = "b"
+	if out = screen(); !strings.Contains(out, "answer 40") || strings.Contains(out, "newer lines") {
+		t.Fatalf("another agent did not start at its newest line:\n%s", out)
+	}
+	if m.scrollChat("x") {
+		t.Fatal("x is no scroll key")
+	}
+}
+
+func itoa(i int) string { return strconv.Itoa(i) }

@@ -30,6 +30,8 @@ type Keys struct {
 	Zoom    string `toml:"zoom"`
 	Dismiss string `toml:"dismiss"`
 	Refresh string `toml:"refresh"`
+	Older   string `toml:"scroll_up"`
+	Newer   string `toml:"scroll_down"`
 }
 
 type Config struct {
@@ -58,6 +60,8 @@ wall = "W"            # every agent as tiles
 zoom = "z"            # in the wall: one tile full screen
 dismiss = "x"         # take a waiting agent out of the queue without answering
 refresh = "R"         # re-read everything now
+scroll_up = "up"      # the agent's conversation: 3 lines back (pgup a page, home the start)
+scroll_down = "down"  # 3 lines on (pgdown a page, end the newest)
 
 # Pre-written replies. key is one key, or "space " + a key (press space, then the key).
 # text is typed into the selected agent's session exactly as written, then Enter.
@@ -143,6 +147,8 @@ func loadConfig() (Config, time.Time, error) {
 	fill(&c.Keys.Command, def.Keys.Command)
 	fill(&c.Keys.Wall, def.Keys.Wall)
 	fill(&c.Keys.Zoom, def.Keys.Zoom)
+	fill(&c.Keys.Older, def.Keys.Older)
+	fill(&c.Keys.Newer, def.Keys.Newer)
 	fill(&c.Keys.Dismiss, def.Keys.Dismiss)
 	fill(&c.Keys.Refresh, def.Keys.Refresh)
 	for i := range c.Replies {
