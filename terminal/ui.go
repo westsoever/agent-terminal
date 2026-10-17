@@ -79,11 +79,12 @@ type model struct {
 	props      []string
 	sync       []string
 	ed         *editor
-	prompts    map[string]Prompt  // sid -> the menu its screen shows (selected waiting agents only)
-	scroll     *chatScroll        // shared by every copy of the model: View records the limits it drew
-	usage      Usage              // the Claude usage limits, read on every tick
-	files      *fileHistory       // the FL view: the last files the agents mentioned
-	asked      map[string]askSeen // sid -> when its menu first showed: a busy agent's wait starts there
+	prompts    map[string]Prompt   // sid -> the menu its screen shows (selected waiting agents only)
+	scroll     *chatScroll         // shared by every copy of the model: View records the limits it drew
+	usage      Usage               // the Claude usage limits, read on every tick
+	askProg    map[string]*askProg // sid -> where a background agent's menu is (see ask.go)
+	files      *fileHistory        // the FL view: the last files the agents mentioned
+	asked      map[string]askSeen  // sid -> when its menu first showed: a busy agent's wait starts there
 	ticks      int
 }
 
@@ -129,7 +130,7 @@ type execDone struct{ err error }
 
 func newModel() model {
 	cfg, ct, err := loadConfig()
-	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}}
+	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, askProg: map[string]*askProg{}}
 	m.ed.drafts = loadDrafts()
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
@@ -355,8 +356,9 @@ func (m *model) promptKey(ks string) (bool, tea.Cmd) {
 	case "enter", "left", "right", "tab", "shift+tab":
 		k := ks
 		if k == "shift+tab" {
-			return true, m.deliver("", []string{"left"})
+			k = "left"
 		}
+		m.pressMenu(a, k)
 		return true, m.deliver("", []string{k})
 	}
 	return false, nil
@@ -381,6 +383,11 @@ func (m *model) nextWaiting() {
 
 // deliver sends text (or keys) to the selected agent in the background.
 func (m *model) deliver(what string, keys []string) tea.Cmd {
+	return m.deliverAs("", what, keys)
+}
+
+// deliverAs is deliver with a name for the status line and the window rule ("" names it after what is sent).
+func (m *model) deliverAs(label, what string, keys []string) tea.Cmd {
 	a := m.sel()
 	if a == nil {
 		m.setErr("no agent selected")
@@ -391,9 +398,11 @@ func (m *model) deliver(what string, keys []string) tea.Cmd {
 		return nil
 	}
 	sid, name, tty, bg, job := a.SID, a.Name, a.TTY, a.Bg, a.Job
-	label := what
-	if keys != nil {
-		label = "key " + strings.Join(keys, " ")
+	if label == "" {
+		label = what
+		if keys != nil {
+			label = "key " + strings.Join(keys, " ")
+		}
 	}
 	m.setStatus("sending to " + name + "…")
 	return func() tea.Msg {
@@ -419,6 +428,7 @@ func (m *model) answer(n int) tea.Cmd {
 			m.setErr(fmt.Sprintf("%s has no option %d", a.Name, n))
 			return nil
 		}
+		m.pressMenu(a, strconv.Itoa(n))
 		return m.deliver("", []string{strconv.Itoa(n)})
 	}
 	l := m.last(a)
@@ -519,6 +529,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.expect[msg.sid] = time.Now()
 		} else {
 			m.setErr(msg.name + ": " + msg.res)
+			delete(m.askProg, msg.sid) // a failed key: the menu may be elsewhere, start from the first question
 		}
 		delete(m.prompts, msg.sid)
 		delete(m.asked, msg.sid) // answered: a menu after this is a new wait
@@ -709,6 +720,8 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.setErr("no Terminal window for this agent")
+	case ks == K.Quick && (m.view == vDesk || m.view == vWall):
+		return m, m.quickApprove()
 	case ks == K.Dismiss && (m.view == vDesk || m.view == vWall):
 		a := m.sel()
 		if a == nil || a.Group() != 0 {
@@ -768,6 +781,11 @@ func (m *model) screenWanted(a Agent) bool {
 
 // A busy agent that shows a menu has waited since the menu first showed, not since its turn began.
 func (m *model) applyPrompts() {
+	for i := range m.agents {
+		if a := &m.agents[i]; a.Bg {
+			m.bgPrompt(a)
+		}
+	}
 	for i := range m.agents {
 		a := &m.agents[i]
 		_, a.Asking = m.prompts[a.SID]
@@ -884,6 +902,14 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if p, ok := m.prompts[target]; ok && p.TypeOpt > 0 && !strings.Contains(text, "\n") {
 			// the agent shows a menu: the reply is its "Type something." answer
 			a := m.sel()
+			if a != nil && a.Bg {
+				sid, name, job, n := a.SID, a.Name, a.Job, p.TypeOpt
+				m.pressMenu(a, "right") // a written answer moves on to the next question
+				m.setStatus("answering " + name + "…")
+				return m, func() tea.Msg {
+					return sentMsg{sid, name, "answer", bgSteps(job, bgKey(strconv.Itoa(n)), bgPause(), bgText(text), bgKey("enter"))}
+				}
+			}
 			if a != nil && a.InTerminal {
 				sid, name, tty, n := a.SID, a.Name, a.TTY, p.TypeOpt
 				m.setStatus("answering " + name + "…")

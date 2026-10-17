@@ -39,8 +39,34 @@ var bgKeys = map[string]string{
 	"enter": "\r", "left": "\x1b[D", "right": "\x1b[C", "up": "\x1b[A", "down": "\x1b[B", "tab": "\t", "esc": "\x1b",
 }
 
+// bgStep is one thing a person does in the attached session: press a key, paste text, wait a moment.
+type bgStep struct {
+	key, text string
+	pause     bool
+}
+
+func bgKey(k string) bgStep  { return bgStep{key: k} }
+func bgText(t string) bgStep { return bgStep{text: t} }
+func bgPause() bgStep        { return bgStep{pause: true} }
+
 // bgSend types text (as one paste, then Enter) or keys into the background session job. "ok" or "error: ...".
 func bgSend(job, text string, keys []string) string {
+	if keys == nil {
+		return bgSteps(job, bgText(text), bgKey("enter"))
+	}
+	var steps []bgStep
+	for _, k := range keys {
+		if k == askKeysPause {
+			steps = append(steps, bgPause())
+			continue
+		}
+		steps = append(steps, bgKey(k))
+	}
+	return bgSteps(job, steps...)
+}
+
+// bgSteps attaches to the background session job in a pty of its own, does the steps and closes the attach again.
+func bgSteps(job string, steps ...bgStep) string {
 	cmd := exec.Command(claudeBin(), "attach", job)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 50, Cols: 160})
@@ -94,19 +120,21 @@ func bgSend(job, text string, keys []string) string {
 			break
 		}
 	}
-	if keys != nil {
-		for _, k := range keys {
-			b, ok := bgKeys[k]
+	for _, st := range steps {
+		switch {
+		case st.pause:
+			time.Sleep(350 * time.Millisecond)
+		case st.text != "":
+			_, _ = f.Write([]byte("\x1b[200~" + st.text + "\x1b[201~"))
+			time.Sleep(300 * time.Millisecond)
+		default:
+			b, ok := bgKeys[st.key]
 			if !ok {
-				b = k // a digit or a letter
+				b = st.key // a digit or a letter
 			}
 			_, _ = f.Write([]byte(b))
 			time.Sleep(150 * time.Millisecond)
 		}
-	} else {
-		_, _ = f.Write([]byte("\x1b[200~" + text + "\x1b[201~"))
-		time.Sleep(300 * time.Millisecond)
-		_, _ = f.Write([]byte("\r"))
 	}
 	time.Sleep(800 * time.Millisecond)
 	stop()

@@ -33,6 +33,7 @@ type Keys struct {
 	Refresh string `toml:"refresh"`
 	Older   string `toml:"scroll_up"`
 	Newer   string `toml:"scroll_down"`
+	Quick   string `toml:"quick_approve"`
 }
 
 type Config struct {
@@ -66,6 +67,7 @@ wall = "W"            # every agent as tiles
 zoom = "z"            # in the wall: one tile full screen
 dismiss = "x"         # take a waiting agent out of the queue without answering
 refresh = "R"         # re-read everything now
+quick_approve = "a"   # an agent that asks questions: take every recommended answer and submit
 scroll_up = "up"      # the agent's conversation: 3 lines back (pgup a page, home the start)
 scroll_down = "down"  # 3 lines on (pgdown a page, end the newest)
 
@@ -160,6 +162,7 @@ func loadConfig() (Config, time.Time, error) {
 	fill(&c.Keys.Newer, def.Keys.Newer)
 	fill(&c.Keys.Dismiss, def.Keys.Dismiss)
 	fill(&c.Keys.Refresh, def.Keys.Refresh)
+	fill(&c.Keys.Quick, def.Keys.Quick)
 	for i := range c.Replies {
 		c.Replies[i].Key = strings.TrimSpace(c.Replies[i].Key)
 		if c.Replies[i].Label == "" {

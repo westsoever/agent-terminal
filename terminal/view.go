@@ -436,6 +436,7 @@ func (m model) agentPanel(w, h int) []string {
 			hint += " · " + m.cfg.Keys.Reply + " writes your own answer"
 		}
 		tail = append(tail, row(in, s(hint, cDark)))
+		tail = append(tail, askSummary(l.Ask, in, m.cfg.Keys.Quick)...)
 	} else if len(l.Options) > 0 {
 		tail = append(tail, "")
 		if l.Question != "" {
@@ -969,6 +970,7 @@ func (m model) helpView(h int) []string {
 		row2(k(K.Older)+" / "+k(K.Newer), "scroll the agent's conversation 3 lines back / on (also when zoomed, and while writing on the draft's first / last line)"),
 		row2("pgup / pgdown", "a page back / on   ·   home: its start   ·   end: the newest"),
 		row2("1-9", "send that numbered answer"),
+		row2(K.Quick, "an agent asks questions: take the recommended answer (★, the one the agent marks) of every question and submit; it refuses when a question has none"),
 		row2("enter, ←, →", "when the agent asks: confirm, previous / next part"),
 		row2(K.Reply, "write a message (keys below); esc keeps it as a draft; sending it sends a window on monitor 1 back"),
 		row2(K.Open+" then a-i", "open that file"),
@@ -1044,6 +1046,9 @@ func (m model) footer() []string {
 		add(&r1, K.Command, "command")
 	default:
 		add(&r1, "1-9", "answer")
+		if a := m.sel(); a != nil && len(m.last(a).Ask) > 0 {
+			add(&r1, K.Quick, "quick approve")
+		}
 		add(&r1, K.Next+" "+K.Prev, "next/prev")
 		add(&r1, key(K.Older)+key(K.Newer), "scroll")
 		add(&r1, key(K.Waiting), "longest input")
