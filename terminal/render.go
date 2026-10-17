@@ -10,8 +10,8 @@ import (
 // The terminal.shop palette (owner's choice): near-black, mostly grey, white for what's selected, one orange.
 var (
 	cWhite  = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Bold(true)
-	cGrey   = lipgloss.NewStyle().Foreground(lipgloss.Color("102"))
-	cDark   = lipgloss.NewStyle().Foreground(lipgloss.Color("59"))
+	cGrey   = lipgloss.NewStyle().Foreground(lipgloss.Color("248"))
+	cDark   = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 	cOrange = lipgloss.NewStyle().Foreground(lipgloss.Color("202"))
 	cSel    = lipgloss.NewStyle().Background(lipgloss.Color("202")).Foreground(lipgloss.Color("16")).Bold(true)
 	cPlain  = lipgloss.NewStyle()
