@@ -20,15 +20,28 @@ type Last struct {
 	Files    []string  // paths the last message mentions that exist, absolute
 	Recap    string    // Claude Code's latest recap (the "while you were away" summary), '' when none
 	RecapAt  time.Time // when Claude Code wrote it
+	Chat     []Turn    // the conversation in the transcript tail, oldest first, at most maxTurns
 }
 
-const tailBytes = 512 << 10
+// Turn is one message of the conversation: the owner's prompt (User) or a text the agent wrote.
+type Turn struct {
+	User bool
+	Text string
+}
+
+const maxTurns = 300
+
+// tailBytes is how much of the transcript's end is read: enough for some prompts of conversation to scroll
+// back through (tool output fills most of it). 4 MB of the largest transcript reads in about 12 ms, only when
+// the file changed.
+const tailBytes = 4 << 20
 
 type entry struct {
 	Type      string          `json:"type"`
 	Subtype   string          `json:"subtype"`
 	Content   json.RawMessage `json:"content"` // system entries: plain text
 	Timestamp time.Time       `json:"timestamp"`
+	IsMeta    bool            `json:"isMeta"`
 	Message   struct {
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
@@ -72,6 +85,7 @@ func readLast(path, cwd string) Last {
 		}
 	}
 	var lastText string
+	var chat []Turn
 	var openAsk *askInput
 	openID := ""
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
@@ -95,12 +109,23 @@ func readLast(path, cwd string) Last {
 		}
 		var blocks []block
 		if json.Unmarshal(e.Message.Content, &blocks) != nil {
-			continue // a plain-string user prompt
+			var p string // a plain-string user prompt
+			if e.Type == "user" && !e.IsMeta && json.Unmarshal(e.Message.Content, &p) == nil {
+				if t := promptText(p); t != "" {
+					chat = append(chat, Turn{User: true, Text: t})
+				}
+			}
+			continue
 		}
 		for _, b := range blocks {
 			switch {
 			case e.Type == "assistant" && b.Type == "text" && strings.TrimSpace(b.Text) != "":
 				lastText = b.Text
+				chat = append(chat, Turn{Text: strings.TrimSpace(b.Text)})
+			case e.Type == "user" && !e.IsMeta && b.Type == "text":
+				if t := promptText(b.Text); t != "" {
+					chat = append(chat, Turn{User: true, Text: t})
+				}
 			case e.Type == "assistant" && b.Type == "tool_use" && b.Name == "AskUserQuestion":
 				var in askInput
 				if json.Unmarshal(b.Input, &in) == nil {
@@ -112,6 +137,10 @@ func readLast(path, cwd string) Last {
 		}
 	}
 	l.Text = strings.TrimSpace(lastText)
+	if len(chat) > maxTurns {
+		chat = chat[len(chat)-maxTurns:]
+	}
+	l.Chat = chat
 	if openAsk != nil && len(openAsk.Questions) > 0 {
 		q := openAsk.Questions[0]
 		l.Question = q.Question
@@ -124,6 +153,16 @@ func readLast(path, cwd string) Last {
 	}
 	l.Files = mentionedFiles(l.Text, cwd)
 	return l
+}
+
+// promptText is what the owner typed, ” for user entries that are machinery: slash-command records, command
+// output, system reminders and task notifications all start with a tag, and Claude Code's "Caveat:" note.
+func promptText(t string) string {
+	t = strings.TrimSpace(t)
+	if strings.HasPrefix(t, "<") || strings.HasPrefix(t, "Caveat:") {
+		return ""
+	}
+	return t
 }
 
 // recapText drops Claude Code's "(disable recaps in /config)" hint from the end of a recap.
