@@ -158,8 +158,79 @@ func TestViewGeometry(t *testing.T) {
 	}
 }
 
-// The queue lists INPUT (asked the owner, or blocked) above WAITING (done), then WORKING and IDLE; an INPUT row
-// shows what it asks under it.
+// A session that changed folder (EnterWorktree, cd) keeps its meta transcript path from its start, but Claude
+// Code writes under the new folder's project dir: the stale path must not hide the chat.
+func TestFindTranscriptAfterFolderChange(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	write := func(dir string) string {
+		p := filepath.Join(home, ".claude", "projects", dir, "sid1.jsonl")
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte("{}\n"), 0o644)
+		return p
+	}
+	stale := filepath.Join(home, ".claude", "projects", "-Users-me", "sid1.jsonl")
+	moved := write("-Users-me-repo--claude-worktrees-wt")
+	if got := findTranscript(stale, "/Users/me/repo/.claude/worktrees/wt", "sid1"); got != moved {
+		t.Errorf("cwd's project dir: got %q want %q", got, moved)
+	}
+	if got := findTranscript(stale, "/somewhere/else", "sid1"); got != moved {
+		t.Errorf("any project dir: got %q want %q", got, moved)
+	}
+	if got := findTranscript(moved, "/x", "sid1"); got != moved {
+		t.Errorf("a valid recorded path is kept: got %q", got)
+	}
+	if got := findTranscript(stale, "/x", "none"); got != stale {
+		t.Errorf("nothing found keeps the recorded path: got %q", got)
+	}
+}
+
+// A finished turn is DONE only when nothing is left: no next action, no blocker, no NEXT.md. The checkpoint is
+// read from the repo's .agent (with a GOAL.md) or the session's own folder, and "none" counts as empty.
+func TestNothingLeft(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENT_HOME", home)
+	state := func(dir, next, blocker string) {
+		os.MkdirAll(dir, 0o755)
+		os.WriteFile(filepath.Join(dir, "STATE.md"), []byte("# s\n<!-- ching:checkpoint -->\nresult: ok\nblocker: "+blocker+"\nnext_action: "+next+"\n<!-- /ching:checkpoint -->\nnext_action: outside the block\n"), 0o644)
+	}
+	sess := filepath.Join(home, "sessions", "s1")
+	state(sess, "none", "(none)")
+	if !nothingLeft("", "s1") {
+		t.Error("none/(none) is empty, the line outside the block is not the checkpoint")
+	}
+	state(sess, "Merge the PR", "none")
+	if nothingLeft("", "s1") {
+		t.Error("a next action is left")
+	}
+	state(sess, "none", "waiting on the owner's key")
+	if nothingLeft("", "s1") {
+		t.Error("a blocker is left")
+	}
+	state(sess, "none", "none")
+	os.WriteFile(filepath.Join(sess, "NEXT.md"), []byte(" \n"), 0o644)
+	if !nothingLeft("", "s1") {
+		t.Error("a blank NEXT.md is nothing")
+	}
+	os.WriteFile(filepath.Join(sess, "NEXT.md"), []byte("- ship it\n"), 0o644)
+	if nothingLeft("", "s1") {
+		t.Error("NEXT.md has an item")
+	}
+	// a repo with a GOAL.md keeps its state in <root>/.agent, and the session folder is ignored
+	root := t.TempDir()
+	state(filepath.Join(root, ".agent"), "none", "none")
+	os.WriteFile(filepath.Join(root, ".agent", "GOAL.md"), []byte("# goal\n"), 0o644)
+	if !nothingLeft(root, "s1") {
+		t.Error("the repo's .agent says nothing is left")
+	}
+	state(filepath.Join(root, ".agent"), "Fix the build", "none")
+	if nothingLeft(root, "s1") {
+		t.Error("the repo's next action is left")
+	}
+}
+
+// The queue lists INPUT (asked the owner, or blocked) above WAITING (done, something open), then WORKING, IDLE
+// and DONE (done, nothing left); an INPUT row shows what it asks under it.
 func TestQueueSections(t *testing.T) {
 	t.Setenv("AGENT_HOME", t.TempDir())
 	cfg, _, _ := loadConfig()
@@ -172,19 +243,20 @@ func TestQueueSections(t *testing.T) {
 		{SID: "z", Name: "fresh", State: "idle", Since: now},
 		{SID: "b", Name: "stuck", State: "blocked", Since: now.Add(-2 * time.Hour)},
 		{SID: "m", Name: "menu", State: "working", Busy: true, Asking: true, Ask: "stale", Since: now.Add(-30 * time.Minute)},
+		{SID: "c", Name: "closed", State: "done", Closed: true, Since: now.Add(-5 * time.Hour)},
 	}
 	sortAgents(m.agents)
 	var order []string
 	for _, a := range m.agents {
 		order = append(order, a.Name)
 	}
-	if got, want := strings.Join(order, " "), "stuck menu asks old-done busy fresh"; got != want {
+	if got, want := strings.Join(order, " "), "stuck menu asks old-done busy fresh closed"; got != want {
 		t.Errorf("order: got %q want %q", got, want)
 	}
 	m.selSID = "z"
 	out := ansiRe.ReplaceAllString(strings.Join(m.queuePanel(60, 30), "\n"), "")
 	last := -1
-	for _, h := range []string{" INPUT", "stuck", "menu", "asks", "↳ Want me to merge?", " WAITING", "old-done", " WORKING", "busy", " IDLE", "fresh"} {
+	for _, h := range []string{" INPUT", "stuck", "menu", "asks", "↳ Want me to merge?", " WAITING", "old-done", " WORKING", "busy", " IDLE", "fresh", " DONE", "closed"} {
 		at := strings.Index(out, h)
 		if at < 0 || at < last {
 			t.Fatalf("%q missing or out of order in:\n%s", h, out)
@@ -194,6 +266,29 @@ func TestQueueSections(t *testing.T) {
 	if strings.Contains(out, "stale") {
 		t.Errorf("an ask from an earlier turn is shown:\n%s", out)
 	}
+}
+
+// Every section keeps its header when it is empty, so an empty INPUT shows that nothing needs the owner.
+func TestQueueKeepsEmptySections(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	cfg, _, _ := loadConfig()
+	m := model{cfg: cfg, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}}
+	headers := []string{" INPUT", " WAITING", " WORKING", " IDLE", " DONE"}
+	check := func(label string) {
+		out := ansiRe.ReplaceAllString(strings.Join(m.queuePanel(60, 30), "\n"), "")
+		last := -1
+		for _, h := range headers {
+			at := strings.Index(out, h)
+			if at < 0 || at < last {
+				t.Fatalf("%s: %q missing or out of order in:\n%s", label, h, out)
+			}
+			last = at
+		}
+	}
+	check("no agents")
+	m.agents = []Agent{{SID: "z", Name: "fresh", State: "idle", Since: time.Now()}}
+	m.selSID = "z"
+	check("only an idle agent")
 }
 
 // The conversation keeps the owner's prompts (a slash command as "/name args") and the agent's texts in order;

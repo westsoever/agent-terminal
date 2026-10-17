@@ -208,13 +208,15 @@ The usage comes from the statusline: `~/.claude/statusline-command.sh` writes th
 
 ### 4.2 The agent list
 
-The agent list has three groups:
+The agent list has five groups. All five headers are always on the screen, also when a group has no agent. An empty `INPUT` shows that no agent needs you.
 
 | Group | Agents in the group |
 |---|---|
-| `WAITING` | The agent stopped and waits for you: its screen shows a question or an approval (`asks`), it has a question (`input`), it cannot continue (`blocked`), it finished (`done`), or it is ready for release (`ready`). The agent that waited the longest time is at the top. |
+| `INPUT` | The agent stopped and needs you: its screen shows a question or an approval (`asks`), it has a question (`input`), or it cannot continue (`blocked`). The agent that waited the longest time is at the top. |
+| `WAITING` | The agent finished its turn (`done`), or it is ready for release (`ready`), but something is still open: its checkpoint has a next action or a blocker, or its `NEXT.md` has text. The agent that waited the longest time is at the top. |
 | `WORKING` | The agent does work now. |
 | `IDLE` | The agent does not do work and does not wait for an answer. |
+| `DONE` | The agent finished its task and nothing is left: its checkpoint has no next action and no blocker, and its `NEXT.md` is empty or missing. The agent that finished last is at the top. |
 
 Each line shows the name of the agent, its state and the time since the last change. The selected agent has an orange line.
 

@@ -2,6 +2,22 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D48 (2026-10-18): the terminal finds a transcript that moved with its session
+
+**Decision (user):** "I don't see any messages of the background agent ... Maybe fix that first to actually have the text of the chat from this background agent show up here as well."
+
+**Why:** meta `transcript=` is written when the session starts. A session that changes folder (EnterWorktree, cd) gets its transcript under the new folder's project dir, so the recorded file was gone and the right panel showed an empty chat. Every background session that works in a worktree was affected.
+
+**Built:** `findTranscript` keeps the recorded path while the file exists, else tries the current cwd's project dir, else any `~/.claude/projects/*/<sid>.jsonl`. The bash hooks still record the start path; only the terminal resolves it.
+
+## D47 (2026-10-18): kaching lists finished agents with nothing left under DONE (amends D41)
+
+**Decision (user):** "There should be another section for the agents on the left, that is DONE - it puts a session there when it has finished its task and is just completed and there's nothing left to wait for."
+
+**Built:** the queue has five sections: INPUT, WAITING, WORKING, IDLE, DONE. A session whose turn ended as `done` is DONE when its checkpoint (`STATE.md`, in the repo's `.agent` with a GOAL.md, else the session folder) has no `next_action` and no `blocker` (empty, `none`, `(none)` and `none.` count as empty) and its `NEXT.md` is empty or missing. That is the test `kaching-watch.sh` already uses to leave a finished session alone. A finished session with something open stays in WAITING. DONE is last and newest first, so what the owner can ignore stays out of the way; a family sits in its most urgent member's section. `Group()` is unchanged, so DONE agents still count as waiting in the tab badge and `x` can dismiss them.
+
+**Also (user):** "even when empty, keep the INPUT and other sections there - just empty but so that I can more easily see if there's nothing that needs input." All five headers are always drawn; the "no live agents" line in the queue is gone (the right panel keeps its own).
+
 ## D46 (2026-10-18): RP becomes a repo list you can open and browse
 
 **Decision (user):** "For the RP, the repositories or repos here, I would love to also be able to cycle through them or switch through them. When I hit Enter, I want the local folder to open. If there's no local folder, then there should be a question saying, 'No local folder. Do you want to open it in GitHub?' Then, with a confirmation, I can confirm it again. Also, find another way, maybe Shift+Enter, where I can directly open the repository on the website. When I click K on it, it shouldn't open the repository locally, but it should open it in the side panel and just show the folder structure of it. Then I can cycle through the folder structure, so I can actually go through the folders. Meaning, just naturally navigating with K, I open the folder. For example (and on a file, opens the file)"

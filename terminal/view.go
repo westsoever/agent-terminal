@@ -244,30 +244,28 @@ func (m model) desk(h int) []string {
 func (m model) queuePanel(w, h int) []string {
 	in := w - 2
 	var body []string
-	// INPUT and WAITING are both Group 0 (waiting): INPUT asks the owner something (needsYou), WAITING is done.
+	// INPUT, WAITING and DONE are all Group 0 (waiting): INPUT asks the owner something (needsYou), WAITING
+	// finished its turn with something still open, DONE finished with nothing left.
 	groups := []struct {
 		name string
 		in   func(Agent) bool
 	}{
 		{"INPUT", func(a Agent) bool { return a.needsYou() }},
-		{"WAITING", func(a Agent) bool { return a.Group() == 0 && !a.needsYou() }},
+		{"WAITING", func(a Agent) bool { return sectionOf(a) == 1 }},
 		{"WORKING", func(a Agent) bool { return a.Group() == 1 }},
 		{"IDLE", func(a Agent) bool { return a.Group() == 2 }},
+		{"DONE", func(a Agent) bool { return sectionOf(a) == 4 }},
 	}
 	si := 0
 	for gi, g := range groups {
-		name := g.name
-		first := true
+		// every section keeps its header, also when empty: an empty INPUT shows at a glance that nothing needs the owner
+		if gi > 0 {
+			body = append(body, "")
+		}
+		body = append(body, row(in, s(" "+g.name, cDark)))
 		for i, a := range m.agents {
 			if familySection(m.agents, i) != gi {
 				continue
-			}
-			if first {
-				if len(body) > 0 {
-					body = append(body, "")
-				}
-				body = append(body, row(in, s(" "+name, cDark)))
-				first = false
 			}
 			if a.SID == m.selSID {
 				si = len(body)
@@ -278,20 +276,19 @@ func (m model) queuePanel(w, h int) []string {
 			}
 		}
 	}
-	if len(m.agents) == 0 {
-		body = append(body, row(in, s(" no live agents", cDark)))
-	}
 	if vis := h - 2; len(body) > vis && si >= vis { // keep the selected row visible
 		body = body[si-vis+1:]
 	}
 	return box(w, h, []seg{s("AGENTS", cGrey)}, cDark, body)
 }
 
-// sectionOf: the queue section an agent belongs to by itself: 0 INPUT, 1 WAITING, 2 WORKING, 3 IDLE.
+// sectionOf: the queue section an agent belongs to by itself: 0 INPUT, 1 WAITING, 2 WORKING, 3 IDLE, 4 DONE.
 func sectionOf(a Agent) int {
 	switch {
 	case a.needsYou():
 		return 0
+	case a.Closed && a.Group() == 0:
+		return 4
 	case a.Group() == 0:
 		return 1
 	case a.Group() == 1:
