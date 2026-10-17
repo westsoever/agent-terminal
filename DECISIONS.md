@@ -2,6 +2,14 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D39 (2026-10-17): kaching splits waiting agents into INPUT and WAITING, and shows what each one asks
+
+**Decision (user):** waiting, working and idle are sorted right, but inside waiting the owner can't tell who needs an answer from who just finished. The queue now has four sections: INPUT (asked you something, or blocked), WAITING (done), WORKING, IDLE. Each INPUT agent shows what it asks on a line under its name.
+
+**Why:** a turn counted as "needs input" only when its last line ended in "?". Agents that asked in an earlier line, or asked without a question mark ("tell me and I'll check", "I left the live check to you", "let me know if you want X"), showed as done and sat among the finished reports.
+
+**Built:** `bin/ask-check.sh` reads the last 6 lines of the turn, leaving out code blocks and headings. A real question there (not a "?" inside code or a link), or a request for the owner to do or decide something, makes the turn input. The matching sentence is the ask. `stop-check.sh` uses it for the state, the notification text and the new meta `ask=`. A heuristic, so some misses remain; a Haiku pass was left out because it would use the learner's daily token cap on every stop. Agents whose screen shows a menu (the `Asking` flag, being built in kaching-prompt) belong in INPUT too.
+
 ## D38 (2026-10-17): Windows move on their own only when kaching is closed, and you can drag them (closes D37's open part)
 
 **Decisions (user):**

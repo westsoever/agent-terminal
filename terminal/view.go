@@ -195,12 +195,22 @@ func (m model) desk(h int) []string {
 func (m model) queuePanel(w, h int) []string {
 	in := w - 2
 	var body []string
-	groups := []string{"WAITING", "WORKING", "IDLE"}
+	// INPUT and WAITING are both Group 0 (waiting): INPUT asked the owner something, WAITING is done.
+	groups := []struct {
+		name string
+		in   func(Agent) bool
+	}{
+		{"INPUT", func(a Agent) bool { return a.needsYou() }},
+		{"WAITING", func(a Agent) bool { return a.Group() == 0 && !a.needsYou() }},
+		{"WORKING", func(a Agent) bool { return a.Group() == 1 }},
+		{"IDLE", func(a Agent) bool { return a.Group() == 2 }},
+	}
 	si := 0
-	for g, name := range groups {
+	for _, g := range groups {
+		name := g.name
 		first := true
 		for i, a := range m.agents {
-			if a.Group() != g {
+			if !g.in(a) {
 				continue
 			}
 			if first {
@@ -214,6 +224,9 @@ func (m model) queuePanel(w, h int) []string {
 				si = len(body)
 			}
 			body = append(body, m.queueRow(in, i, a))
+			if a.needsYou() && a.Ask != "" { // what it asks, under its row
+				body = append(body, row(in, s("   ↳ "+trunc(a.Ask, in-5), cGrey)))
+			}
 		}
 	}
 	if len(m.agents) == 0 {
