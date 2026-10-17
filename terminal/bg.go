@@ -39,8 +39,34 @@ var bgKeys = map[string]string{
 	"enter": "\r", "left": "\x1b[D", "right": "\x1b[C", "up": "\x1b[A", "down": "\x1b[B", "tab": "\t", "esc": "\x1b",
 }
 
+// bgStep is one thing a person does in the attached session: press a key, paste text, wait a moment.
+type bgStep struct {
+	key, text string
+	pause     bool
+}
+
+func bgKey(k string) bgStep  { return bgStep{key: k} }
+func bgText(t string) bgStep { return bgStep{text: t} }
+func bgPause() bgStep        { return bgStep{pause: true} }
+
 // bgSend types text (as one paste, then Enter) or keys into the background session job. "ok" or "error: ...".
 func bgSend(job, text string, keys []string) string {
+	if keys == nil {
+		return bgSteps(job, bgText(text), bgKey("enter"))
+	}
+	var steps []bgStep
+	for _, k := range keys {
+		if k == askKeysPause {
+			steps = append(steps, bgPause())
+			continue
+		}
+		steps = append(steps, bgKey(k))
+	}
+	return bgSteps(job, steps...)
+}
+
+// bgSteps attaches to the background session job in a pty of its own, does the steps and closes the attach again.
+func bgSteps(job string, steps ...bgStep) string {
 	cmd := exec.Command(claudeBin(), "attach", job)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 50, Cols: 160})
@@ -94,19 +120,21 @@ func bgSend(job, text string, keys []string) string {
 			break
 		}
 	}
-	if keys != nil {
-		for _, k := range keys {
-			b, ok := bgKeys[k]
+	for _, st := range steps {
+		switch {
+		case st.pause:
+			time.Sleep(350 * time.Millisecond)
+		case st.text != "":
+			_, _ = f.Write([]byte("\x1b[200~" + st.text + "\x1b[201~"))
+			time.Sleep(300 * time.Millisecond)
+		default:
+			b, ok := bgKeys[st.key]
 			if !ok {
-				b = k // a digit or a letter
+				b = st.key // a digit or a letter
 			}
 			_, _ = f.Write([]byte(b))
 			time.Sleep(150 * time.Millisecond)
 		}
-	} else {
-		_, _ = f.Write([]byte("\x1b[200~" + text + "\x1b[201~"))
-		time.Sleep(300 * time.Millisecond)
-		_, _ = f.Write([]byte("\r"))
 	}
 	time.Sleep(800 * time.Millisecond)
 	stop()
@@ -128,10 +156,78 @@ func lastLine(t string) string {
 
 var bgStartedRe = regexp.MustCompile(`backgrounded\s+·\s+([0-9a-f]+)`)
 
-// bgStart starts a background session in dir with prompt as its first message. It returns the session's
+// nwOpts is how /NW starts a background agent: its folder and, when set, the model, effort and permission mode
+// (the claude flags --model, --effort and --permission-mode). Unset ones are left to Claude Code's own defaults.
+type nwOpts struct {
+	Dir, Model, Effort, Perm string
+}
+
+var (
+	nwModels  = map[string]bool{"opus": true, "sonnet": true, "haiku": true, "fable": true}
+	nwEfforts = map[string]bool{"low": true, "medium": true, "high": true, "xhigh": true, "max": true}
+	// nwPerms: the words /NW takes for the permission modes, and the mode each stands for
+	nwPerms = map[string]string{"plan": "plan", "auto": "auto", "bypass": "bypassPermissions", "accept": "acceptEdits",
+		"manual": "manual", "dontask": "dontAsk"}
+)
+
+// parseNW splits the words after /NW: model, effort and permission words are picked out wherever they stand; the
+// rest, in order, is the folder. keys.toml's nw_model, nw_effort and nw_permission fill what the words leave open.
+func parseNW(arg string, cfg Config) nwOpts {
+	o := nwOpts{Model: cfg.NWModel, Effort: cfg.NWEffort, Perm: cfg.NWPerm}
+	if p, ok := nwPerms[strings.ToLower(o.Perm)]; ok {
+		o.Perm = p
+	}
+	var dir []string
+	for _, w := range strings.Fields(arg) {
+		lw := strings.ToLower(w)
+		switch {
+		case nwModels[lw]:
+			o.Model = lw
+		case strings.HasPrefix(lw, "claude-"):
+			o.Model = w
+		case nwEfforts[lw]:
+			o.Effort = lw
+		case nwPerms[lw] != "":
+			o.Perm = nwPerms[lw]
+		default:
+			dir = append(dir, w)
+		}
+	}
+	o.Dir = strings.Join(dir, " ")
+	return o
+}
+
+// summary is the options as the command line shows them: "sonnet · high".
+func (o nwOpts) summary() string {
+	var parts []string
+	for _, p := range []string{o.Model, o.Effort, o.Perm} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// args are the claude flags for the options; the prompt follows after "--", so it may start with "/" or "-".
+func (o nwOpts) args(prompt string) []string {
+	a := []string{"--bg"}
+	if o.Model != "" {
+		a = append(a, "--model", o.Model)
+	}
+	if o.Effort != "" {
+		a = append(a, "--effort", o.Effort)
+	}
+	if o.Perm != "" {
+		a = append(a, "--permission-mode", o.Perm)
+	}
+	return append(a, "--", prompt)
+}
+
+// bgStart starts a background session in o.Dir with prompt as its first message. It returns the session's
 // short id, or an error with claude's own words (for example, a folder that is not trusted yet).
-func bgStart(dir, prompt string) (string, error) {
-	cmd := exec.Command(claudeBin(), "--bg", prompt)
+func bgStart(o nwOpts, prompt string) (string, error) {
+	dir := o.Dir
+	cmd := exec.Command(claudeBin(), o.args(prompt)...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if m := bgStartedRe.FindStringSubmatch(string(out)); m != nil {

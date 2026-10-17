@@ -12,12 +12,14 @@ Push `/`, write the code, then push `Enter`.
 |---|---|---|
 | `IN` | Inbox (the desk) | All agents and the selected agent. This is the start view. |
 | `FL` | Files | The last 30 files that the agents wrote about, newest first. Files of agents that stopped stay in the list. |
-| `RP` | Repos | The git sync check: repos with work that you can lose. |
+| `RP` | Repos | The git clones on this Mac and your GitHub repos (`westsoever`, `technobbq`) that have no clone. Repos with work that you can lose (the git sync check) are at the top. |
 | `RC` | Recaps | The last recap of each agent. Claude Code writes a recap when you come back to a session after some time. The desk also shows the recap of the selected agent above its last message. |
 | `PR` | Pull requests | The open GitHub pull requests that involve you (yours, assigned to you, that ask your review, or where you commented or were mentioned), the last updated first. The number in the tab is how many. |
 | `PO` | Proposals | The changes that the learner proposes. The tab is orange when proposals are open. |
-| `PC` | Paperclip | Paperclip issues that need you, and issues in progress. The selected issue shows on the right, with what it asks you. The tab is orange when an issue needs you. |
-| `NW` | New agent | Start a background agent. Refer to section 6.15. |
+| `PC` | Paperclip | Paperclip issues and company approvals that need you, and issues in progress. The selected row shows on the right, with what it asks you. The tab is orange when a row needs you. |
+| `FIND` | Find a session | Look for a session by its name, or by what you and the agents said in it. Write the words after `FIND`, for example `FIND kaching resume`. No tab shows this view. Refer to section 6.19. |
+| `NW` | New agent | Start a background agent. You can add a folder, a model, an effort and a mode, for example `NW soii sonnet high`. Refer to section 6.15. |
+| `ALL` | Write to a group | Write one message to a group of agents: `ALL waiting`, `ALL input`, `ALL idle` or `ALL working`. Refer to section 6.17. |
 | `STOP` | – | Stop the selected background agent. Its conversation stays. |
 | `A3` | Agent 3 | The desk, with agent 3 selected. Use a number from 1 to 9. |
 | `ching` | An agent by name | The desk, with the first agent whose name starts with these letters. |
@@ -37,6 +39,7 @@ The right hand does the most frequent work: `j` goes up, `l` goes down, `k` open
 | `j` or `↑` | Select the previous agent (up the list). |
 | `Space` | Select the agent in `INPUT` that has waited the longest. |
 | `1` to `9` | Send the answer with that number to the selected agent. |
+| `a` | When the agent asks questions: take the recommended answer of each question and send all. Refer to section 6.3. |
 | `k` | Write a message to the selected agent. `Enter` sends it. `Esc` keeps it as a draft. Refer to section 1.4. |
 | `o`, then `a` to `i` | Open the file with that letter. |
 | `g` | Show the Terminal window of the selected agent, where it is. For a background agent, open a new Terminal window that is attached to it. |
@@ -69,7 +72,8 @@ You can change these keys and messages. Refer to section 7.
 | `Enter` | Send the message. |
 | `Option+Enter`, `Ctrl+J`, or `\` then `Enter` | Start a new line. |
 | `Option` + a key | Write the character that your keyboard layout puts on this key, for example `Option+L` for `@`, `Option+5` for `[`, `Option+8` for `{`, `Option+7` for `|`. |
-| `@`, then letters | Show the files of the agent folder that agree with the letters. |
+| `@`, then letters | Show the other sessions and the files of the agent folder that agree with the letters. A session shows with the word `session`. |
+| `@Name` at the start | Send the message to the session with that name, not to the selected agent. Refer to section 6.18. |
 | `/` at the start, then letters | Show the commands and skills that agree with the letters, with their descriptions: Claude Code commands, your commands and skills, the commands and skills of the agent folder and its parent folders, and the enabled plugins. |
 | `Tab` or `Enter` | Put the selected suggestion into the message. |
 | `↑`, `↓` | Select a suggestion. When there are no suggestions, move between lines. |
@@ -94,7 +98,7 @@ The top line does not show your message. It shows only the name of the agent tha
 
 When a tile shows on the full screen, the number keys send answers, as on the desk.
 
-### 1.6 Keys in the lists (FL, RC, PR, PC, RP)
+### 1.6 Keys in the lists (FL, RC, PR, PO, PC, RP)
 
 | View | Key | Result |
 |---|---|---|
@@ -110,10 +114,37 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | `PO` | `a` | Approve the proposal. The screen asks you to write a code. |
 | `PO` | `x` | Reject the proposal. |
 | `PO` | `z` | Hide the proposal for 7 days. |
-| `PC` | `1` to `9` | Give that answer to what the issue asks: for example approve, decline, or decline with a reason. |
-| `PC` | `↑`, `↓` | Scroll the issue on the right: its description, its thread and the full request. |
-| `PC` | `Enter` | Open the issue in Paperclip in your browser. |
-| `PC` | `k` | Write a comment on the issue. `Enter` sends it. |
+| `PC` | `1` to `9` | Give that answer to what the row asks: for example approve, reject, or decline with a reason. In a list, tick or untick the item with that number. In a question, pick that option. With verdicts, give the current item that verdict. |
+| `PC` | `s` | Send what you ticked, picked or judged. |
+| `PC` | `x` | Decline a list of choices or of suggested tasks. |
+| `PC` | `r` | Decline it with a reason. The box opens. |
+| `PC` | `←`, `→` | Go to the previous or next question, or item. |
+| `PC` | `o` | Write your own answer to a question. |
+| `PC` | `a` | Give the recommended answer to every question and send. Kaching refuses if one question has none. |
+| `PC` | `n`, `p` | Show the next or previous page of a long list. |
+| `PC` | `↑`, `↓` | Scroll the row on the right: its description, its thread and the full request. |
+| `PC` | `Enter` | Open the row in Paperclip in your browser. |
+| `PC` | `k` | Write a comment on the row. `Enter` sends it. |
+| `RP` | `Enter` | Open the folder of the repo. A repo without a local folder asks `No local folder. Open it on GitHub?`: push `Enter` or `y` to open it, any other key to stop. |
+| `RP` | `b`, `Option+Enter` | Open the repo on GitHub in your browser. `Shift+Enter` also does this, but only in a terminal that sends it differently from `Enter` (Terminal.app does not). |
+| `RP` | `k` | Show the folders of the repo in a panel on the right. |
+| `RP` panel | `l`, `j` | Select the next or previous file or folder. |
+| `RP` panel | `k` | Go into the folder, or open the file. `..` goes up. |
+| `RP` panel | `h`, `Backspace` | Go up one folder. |
+| `RP` panel | `Enter` | Show the folder in Finder, or open the file. |
+| `RP` panel | `b` | Open the folder that the panel shows on GitHub. |
+| `RP` panel | `Esc` | Close the panel. Push `Esc` again to go to the desk. |
+
+### 1.7 Keys in the FIND view
+
+| Key | Result |
+|---|---|
+| `l`, `j` | Select the next or previous result. |
+| `Enter` | For a live session: go to the desk with that agent selected. For a session that ended: show the messages that match, on a page that you can only read. |
+| `s` | Ask Claude which sessions fit the words. |
+| `r` | Resume the selected session that ended. A new Terminal window opens and starts `claude --resume`. |
+| `l`, `j` on the page | Scroll the page one line down or up. `PgDn` and `PgUp` scroll one page. `Home` and `End` go to the start and the end. |
+| `Esc` | Close the page. Push `Esc` again to go back to the desk. |
 
 ## 2. Introduction
 
@@ -123,7 +154,7 @@ Kaching is one screen for all the Claude Code agents on this Mac. You operate it
 
 ### 2.2 What Kaching does not do
 
-Kaching does not have its own AI. It does not decide for you. It reads the session records of the agents. It writes the text that you select into the Terminal window of the agent. The agent then does the work.
+Kaching does not have its own AI. It does not decide for you. The only exception is the `AI` step of `FIND` (section 6.19). It runs when you push `s`, or when the other steps find nothing. It reads the session records of the agents. It writes the text that you select into the Terminal window of the agent. The agent then does the work.
 
 Kaching can only send text to agents in Terminal.app and to background agents. It shows agents in Claude Desktop, VS Code or Cursor, but you cannot send text to them.
 
@@ -267,6 +298,12 @@ To write your own answer, push `k`, write the answer, and push `Enter`. Kaching 
 
 To go back to a part, push `←`. To confirm a selection, push `Enter`.
 
+**Quick approve.** An agent can mark the answer that it recommends: the label ends with `(Recommended)`. Kaching shows each question with its recommended answer under `RECOMMENDED`, with a `★`. Push `a` (quick approve) to take the recommended answer of each question and send all answers. Kaching does it with the keys that you would push. A question with more choices gets all of its recommended answers.
+
+If one question has no recommended answer, quick approve does nothing. The command line names the question. Answer that question yourself. Then push `a` again for the rest.
+
+Kaching reads the questions of all agents in the same way, also for background agents. A permission prompt or a plan approval has no recommended answer: answer it with the number keys.
+
 ### 6.4 Send a fixed message
 
 1. Select the agent.
@@ -341,10 +378,21 @@ The tiles change size with the window. A wide window shows more tiles in each li
 
 ### 6.12 Look at the repos
 
-1. Push `/`.
-2. Write `RP`.
-3. Push `Enter`.
-4. Read the repos that need attention.
+1. Push `/`, write `RP`, push `Enter`.
+2. Read the list. Each line shows the name of the repo, its name on GitHub (`owner/name`), its local folder (or `github only`) and, in orange, what the git sync check found (for example `1 stash`). Repos with a finding are at the top, then the other local repos, then the GitHub repos without a clone. The selected repo shows the full findings below its line.
+3. Push `l` (down) or `j` (up) to select a repo.
+4. Do one of these steps:
+   - To open its folder, push `Enter`. If the repo has no local folder, the command line asks `No local folder. Open it on GitHub?`. Push `Enter` or `y` to open it on GitHub. Push `Esc` to stop.
+   - To open it on GitHub, push `b` or `Option+Enter`.
+   - To look at its files, push `k`. The list moves to the left and the panel on the right shows the folders and files of the repo (folders first, `.git` is not shown).
+5. In the panel:
+   - Push `l` or `j` to select a file or folder.
+   - Push `k` to go into a folder, or to open a file (with `open_cmd`). Select `..` and push `k`, or push `h`, to go up.
+   - Push `Enter` to show the folder in Finder, or to open the file.
+   - Push `b` to open the folder that the panel shows on GitHub.
+   - Push `Esc` to close the panel.
+
+Kaching finds local repos one level below `~/bbq` and `~`, in `~/.agent-repos` and in the sync check. It reads the GitHub repos with `gh repo list` each time you open the view. If that read fails, the last list stays and the error shows at the top. For a repo without a local folder, the panel reads the folders from GitHub, and `k` on a file opens it on GitHub.
 
 ### 6.13 Do a proposal of the learner
 
@@ -361,22 +409,62 @@ Only a person can approve a proposal. An agent cannot approve it.
 ### 6.14 Do work on Paperclip issues
 
 1. Push `/`, write `PC`, push `Enter`.
-2. Push `l` (down) or `j` (up) to select an issue. Orange issues need you. The issue shows on the right: its title, its description, its thread (your comments have a lighter background) and the full request, for example the pull request that it asks you to review.
-3. Push `↑` or `↓` to read more of the issue.
-4. At the bottom, `IT ASKS YOU` shows the question and the numbered answers:
+2. Push `l` (down) or `j` (up) to select a row. Orange rows need you. A row is an issue, or a company approval (`APPROVAL`). The row shows on the right: its title, its description, its thread (your comments have a lighter background) and the full request, for example the pull request that it asks you to review.
+3. Push `↑` or `↓` to read more of the row.
+4. At the bottom, `IT ASKS YOU` shows the question. Below it, a key line shows what each key does. Find the request in this table:
 
-   | What it asks | Answers |
+   | What it asks | Keys |
    |---|---|
    | A confirmation (for example "Review the PR") | `1` approve, `2` decline, `3` decline with a reason |
    | A question with one answer | `1` to `9`: the options |
    | A recovery action (`RECOVERY WAITS FOR YOU`) | `1` retry: hand it back to the agent, `2` done: mark the issue done, `3` blocked: keep it blocked |
+   | A company approval (`APPROVAL`) | `1` approve, `2` reject, `3` request revision (a note is a must), `4` approve with a note, `5` reject with a note |
+   | A list to tick (choices, or suggested tasks) | `1` to `9` tick or untick, `s` send, `x` decline, `r` decline with a reason |
+   | Questions with more parts, several answers, or your own answer | `1` to `9` pick, `←` `→` other question, `o` your own answer, `s` send, `a` recommended answers |
+   | Items that wait for a verdict | `1` to `3` give the verdict, `←` `→` other item, `s` send |
+   | A connection request, or a request that Kaching does not know | None. Push `Enter` to open it in your browser. |
 
-5. Push the number of your answer. Make sure that the command line shows `✓ <answer> · <issue>`.
-6. For `3` (decline with a reason), the box opens. Write the reason. Push `Enter`.
-7. To write a comment, push `k`. Write the comment. Push `Enter`.
-8. To open the issue in your browser, push `Enter`.
+5. Push the keys of your request. Make sure that the command line shows `✓ <answer> · <row>`.
+6. For a decline with a reason, or an answer with a note, the box opens. Write the text. Push `Enter`.
+7. To write a comment, push `k`. Write the comment. Push `Enter`. This also works on an approval.
+8. To open the row in your browser, push `Enter`.
 
-When Kaching cannot answer a request (a question with more parts, a list of choices), the panel tells you to open it in the browser. If Paperclip does not operate, the view shows `Paperclip isn't running (localhost:3100)`.
+**Company approval.** The panel shows the payload: for example the name, the role and the monthly budget of an agent to hire. It also shows the issue that the approval belongs to.
+
+- Push `1` to approve or `2` to reject. Kaching sends the answer at once.
+- To add a note, push `4` (approve) or `5` (reject). Write the note. Push `Enter`.
+- To send the approval back for changes, push `3`. Write what to change. Push `Enter`.
+- A `board ask` (a request to the board) has no keys. Paperclip wants you to review its action in the browser first. Push `Enter` to open it.
+
+**List to tick.** A list of choices starts with the choices that the request ticked. A list of suggested tasks starts with all tasks ticked.
+
+- Push the number of an item to tick it. Push it again to untick it. `[x]` shows a ticked item.
+- A task needs its parent. When you tick a task, its parent is ticked too. When you untick a parent, its tasks are unticked too.
+- When the list is longer than the panel, push `n` for the next page and `p` for the previous page.
+- Push `s` to send. For tasks, Kaching accepts the ticked tasks. When all tasks are ticked, it accepts all.
+- Push `x` to decline. To decline with a reason, push `r`, write the reason, push `Enter`.
+- When Paperclip refuses (for example, you ticked too many items), the command line shows its message. Change the ticks. Push `s` again.
+
+**Questions with more parts.** Kaching shows one question at a time, for example `question 2 of 3`. A `✓` after it marks each question that has an answer.
+
+- Push the number of an option. For a question with one answer, Kaching then goes to the next question.
+- For a question with several answers, push the number of each option. Then push `→`.
+- To write your own answer, push `o`. Write the answer. Push `Enter`. Some questions take only a written answer.
+- To go back to a question, push `←`.
+- Push `s` to send all answers at once. When a question needs an answer and has none, Kaching names it and sends nothing.
+- A star (`★`) marks the answer that the request recommends. A label that ends in `(Recommended)` has the same mark.
+- When every question has a star, push `a`. Kaching takes the starred answers and sends them at once.
+- When a question has no star, `a` sends nothing. The command line shows which question it is. Kaching does not guess.
+
+**Items that wait for a verdict.** The list shows each item and its verdict. `>` marks the current item. Its full text shows above `IT ASKS YOU`.
+
+- Push `1`, `2` or `3` to give the current item that verdict. The key line shows the verdicts. Kaching then goes to the next item.
+- A verdict can need a reason, usually `reject`. Then the box opens. Write the reason. Push `Enter`.
+- To go to another item, push `←` or `→`.
+- Push `s` to send the verdicts. You can send some items now and the others later. The command line shows how many are left.
+- An item that has a verdict already stays as it is.
+
+When Kaching cannot answer a request (a connection request, or a kind that a later Paperclip adds), the panel tells you to open it in the browser. Kaching never sends an answer that it does not understand. If Paperclip does not operate, the view shows `Paperclip isn't running (localhost:3100)`.
 
 ### 6.15 Start a background agent
 
@@ -384,9 +472,12 @@ A background agent is a Claude Code session without a window. It does the work w
 
 1. Select an agent that works in the folder that you want, or know the folder.
 2. Push `/`, write `NW`, push `Enter`. To use another folder, write it after `NW`: a path (`NW ~/bbq/soii`), a folder in `~/bbq` (`NW soii`), or the start of an agent name (`NW miso`).
-3. The message box opens with `new background agent in <folder>`. Write the task.
-4. Push `Enter`. The command line shows `✓ background agent <id> started`. Kaching selects the new agent when it shows in the list.
-5. Answer it as any other agent: push `k`, or a number key.
+3. To choose the model, the effort or the permission mode, write them after `NW`, in any place: a model (`opus`, `sonnet`, `haiku`, `fable`, or a full name), an effort (`low`, `medium`, `high`, `xhigh`, `max`), a mode (`plan`, `auto`, `bypass`, `accept`, `manual`, `dontask`). Example: `NW soii sonnet high`. The defaults are `nw_model`, `nw_effort` and `nw_permission` in `keys.toml` (section 7.6).
+4. The message box opens with `new background agent in <folder>` and the options. Write the task.
+5. Push `Enter`. The command line shows `✓ background agent <id> started`. Kaching selects the new agent when it shows in the list.
+6. Answer it as any other agent: push `k`, or a number key. Its questions and menus show in the agent panel like those of other agents. Quick approve (`a`) works too.
+
+To change the model of a running agent, write `/model sonnet` as a message. The agent asks `Switch model?`. The agent panel shows the question. Push `1` to confirm.
 
 To see its own screen, push `g`. A new Terminal window opens and shows the agent. Closing that window does not stop the agent.
 
@@ -404,6 +495,69 @@ The folder must be trusted by Claude Code. If the command line shows `Workspace 
 6. Push `Esc` to close the pull request on the right.
 
 Kaching reads the list with `gh`: every 30 seconds while the view is open, every 2 minutes for the number in the tab. If a read fails, the last list stays and the error shows at the top. If the error says you are not logged in, write `gh auth login` in a terminal.
+
+### 6.17 Write to a group of agents
+
+Use this procedure to send one message to many agents.
+
+1. Push `/`, write `ALL` and a group, push `Enter`. The groups are:
+
+   | Group | Agents in the group |
+   |---|---|
+   | `waiting` | The agents in `INPUT` and in `WAITING`. |
+   | `input` | The agents in `INPUT`: they ask you something or are blocked. |
+   | `idle` | The agents in `IDLE`. |
+   | `working` | The agents in `WORKING`. |
+
+2. The message box opens. Its title shows how many agents get the message, and their names.
+3. Write the message. Push `Enter`.
+4. Kaching writes the message to the agents one after the other. The command line shows `✓ sent to <n> agents` and the names.
+
+Kaching leaves out an agent that shows a menu on its screen, because the message would go into the menu. Kaching also leaves out an agent that is not in Terminal.app and not in the background. The title and the command line name them.
+
+### 6.18 Write to another session
+
+1. Push `k` to open the message box.
+2. Write `@` and some letters of the name. The list shows the other sessions first, with the word `session`.
+3. Push `Tab` to take a name. A name with spaces gets quotation marks: `@"release notes"`.
+4. Write the message after the name. Push `Enter`.
+5. Kaching writes the message, without the name, to that session. The selected agent does not get it.
+
+A name in the middle of a message stays in the message. The selected agent then passes the message on itself, with its own tool for messages between sessions.
+
+If the name is not a live session, Kaching sends the message to the selected agent. If two sessions have the name, or the session shows a menu, the box stays open and the command line tells you.
+
+### 6.19 Find a session
+
+Use this procedure when you know what you or an agent said, but not in which session.
+
+1. Push `/`. Write `FIND` and the words, for example `FIND kaching resume`. Push `Enter`.
+2. Read the top line of the view. It shows the progress: `searching…`, and then for example `3 in names, 12 in text`.
+3. Look at the results. Kaching searches in three steps:
+
+   | Step | Label | What Kaching searches |
+   |---|---|---|
+   | 1 | `name` | The name, the folder and the git branch of each live agent. The name of each session that ended: the name that you gave with `/rename`, or the title that Claude Code made. |
+   | 2 | `text` | Your prompts and the text replies of the agents, in all sessions on this Mac. A message is a result when it has all the words. Capital letters do not matter. |
+   | 3 | `AI` | Claude reads a short list of the last 120 sessions. It selects the sessions that fit the words by meaning. |
+
+4. Read each result. The first line shows the label of the step, the session name, the start folder and the date. A session without a name shows the first 7 characters of its id. A `●` shows a live agent.
+5. Read the second line of a result. For a `text` result, it shows the newest message that matches, with the words in white. It also shows who wrote it: `you` or `agent`. `×3` after `text` shows that 3 messages match. For an `AI` result, it shows the reason that Claude gives.
+6. Push `l` or `j` to select a result. Push `Enter`:
+   - For a live agent, Kaching goes to the desk with that agent selected.
+   - For a session that ended, Kaching shows the newest 4 messages that match. Each one has the message before it and the message after it. Push `l` or `j` to scroll. Push `Esc` to close the page.
+7. To continue a session that ended, push `r`. Kaching opens a new Terminal window. The window goes to the folder where the session started and runs `claude --resume <session id>`. Kaching does this only when you push `r`.
+
+Step 3 starts by itself when steps 1 and 2 find nothing. The top line then shows `asking Claude…`. This takes approximately 10 seconds. To ask Claude when steps 1 and 2 found results, push `s`. The results of Claude show at the top of the list.
+
+Notes:
+
+- To search for a phrase, write it in double quotes, for example `FIND "pull request" merge`.
+- The `text` step stops after 3 seconds. If it stops early, the top line shows `partial`. The list then shows only the newest sessions. Write more words to get fewer results.
+- The list shows at most 50 sessions for each step.
+- Kaching does not search the claude-mem observer sessions or the sessions of sub-agents that an agent started.
+- Step 3 uses your Claude usage. It makes one small call with the model Haiku. The call sends the name, folder, date, first prompt and last reply of the last 120 sessions to Claude. Kaching cuts each prompt and reply to 200 characters.
+- The call does not run your hooks. It does not save a session, and it does not add a folder to `~/.agent/sessions`. While it runs, Claude Code lists it as a session in `claude agents`. Kaching does not show it in the agent list.
 
 ## 7. Change the keys and the fixed messages
 
@@ -466,6 +620,13 @@ Kaching draws the markdown tables in an agent's messages as tables.
 
 3. Save the file.
 
+### 7.6 Change how `NW` starts agents and the quick approve key
+
+1. Open `~/.agent/terminal/keys.toml`.
+2. Above `[keys]`, set `nw_model`, `nw_effort` and `nw_permission`. Words that you write after `NW` have priority. An empty value leaves the choice to Claude Code.
+3. In `[keys]`, set `quick_approve` to change the key of quick approve (`a`).
+4. Save the file.
+
 ## 8. Kaching and the Terminal windows
 
 Kaching does not move, resize or close Terminal windows. When you start, stop or reload Kaching, all Terminal windows stay where they are. The agent sessions continue.
@@ -488,6 +649,8 @@ Kaching examines the agent window after it pushes `Enter`. If the text did not g
 
 A background agent has no window. Kaching opens `claude attach <id>` out of sight, pastes the text, pushes `Enter` and closes the attach again. The agent continues. This takes approximately 2 seconds.
 
+To read the screen of a background agent, Kaching does not attach. It runs `claude logs <id>` and replays the output in a small terminal program. It then reads the menu from that screen, as it does for an agent in Terminal.app. Kaching reads the selected agent from time to time, and each agent that waits for you every 2 seconds.
+
 ## 10. Problems and solutions
 
 | Problem | Cause | Solution |
@@ -501,6 +664,11 @@ A background agent has no window. Kaching opens `claude attach <id>` out of sigh
 | `Option` + a key writes a wrong character. | Terminal sends `Option` as Meta, and Kaching reads your layout when it starts. | Stop and start Kaching after you change the keyboard layout. |
 | The screen shows `kaching needs at least 60x16`. | The window is too small. | Make the window larger. |
 | The PC view shows `Paperclip isn't running`. | The Paperclip service does not operate. | Start Paperclip. Then go to `PC` again. |
+| The command line shows `Paperclip refused`. | Paperclip does not accept the answer. The text after it says why. | Read the text. Change your answer, or open the row in the browser. |
+| The command line shows `no recommended answer for question`. | The question has no `★`. Kaching does not guess. | Pick an answer for each question. Push `s`. |
+| The FIND view shows `Claude failed` and a reason. | Claude did not answer in 2 minutes, or your Claude usage is used up. The reason says which. | Wait. Push `s` to ask again. |
+| The FIND view shows `partial`. | The `text` step did not finish in 3 seconds. | Write more words. Push `/`, write `FIND` and the new words. |
+| `r` in the FIND view shows `its folder is gone`. | The folder where the session started does not exist now. | Make the folder again, or open a terminal and write `claude --resume <session id>` in another folder. |
 
 ## 11. Files
 
@@ -511,5 +679,7 @@ A background agent has no window. Kaching opens `claude attach <id>` out of sigh
 | `~/.agent/terminal/open` | Tells the monitor queue that Kaching operates and which agent is selected. Kaching removes it when it stops. |
 | `~/.agent/terminal/send.js` | The script that sends text to Terminal windows. Kaching writes it when it starts. |
 | `~/.agent/terminal/files.json` | The last 30 files that the agents wrote about (the `FL` view). |
+| `~/.claude/projects/` | The conversations of all sessions. The `FIND` view reads them. It never changes them. |
+| `kaching-find` in the temporary folder of your Mac | An empty folder. The `AI` step of `FIND` runs Claude there, so that Claude finds no project settings. |
 | `~/.claude/kaching/terminal/` | The source code. |
 | `~/.claude/kaching/docs/superpowers/specs/2026-10-17-agent-terminal-design.md` | The design. |

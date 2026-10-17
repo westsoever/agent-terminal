@@ -8,6 +8,7 @@ package main
 //   GET  /api/companies/:id/agents                        agent names
 //   GET  /api/companies/:id/heartbeat-runs?limit=N        recent runs: status, usageJson.costUsd, contextSnapshot.issueId
 //   POST /api/issues/:id/comments {body, clientRequestId} a comment as the board user (what the UI sends)
+// Company approvals (rows "approval:<id>") are in pcapproval.go, the answers to requests in pcdetail.go and pcform.go.
 // The web UI route for an issue is the attention item's href, /<PREFIX>/issues/<REF>.
 
 import (
@@ -70,8 +71,10 @@ type pcSubject struct {
 	Status     string `json:"status"`
 	Href       string `json:"href"`
 	Metadata   struct {
-		AssigneeAgentID string `json:"assigneeAgentId"`
-		SourceIssueID   string `json:"sourceIssueId"`
+		AssigneeAgentID    string `json:"assigneeAgentId"`
+		SourceIssueID      string `json:"sourceIssueId"`
+		Type               string `json:"type"`               // an approval's type
+		RequestedByAgentID string `json:"requestedByAgentId"` // an approval's requester
 	} `json:"metadata"`
 }
 
@@ -241,9 +244,15 @@ func loadCompany(ctx context.Context, c pcCompany) ([]PCItem, map[string]string,
 		byID[is.ID] = is
 	}
 
+	apInfo := pcApprovalInfo(ctx, c.ID, att) // the payloads of the pending approvals, when the feed has any
+
 	var out []PCItem
 	index := map[string]int{} // issue id -> position in out
 	for _, a := range att.Items {
+		if a.SourceKind == "approval" { // a company approval: a row of its own (pcapproval.go)
+			out = append(out, pcApprovalRow(c, a.Subject, a.WhyNow, names, apInfo))
+			continue
+		}
 		subj := a.Subject
 		issue := subj
 		if subj.Kind != "issue" && a.RelatedIssue != nil {
@@ -366,10 +375,14 @@ func pcComment(id, text string) error {
 	if id == "" || text == "" {
 		return errors.New("nothing to post")
 	}
-	body, _ := json.Marshal(map[string]string{"body": text, "clientRequestId": newUUID()})
+	path, fields := "/api/issues/"+url.PathEscape(id)+"/comments", map[string]string{"body": text, "clientRequestId": newUUID()}
+	if aid, ok := pcApprovalID(id); ok { // an approval's thread takes only the text
+		path, fields = "/api/approvals/"+url.PathEscape(aid)+"/comments", map[string]string{"body": text}
+	}
+	body, _ := json.Marshal(fields)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, pcBase+"/api/issues/"+url.PathEscape(id)+"/comments", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, pcBase+path, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

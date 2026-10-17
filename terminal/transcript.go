@@ -17,6 +17,8 @@ type Last struct {
 	Question string        // an open AskUserQuestion, '' when none
 	Options  []string      // numbered options: from the open question, else "1. ..." lines in the last message
 	Menu     bool          // true: the options are a menu in Claude Code (answer with a key press, no Enter)
+	Ask      []AskQuestion // every question of the open AskUserQuestion, with its recommendations; nil when none
+	AskID    string        // the tool call of that question set
 	Files    []string      // paths the last message mentions that exist, absolute
 	Recap    string        // Claude Code's latest recap (the "while you were away" summary), '' when none
 	RecapAt  time.Time     // when Claude Code wrote it
@@ -64,9 +66,12 @@ type block struct {
 
 type askInput struct {
 	Questions []struct {
-		Question string `json:"question"`
-		Options  []struct {
-			Label string `json:"label"`
+		Question    string `json:"question"`
+		Header      string `json:"header"`
+		MultiSelect bool   `json:"multiSelect"`
+		Options     []struct {
+			Label       string `json:"label"`
+			Description string `json:"description"`
 		} `json:"options"`
 	} `json:"questions"`
 }
@@ -157,6 +162,14 @@ func readLast(path, cwd string) Last {
 			l.Options = append(l.Options, o.Label)
 		}
 		l.Menu = true
+		l.AskID = openID
+		for _, q := range openAsk.Questions {
+			aq := AskQuestion{Header: strings.TrimSpace(q.Header), Text: strings.TrimSpace(q.Question), Multi: q.MultiSelect}
+			for _, o := range q.Options {
+				aq.Options = append(aq.Options, newAskOption(o.Label, o.Description))
+			}
+			l.Ask = append(l.Ask, aq)
+		}
 	} else {
 		l.Options = numbered(l.Text)
 	}

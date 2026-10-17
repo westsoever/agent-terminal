@@ -2,19 +2,25 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
-## D46 (2026-10-18): kaching lists finished agents with nothing left under DONE (amends D41)
-
-**Decision (user):** "There should be another section for the agents on the left, that is DONE - it puts a session there when it has finished its task and is just completed and there's nothing left to wait for."
-
-**Built:** the queue has five sections: INPUT, WAITING, WORKING, IDLE, DONE. A session whose turn ended as `done` is DONE when its checkpoint (`STATE.md`, in the repo's `.agent` with a GOAL.md, else the session folder) has no `next_action` and no `blocker` (empty, `none`, `(none)` and `none.` count as empty) and its `NEXT.md` is empty or missing. That is the test `kaching-watch.sh` already uses to leave a finished session alone. A finished session with something open stays in WAITING. DONE is last and newest first, so what the owner can ignore stays out of the way; a family sits in its most urgent member's section. `Group()` is unchanged, so DONE agents still count as waiting in the tab badge and `x` can dismiss them.
-
-## D47 (2026-10-18): the terminal finds a transcript that moved with its session
+## D48 (2026-10-18): the terminal finds a transcript that moved with its session
 
 **Decision (user):** "I don't see any messages of the background agent ... Maybe fix that first to actually have the text of the chat from this background agent show up here as well."
 
 **Why:** meta `transcript=` is written when the session starts. A session that changes folder (EnterWorktree, cd) gets its transcript under the new folder's project dir, so the recorded file was gone and the right panel showed an empty chat. Every background session that works in a worktree was affected.
 
 **Built:** `findTranscript` keeps the recorded path while the file exists, else tries the current cwd's project dir, else any `~/.claude/projects/*/<sid>.jsonl`. The bash hooks still record the start path; only the terminal resolves it.
+
+## D47 (2026-10-18): kaching lists finished agents with nothing left under DONE (amends D41)
+
+**Decision (user):** "There should be another section for the agents on the left, that is DONE - it puts a session there when it has finished its task and is just completed and there's nothing left to wait for."
+
+**Built:** the queue has five sections: INPUT, WAITING, WORKING, IDLE, DONE. A session whose turn ended as `done` is DONE when its checkpoint (`STATE.md`, in the repo's `.agent` with a GOAL.md, else the session folder) has no `next_action` and no `blocker` (empty, `none`, `(none)` and `none.` count as empty) and its `NEXT.md` is empty or missing. That is the test `kaching-watch.sh` already uses to leave a finished session alone. A finished session with something open stays in WAITING. DONE is last and newest first, so what the owner can ignore stays out of the way; a family sits in its most urgent member's section. `Group()` is unchanged, so DONE agents still count as waiting in the tab badge and `x` can dismiss them.
+
+## D46 (2026-10-18): RP becomes a repo list you can open and browse
+
+**Decision (user):** "For the RP, the repositories or repos here, I would love to also be able to cycle through them or switch through them. When I hit Enter, I want the local folder to open. If there's no local folder, then there should be a question saying, 'No local folder. Do you want to open it in GitHub?' Then, with a confirmation, I can confirm it again. Also, find another way, maybe Shift+Enter, where I can directly open the repository on the website. When I click K on it, it shouldn't open the repository locally, but it should open it in the side panel and just show the folder structure of it. Then I can cycle through the folder structure, so I can actually go through the folders. Meaning, just naturally navigating with K, I open the folder. For example (and on a file, opens the file)"
+
+**Built:** `RP` lists the git clones one level under `~/bbq` and `~` (not the folders macOS guards, such as `~/Library`), the repos in `~/.agent-repos` and the sync check's repos, then the GitHub repos of `westsoever` and `technobbq` that have no clone here (`gh repo list --no-archived`, read in the background each time the view opens; a failed read keeps the last list and shows its error). Each line: name, `owner/name`, folder or `github only`, and the sync check's `needs:` in orange; repos with findings first, in the sync check's order. `j`/`l` move; Enter opens the folder, and for a GitHub-only repo asks "No local folder. Open it on GitHub?" in the command line (Enter or `y` opens, any other key does not). `b` and Option+Enter open the repo on GitHub. Shift+Enter does too where the terminal sends it apart from Enter (CSI u, or xterm's modifyOtherKeys); Terminal.app sends a plain Return for it, and Bubble Tea v1 has no shift+enter key, so there it acts as Enter. `k` opens a side panel with the repo's folders (folders first, `.git` hidden): `k` goes into a folder or opens a file with `open_cmd`, `..`/`h`/Backspace go up, Enter shows it in Finder, `b` opens that folder on GitHub, Esc closes the panel (a second Esc goes to the desk). A GitHub-only repo's panel reads its folders with `gh api repos/o/n/contents`, and a file opens on GitHub. No key in RP acts on the agent selected behind it.
 
 ## D45 (2026-10-18): A pull request opens on the right in kaching, and a comment on it starts an agent (amends D44)
 
