@@ -399,7 +399,8 @@ func (m *model) deliverAs(label, what string, keys []string) tea.Cmd {
 		m.setErr(a.Name + " isn't in a Terminal tab: look only (g opens it)")
 		return nil
 	}
-	sid, name, tty, bg, job := a.SID, a.Name, a.TTY, a.Bg, a.Job
+	ag := *a
+	sid, name := a.SID, a.Name
 	if label == "" {
 		label = what
 		if keys != nil {
@@ -408,15 +409,7 @@ func (m *model) deliverAs(label, what string, keys []string) tea.Cmd {
 	}
 	m.setStatus("sending to " + name + "…")
 	return func() tea.Msg {
-		var res string
-		if bg {
-			res = bgSend(job, what, keys)
-		} else if keys != nil {
-			res = sendKeys(tty, keys...)
-		} else {
-			res = sendText(tty, what)
-		}
-		return sentMsg{sid, name, label, res}
+		return sentMsg{sid, name, label, transmitFn(ag, what, keys)}
 	}
 }
 
@@ -512,6 +505,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			delete(m.pcDet, id)
 		}
 		return m, func() tea.Msg { return pcMsg(loadPaperclip()) }
+	case allMsg:
+		return m, m.sentAll(msg)
 	case bgStartedMsg:
 		m.setStatus("✓ background agent " + msg.job + " started in " + tildify(msg.dir) + " · g attaches a window")
 		m.pendingJob = msg.job
@@ -833,6 +828,7 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scrollChat(dir)
 		return m, nil
 	}
+	m.ed.peers = m.peerNames(m.ed.target)
 	act, cmd := m.ed.key(k, w)
 	switch act {
 	case edClose:
@@ -857,6 +853,28 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		target := m.ed.target
+		// a send that can't go out (nobody to write to, a name that is no agent's) keeps the box open and the text
+		if group, ok := strings.CutPrefix(target, "all:"); ok {
+			send, skipped := m.recipients(group)
+			if len(send) == 0 {
+				m.setErr("ALL " + group + ": no agent to write to now")
+				return m, nil
+			}
+			m.ed.sent()
+			m.mode = mKeys
+			m.setStatus(fmt.Sprintf("sending to %d agents…", len(send)))
+			return m, broadcast(send, skipped, text)
+		}
+		if !strings.Contains(target, ":") { // a message to an agent: @Name at its start sends it to that agent
+			if cmd, ok := m.routeMention(text); ok {
+				if cmd == nil {
+					return m, nil
+				}
+				m.ed.sent()
+				m.mode = mKeys
+				return m, cmd
+			}
+		}
 		m.ed.sent()
 		m.mode = mKeys
 		if dir, ok := strings.CutPrefix(target, "nw:"); ok {
@@ -1167,6 +1185,9 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 		m.nw = o
 		m.view, m.zoom, m.mode = vDesk, false, mTyping
 		return m, m.ed.open("nw:"+dir, dir, m.editorWidth())
+	case c == "ALL":
+		_, arg, _ := strings.Cut(strings.TrimSpace(code), " ")
+		return m.allCommand(arg)
 	case c == "STOP":
 		a := m.sel()
 		if a == nil || !a.Bg {

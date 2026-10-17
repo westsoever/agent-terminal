@@ -17,7 +17,8 @@ Push `/`, write the code, then push `Enter`.
 | `PR` | Pull requests | The open GitHub pull requests that involve you (yours, assigned to you, or that ask your review), the last updated first. The number in the tab is how many. |
 | `PO` | Proposals | The changes that the learner proposes. The tab is orange when proposals are open. |
 | `PC` | Paperclip | Paperclip issues that need you, and issues in progress. The selected issue shows on the right, with what it asks you. The tab is orange when an issue needs you. |
-| `NW` | New agent | Start a background agent. Refer to section 6.15. |
+| `NW` | New agent | Start a background agent. You can add a folder, a model, an effort and a mode, for example `NW soii sonnet high`. Refer to section 6.15. |
+| `ALL` | Write to a group | Write one message to a group of agents: `ALL waiting`, `ALL input`, `ALL idle` or `ALL working`. Refer to section 6.17. |
 | `STOP` | – | Stop the selected background agent. Its conversation stays. |
 | `A3` | Agent 3 | The desk, with agent 3 selected. Use a number from 1 to 9. |
 | `ching` | An agent by name | The desk, with the first agent whose name starts with these letters. |
@@ -37,6 +38,7 @@ The right hand does the most frequent work: `j` goes up, `l` goes down, `k` open
 | `j` or `↑` | Select the previous agent (up the list). |
 | `Space` | Select the agent in `INPUT` that has waited the longest. |
 | `1` to `9` | Send the answer with that number to the selected agent. |
+| `a` | When the agent asks questions: take the recommended answer of each question and send all. Refer to section 6.3. |
 | `k` | Write a message to the selected agent. `Enter` sends it. `Esc` keeps it as a draft. Refer to section 1.4. |
 | `o`, then `a` to `i` | Open the file with that letter. |
 | `g` | Show the Terminal window of the selected agent, where it is. For a background agent, open a new Terminal window that is attached to it. |
@@ -69,7 +71,8 @@ You can change these keys and messages. Refer to section 7.
 | `Enter` | Send the message. |
 | `Option+Enter`, `Ctrl+J`, or `\` then `Enter` | Start a new line. |
 | `Option` + a key | Write the character that your keyboard layout puts on this key, for example `Option+L` for `@`, `Option+5` for `[`, `Option+8` for `{`, `Option+7` for `|`. |
-| `@`, then letters | Show the files of the agent folder that agree with the letters. |
+| `@`, then letters | Show the other sessions and the files of the agent folder that agree with the letters. A session shows with the word `session`. |
+| `@Name` at the start | Send the message to the session with that name, not to the selected agent. Refer to section 6.18. |
 | `/` at the start, then letters | Show the commands and skills that agree with the letters, with their descriptions: Claude Code commands, your commands and skills, the commands and skills of the agent folder and its parent folders, and the enabled plugins. |
 | `Tab` or `Enter` | Put the selected suggestion into the message. |
 | `↑`, `↓` | Select a suggestion. When there are no suggestions, move between lines. |
@@ -261,6 +264,12 @@ To write your own answer, push `k`, write the answer, and push `Enter`. Kaching 
 
 To go back to a part, push `←`. To confirm a selection, push `Enter`.
 
+**Quick approve.** An agent can mark the answer that it recommends: the label ends with `(Recommended)`. Kaching shows each question with its recommended answer under `RECOMMENDED`, with a `★`. Push `a` (quick approve) to take the recommended answer of each question and send all answers. Kaching does it with the keys that you would push. A question with more choices gets all of its recommended answers.
+
+If one question has no recommended answer, quick approve does nothing. The command line names the question. Answer that question yourself. Then push `a` again for the rest.
+
+Kaching reads the questions of all agents in the same way, also for background agents. A permission prompt or a plan approval has no recommended answer: answer it with the number keys.
+
 ### 6.4 Send a fixed message
 
 1. Select the agent.
@@ -378,9 +387,12 @@ A background agent is a Claude Code session without a window. It does the work w
 
 1. Select an agent that works in the folder that you want, or know the folder.
 2. Push `/`, write `NW`, push `Enter`. To use another folder, write it after `NW`: a path (`NW ~/bbq/soii`), a folder in `~/bbq` (`NW soii`), or the start of an agent name (`NW miso`).
-3. The message box opens with `new background agent in <folder>`. Write the task.
-4. Push `Enter`. The command line shows `✓ background agent <id> started`. Kaching selects the new agent when it shows in the list.
-5. Answer it as any other agent: push `k`, or a number key.
+3. To choose the model, the effort or the permission mode, write them after `NW`, in any place: a model (`opus`, `sonnet`, `haiku`, `fable`, or a full name), an effort (`low`, `medium`, `high`, `xhigh`, `max`), a mode (`plan`, `auto`, `bypass`, `accept`, `manual`, `dontask`). Example: `NW soii sonnet high`. The defaults are `nw_model`, `nw_effort` and `nw_permission` in `keys.toml` (section 7.6).
+4. The message box opens with `new background agent in <folder>` and the options. Write the task.
+5. Push `Enter`. The command line shows `✓ background agent <id> started`. Kaching selects the new agent when it shows in the list.
+6. Answer it as any other agent: push `k`, or a number key. Its questions and menus show in the agent panel like those of other agents. Quick approve (`a`) works too.
+
+To change the model of a running agent, write `/model sonnet` as a message. The agent asks `Switch model?`. The agent panel shows the question. Push `1` to confirm.
 
 To see its own screen, push `g`. A new Terminal window opens and shows the agent. Closing that window does not stop the agent.
 
@@ -395,6 +407,37 @@ The folder must be trusted by Claude Code. If the command line shows `Workspace 
 3. Push `Enter` to open it on GitHub in your browser.
 
 Kaching reads the list with `gh` every 30 seconds. If the view shows a `gh search prs` error, write `gh auth login` in a terminal.
+
+### 6.17 Write to a group of agents
+
+Use this procedure to send one message to many agents.
+
+1. Push `/`, write `ALL` and a group, push `Enter`. The groups are:
+
+   | Group | Agents in the group |
+   |---|---|
+   | `waiting` | The agents in `INPUT` and in `WAITING`. |
+   | `input` | The agents in `INPUT`: they ask you something or are blocked. |
+   | `idle` | The agents in `IDLE`. |
+   | `working` | The agents in `WORKING`. |
+
+2. The message box opens. Its title shows how many agents get the message, and their names.
+3. Write the message. Push `Enter`.
+4. Kaching writes the message to the agents one after the other. The command line shows `✓ sent to <n> agents` and the names.
+
+Kaching leaves out an agent that shows a menu on its screen, because the message would go into the menu. Kaching also leaves out an agent that is not in Terminal.app and not in the background. The title and the command line name them.
+
+### 6.18 Write to another session
+
+1. Push `k` to open the message box.
+2. Write `@` and some letters of the name. The list shows the other sessions first, with the word `session`.
+3. Push `Tab` to take a name. A name with spaces gets quotation marks: `@"release notes"`.
+4. Write the message after the name. Push `Enter`.
+5. Kaching writes the message, without the name, to that session. The selected agent does not get it.
+
+A name in the middle of a message stays in the message. The selected agent then passes the message on itself, with its own tool for messages between sessions.
+
+If the name is not a live session, Kaching sends the message to the selected agent. If two sessions have the name, or the session shows a menu, the box stays open and the command line tells you.
 
 ## 7. Change the keys and the fixed messages
 
@@ -457,6 +500,13 @@ Kaching draws the markdown tables in an agent's messages as tables.
 
 3. Save the file.
 
+### 7.6 Change how `NW` starts agents and the quick approve key
+
+1. Open `~/.agent/terminal/keys.toml`.
+2. Above `[keys]`, set `nw_model`, `nw_effort` and `nw_permission`. Words that you write after `NW` have priority. An empty value leaves the choice to Claude Code.
+3. In `[keys]`, set `quick_approve` to change the key of quick approve (`a`).
+4. Save the file.
+
 ## 8. Kaching and the Terminal windows
 
 Kaching does not move, resize or close Terminal windows. When you start, stop or reload Kaching, all Terminal windows stay where they are. The agent sessions continue.
@@ -478,6 +528,8 @@ Kaching then pushes `Enter` in the agent window. For this key, the agent window 
 Kaching examines the agent window after it pushes `Enter`. If the text did not go, Kaching pushes `Enter` again.
 
 A background agent has no window. Kaching opens `claude attach <id>` out of sight, pastes the text, pushes `Enter` and closes the attach again. The agent continues. This takes approximately 2 seconds.
+
+To read the screen of a background agent, Kaching does not attach. It runs `claude logs <id>` and replays the output in a small terminal program. It then reads the menu from that screen, as it does for an agent in Terminal.app. Kaching reads the selected agent from time to time, and each agent that waits for you every 2 seconds.
 
 ## 10. Problems and solutions
 
