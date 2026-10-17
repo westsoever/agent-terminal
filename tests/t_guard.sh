@@ -1291,6 +1291,28 @@ gallow "a case arm with a bracket class is no CLI call" "$R" "python3 - <<'EOF'
 s=\"case \\\"\$lim\\\" in ''|*[!0-9]*) lim=300 ;; esac\"
 EOF"
 gallow "an all-pattern word is no CLI call" "$R" 'x=1; *[!0-9]* ; echo b'
+# the splitter cuts a quoted argument such as "Write(06-Wiki/learned/**)" at its parenthesis and leaves a path glob as
+# a "command word". Matching only its last component (`**`) denied the whole claude -p line (the Librarian's, 2026-10-17).
+# A glob with a directory part is the CLI only when that path can name a copy of it (a bin/ directory holding it).
+gallow "the Librarian claude -p line, quoted tool patterns and a python filter" "$R" "$(cat "$(dirname "${BASH_SOURCE[0]}")/fixtures/guard/librarian-claude-p.txt")"
+gallow "a quoted Write(dir/**) argument is no CLI call" "$R" 'claude -p go --allowedTools "Write(06-Wiki/learned/**)" "Edit(06-Wiki/learned/**)"'
+gallow "a quoted Edit(//abs/dir/**) argument is no CLI call" "$R" 'claude -p go --allowedTools "Edit(//Users/me/vault/learned/**)"'
+gallow "a quoted Read(dir/*) argument is no CLI call" "$R" 'claude -p go --allowedTools "Read(docs/*)"'
+gallow "the same quoted argument from a plain folder" "$P" 'claude -p go --allowedTools "Write(06-Wiki/learned/**)"'
+gdeny "bypass: a glob behind ./" "$R" './bin/c*s approve rule-x'
+gdeny "bypass: a glob behind ../" "$R" '../bin/*s approve rule-x'
+gdeny "bypass: ../ ahead of a bare glob" "$R" '../c*s approve rule-x'
+gdeny "bypass: ./ ahead of a bare glob" "$R" './c*s approve rule-x'
+gdeny "bypass: a glob in the directory part" "$R" 'b*/c*s approve rule-x'
+gdeny "bypass: a glob over the whole path" "$R" '*/*s approve rule-x'
+gdeny "bypass: the path in capitals (a case-insensitive volume)" "$R" 'BIN/C*S approve rule-x'
+gdeny "bypass: a doubled slash" "$R" 'bin//c*s approve rule-x'
+gdeny "bypass: a dot segment" "$R" '/opt/./bin/c*s approve rule-x'
+gdeny "bypass: a dot-dot segment" "$R" '/opt/x/../bin/c*s approve rule-x'
+gdeny "bypass: \$HOME in the path" "$R" '$HOME/.claude/kaching/bin/c*s approve rule-x'
+gdeny "bypass: ~ in the path" "$R" '~/.claude/kaching/bin/c*s approve rule-x'
+gdeny "bypass: the installed link spelled out" "$R" "$HOME/.claude/kaching/bin/c*s approve rule-x"
+gdeny "bypass: the guard's own bin directory, absolute" "$R" "$BIN/k*s approve rule-x"
 gdeny "bypass: find -exec" "$R" 'find bin -name kaching-proposals -exec {} approve rule-x ;'
 gdeny "bypass: python" "$R" "python3 -c 'import os; os.execvp(\"kaching-proposals\", [\"kaching-proposals\", \"approve\", \"rule-x\"])'"
 gdeny "bypass: a copy of the CLI" "$R" 'cp bin/kaching-proposals /tmp/cp2'
