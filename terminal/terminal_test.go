@@ -79,7 +79,7 @@ func TestReadLastPlainPrompt(t *testing.T) {
 func TestConfigDefaultsAndPartialFile(t *testing.T) {
 	t.Setenv("AGENT_HOME", t.TempDir())
 	c, _, err := loadConfig() // writes the default
-	if err != nil || len(c.Replies) != 6 || c.Keys.Next != "j" {
+	if err != nil || len(c.Replies) != 6 || c.Keys.Next != "k" || c.Keys.Prev != "j" {
 		t.Fatalf("default: %v %+v", err, c)
 	}
 	if _, err := os.Stat(configPath()); err != nil {
@@ -87,7 +87,7 @@ func TestConfigDefaultsAndPartialFile(t *testing.T) {
 	}
 	os.WriteFile(configPath(), []byte("[[reply]]\nkey = \"x\"\ntext = \"do x\"\n"), 0o644)
 	c, _, err = loadConfig()
-	if err != nil || c.Keys.Next != "j" || len(c.Replies) != 1 || c.Replies[0].Label != "do x" {
+	if err != nil || c.Keys.Next != "k" || len(c.Replies) != 1 || c.Replies[0].Label != "do x" {
 		t.Fatalf("partial: %v %+v", err, c)
 	}
 	if r, ok := c.directReply("x"); !ok || r.Text != "do x" {
