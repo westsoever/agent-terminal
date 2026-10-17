@@ -11,11 +11,11 @@ Push `/`, write the code, then push `Enter`.
 | Code | View | It shows |
 |---|---|---|
 | `IN` | Inbox (the desk) | All agents and the selected agent. This is the start view. |
-| `AG` | Agents (the wall) | All agents as tiles. You can also push `W`. |
 | `FL` | Files | The last 30 files that the agents wrote about, newest first. Files of agents that stopped stay in the list. |
 | `RP` | Repos | The git sync check: repos with work that you can lose. |
 | `RC` | Recaps | The last recap of each agent. Claude Code writes a recap when you come back to a session after some time. The desk also shows the recap of the selected agent above its last message. |
-| `PR` | Proposals | The changes that the learner proposes. The tab is orange when proposals are open. |
+| `PR` | Pull requests | The open GitHub pull requests that involve you (yours, assigned to you, or that ask your review), the last updated first. The number in the tab is how many. |
+| `PO` | Proposals | The changes that the learner proposes. The tab is orange when proposals are open. |
 | `PC` | Paperclip | Paperclip issues that need you, and issues in progress. The selected issue shows on the right, with what it asks you. The tab is orange when an issue needs you. |
 | `NW` | New agent | Start a background agent. Refer to section 6.15. |
 | `STOP` | – | Stop the selected background agent. Its conversation stays. |
@@ -101,10 +101,11 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | All lists | `l`, `j` | Select the next or previous line. |
 | `FL` | `Enter` | Open the selected file. |
 | `RC` | `Enter` | Go to the desk, with that agent selected. |
-| `PR` | `Enter` | Show the full proposal. Push `q` to close it. |
-| `PR` | `a` | Approve the proposal. The screen asks you to write a code. |
-| `PR` | `x` | Reject the proposal. |
-| `PR` | `z` | Hide the proposal for 7 days. |
+| `PR` | `Enter` | Open the pull request on GitHub in your browser. |
+| `PO` | `Enter` | Show the full proposal. Push `q` to close it. |
+| `PO` | `a` | Approve the proposal. The screen asks you to write a code. |
+| `PO` | `x` | Reject the proposal. |
+| `PO` | `z` | Hide the proposal for 7 days. |
 | `PC` | `1` to `9` | Give that answer to what the issue asks: for example approve, decline, or decline with a reason. |
 | `PC` | `↑`, `↓` | Scroll the issue on the right: its description, its thread and the full request. |
 | `PC` | `Enter` | Open the issue in Paperclip in your browser. |
@@ -162,7 +163,7 @@ You can also push `Ctrl+C`.
 
 The screen has five parts, from the top to the bottom:
 
-1. The tab bar. It shows the views and their codes. The current view is white. The `PR` tab is orange when proposals are open. The `PC` tab is orange when a Paperclip issue needs you. The number in the tab is how many.
+1. The tab bar. It shows the views and their codes. The current view is white. The `PO` tab is orange when proposals are open. The `PC` tab is orange when a Paperclip issue needs you. The number in the tab is how many.
 2. The command line. It shows the current code, the time, the number of agents and the number of agents that wait for you. It also shows short messages from Kaching.
 3. The agent list (left). It shows all agents in three groups.
 4. The agent panel (right). It shows the selected agent.
@@ -341,7 +342,7 @@ The tiles change size with the window. A wide window shows more tiles in each li
 
 ### 6.13 Do a proposal of the learner
 
-1. Push `/`, write `PR`, push `Enter`.
+1. Push `/`, write `PO`, push `Enter`.
 2. Push `l` (down) or `j` (up) to select a proposal.
 3. Push `Enter` to read the full proposal. Push `q` to close it.
 4. Do one of these steps:
@@ -386,6 +387,14 @@ To see its own screen, push `g`. A new Terminal window opens and shows the agent
 To stop it, select it, push `/`, write `STOP`, push `Enter`. To open it again later, write `claude --resume <id>` in a terminal.
 
 The folder must be trusted by Claude Code. If the command line shows `Workspace not trusted`, write `claude` in that folder once and accept.
+
+### 6.16 Look at the open pull requests
+
+1. Push `/`, write `PR`, push `Enter`.
+2. Push `l` (down) or `j` (up) to select a pull request. Each line shows the repo and number, how long ago it changed, and its title. A draft shows `draft` after its number.
+3. Push `Enter` to open it on GitHub in your browser.
+
+Kaching reads the list with `gh` every 30 seconds. If the view shows a `gh search prs` error, write `gh auth login` in a terminal.
 
 ## 7. Change the keys and the fixed messages
 

@@ -3,7 +3,7 @@
 //
 //	kaching                 open the desk
 //	kaching --render WxH    print one frame of the desk at that size and exit (for checks and screenshots)
-//	                        --view CODE picks another view (AG FL RP PR PC HELP)
+//	                        --view CODE picks another view (FL RP RC PR PO PC HELP)
 package main
 
 import (
@@ -33,7 +33,7 @@ func main() {
 		m.w, m.h = w, h
 		m.ttys, m.groups = terminalTabs(), tabGroups()
 		m.refresh()
-		m.props, m.pc = readProposals(), loadPaperclip()
+		m.props, m.pc, m.pulls = readProposals(), loadPaperclip(), loadPulls()
 		m.status = ""
 		if *code != "" {
 			mm, _ := m.command(*code)

@@ -21,6 +21,7 @@ const (
 	vFiles
 	vRepos
 	vProposals
+	vPulls
 	vRecaps
 	vPaperclip
 	vHelp
@@ -32,11 +33,11 @@ var tabs = []struct {
 	v           view
 }{
 	{"IN", "inbox", vDesk},
-	{"AG", "agents", vWall},
 	{"FL", "files", vFiles},
 	{"RP", "repos", vRepos},
 	{"RC", "recaps", vRecaps},
-	{"PR", "proposals", vProposals},
+	{"PR", "pull requests", vPulls},
+	{"PO", "proposals", vProposals},
 	{"PC", "paperclip", vPaperclip},
 }
 
@@ -63,7 +64,7 @@ type model struct {
 	leader     bool   // space was pressed, waiting to see if a leader key follows
 	leaderSeq  int
 	zoom       bool
-	listSel    int // selection inside FL / PR / PC lists
+	listSel    int // selection inside FL / PR / PO / PC lists
 	status     string
 	statusErr  bool
 	expect     map[string]time.Time // sid -> when we sent; cleared when it turns busy
@@ -72,8 +73,9 @@ type model struct {
 	pcDet      map[string]PCDetail // issue id -> its side panel (PC view)
 	pcScroll   *chatScroll         // how far the PC side panel is scrolled back
 	pcAt       time.Time
-	badgeAt    time.Time // when the proposals and Paperclip were last read for the tab bar
-	pendingJob string    // a background agent /NW started: selected once it shows in the list
+	pulls      PullsState // the PR view: open GitHub pull requests
+	badgeAt    time.Time  // when the proposals, pull requests and Paperclip were last read for the tab bar
+	pendingJob string     // a background agent /NW started: selected once it shows in the list
 	props      []string
 	sync       []string
 	ed         *editor
@@ -452,9 +454,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pcAt = time.Now()
 			cmds = append(cmds, func() tea.Msg { return pcMsg(loadPaperclip()) })
 		}
-		if time.Since(m.badgeAt) > badgeEvery { // the PR and PC tabs turn orange on other views too
+		if time.Since(m.badgeAt) > badgeEvery { // the PO and PC tabs turn orange on other views too
 			m.badgeAt = time.Now()
-			cmds = append(cmds, func() tea.Msg { return propsMsg(readProposals()) })
+			cmds = append(cmds, func() tea.Msg { return propsMsg(readProposals()) }, func() tea.Msg { return pullsMsg(loadPulls()) })
 			if m.view != vPaperclip {
 				m.pcAt = time.Now()
 				cmds = append(cmds, func() tea.Msg { return pcMsg(loadPaperclip()) })
@@ -498,6 +500,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("✓ background agent " + msg.job + " started in " + tildify(msg.dir) + " · g attaches a window")
 		m.pendingJob = msg.job
 		m.refresh()
+		return m, nil
+	case pullsMsg:
+		m.pulls = PullsState(msg)
+		if m.listSel >= len(m.pulls.Items) && m.view == vPulls {
+			m.listSel = max(0, len(m.pulls.Items)-1)
+		}
 		return m, nil
 	case propsMsg:
 		m.props = msg
@@ -639,7 +647,7 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch m.view {
-	case vFiles, vProposals, vRecaps, vPaperclip, vRepos:
+	case vFiles, vProposals, vPulls, vRecaps, vPaperclip, vRepos:
 		if done, cmd := m.listKey(ks); done {
 			return m, cmd
 		}
@@ -987,6 +995,8 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 		n = len(m.allFiles())
 	case vProposals:
 		n = len(m.props)
+	case vPulls:
+		n = len(m.pulls.Items)
 	case vRecaps:
 		n = len(m.recaps())
 	case vPaperclip:
@@ -1036,6 +1046,12 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 			if m.listSel < len(m.pc.Items) {
 				openPath("open", m.pc.Items[m.listSel].URL)
 			}
+		case vPulls:
+			if m.listSel < len(m.pulls.Items) {
+				pr := m.pulls.Items[m.listSel]
+				openPath("open", pr.URL)
+				m.setStatus(fmt.Sprintf("opened %s#%d", pr.Repo, pr.Number))
+			}
 		}
 		return true, nil
 	}
@@ -1081,6 +1097,8 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 				m.loadSync()
 			case vProposals:
 				m.loadProposals()
+			case vPulls:
+				return m, func() tea.Msg { return pullsMsg(loadPulls()) }
 			case vPaperclip:
 				m.pcAt = time.Now()
 				return m, func() tea.Msg { return pcMsg(loadPaperclip()) }
@@ -1196,7 +1214,7 @@ func (m *model) recaps() []agentRecap {
 	return out
 }
 
-// badgeEvery: how often the tab bar reads the proposals and Paperclip while their views are not open.
+// badgeEvery: how often the tab bar reads the proposals, pull requests and Paperclip.
 const badgeEvery = 30 * time.Second
 
 // readProposals: the learner's open proposals, one "kind id: ..." line each.
