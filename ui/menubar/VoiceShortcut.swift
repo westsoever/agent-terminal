@@ -1,21 +1,30 @@
 // VoiceShortcut.swift - the global shortcut that wakes the voice dispatcher (dispatcher v2). Part of KachingBar.
 //
-// Right Control + Left Option pressed together: KachingBar plays a short cue (Tink), notes which Terminal tab the
+// Right Control + Left Option tapped together (pressed and let go, no other key): KachingBar plays a short cue (Tink), notes which Terminal tab the
 // owner is looking at, and wakes the dispatcher session (dispatcher/launch.sh: claude --name dispatcher, cwd
 // $AGENT_HOME/dispatcher, talking through VoiceMode's converse tool) so it listens and hands what it hears on.
 //
 // Layers, next to KachingBar.swift's (no drawing code here):
-//   VoiceShortcut  the chord as a pure function of the raw modifier flags, the Accessibility check, the menu entry
+//   ChordTap       the chord as a pure state machine over flagsChanged and keyDown events (testable, no AppKit state)
+//   VoiceShortcut  the Accessibility check, the menu entry, the CLI flags
 //   VoiceWake      one wake: focus file, find the dispatcher, decide start | wake | cue, run it, log it; no UI code
 //   VoiceKeys      the NSEvent monitors and the trust poll inside the running app (main thread)
 //
-// The chord: device-dependent bits of NSEvent.modifierFlags.rawValue, right control NX_DEVICERCTLKEYMASK 0x2000 and
-// left option NX_DEVICELALTKEYMASK 0x20. It fires once, on the flagsChanged event that makes both held (an edge:
-// further modifier changes while both stay down do not fire again), and never while command or shift is held.
-// A global monitor sees it in other apps (needs Accessibility); a local one sees it while KachingBar's menu is open.
+// The chord is a tap, so Ctrl+Option+letter hotkeys (Carbon, in KachingBar) can share the two keys. Read from the
+// device-dependent bits of NSEvent.modifierFlags.rawValue: right control NX_DEVICERCTLKEYMASK 0x2000, left option
+// NX_DEVICELALTKEYMASK 0x20.
+//   arm     on the flagsChanged event that makes both held, when no other modifier is down (shift, command, left
+//           control, right option; caps lock and fn do not count)
+//   disarm  any keyDown while armed (Ctrl+Option+N is a hotkey, not the chord), another modifier joining, or a
+//           Carbon hotkey firing (VoiceKeys.cancelChord(): a registered hotkey's keyDown never reaches the monitors)
+//   fire    when both are released and it is still armed, at most ChordTap.maxHold (1.5 s) after arming
+// Monitors for flagsChanged and keyDown: a global one for other apps (needs Accessibility, keyDown included) and a
+// local one for while KachingBar's menu is open.
 //
 // Accessibility: checked at launch (AXIsProcessTrusted); when missing, macOS is asked once to show its prompt and the
-// menu says "Voice shortcut off: allow KachingBar in Accessibility" (opens that Settings pane). Trust is checked
+// menu says "Voice shortcut off: re-add KachingBar in Accessibility (needed after each rebuild)" (opens that Settings
+// pane). The app is ad-hoc signed, so every rebuild (build.sh, install.sh after a source change) gives it a new
+// signature and macOS drops the grant: remove KachingBar from the Accessibility list and add it again. Trust is checked
 // again every KACHING_BAR_AX_POLL_SECS (5) and whenever the menu opens; the global monitor is installed as soon as
 // it is granted, without a restart. When on, the menu says "Voice: Right Ctrl + Left Option".
 //
@@ -25,19 +34,29 @@
 //           nothing is written (an older file stays; its reader ignores stale ones).
 //   find    $CLAUDE_DIR/sessions/*.json (CLAUDE_DIR default ~/.claude) with name "dispatcher" or cwd
 //           $AGENT_HOME/dispatcher and a live pid (kill(pid, 0) == 0); its tty from `ps -o tty= -p <pid>`.
-//   act     absent -> start: a new Terminal window runs $KACHING_DIR/dispatcher/launch.sh "[shortcut] listen"
+//   act     absent -> start: a new Terminal window runs $KACHING_DIR/dispatcher/launch.sh "[shortcut] listen" and
+//                    Terminal comes to the front; $AGENT_HOME/dispatcher/starting gets the time. Logged "started
+//                    start requested": do script cannot tell whether launch.sh got claude going.
+//           starting -> cue only (logged "starting"): no session yet, but a start was requested under 20 s ago or a
+//                    launch.sh / `claude --name dispatcher` process is running (pgrep -f), so no second window opens
 //           idle   -> wake:  osascript -l JavaScript $KACHING_DIR/terminal/send.js text <tty> "[shortcut] listen"
 //           busy (any status but idle: already listening or working), or no tty -> cue only, nothing typed
-//   log     one line per chord in $AGENT_HOME/dispatcher/shortcut.log: `<ISO time> started|woke|busy|error <details>`
+//   log     one line per chord in $AGENT_HOME/dispatcher/shortcut.log:
+//           `<ISO time> started|starting|woke|busy|error <details>`; a focus file that cannot be written is noted, the
+//           wake goes on
 // Needs, besides Accessibility: Automation (KachingBar -> Terminal), asked by macOS the first time osascript runs.
 //
 // CLI: KachingBar --wake-once [--dry-run]   one wake now, printed as key=value lines (focus_tty, focus_line,
-//                                           dispatcher=absent|idle|busy, action=start|wake|cue, command=..., result);
+//                                           dispatcher=absent|starting|idle|busy, action=start|wake|cue,
+//                                           command=..., result);
 //                                           --dry-run runs nothing and writes nothing (no osascript, no files)
-//      KachingBar --chord-test RAW PREV     fire=1|0 for the chord function (flags in decimal or 0x hex)
+//      KachingBar --chord-test EVENT...     fire=<times the chord fired> over a sequence of events: FLAGS (raw
+//                                           modifier flags, decimal or 0x hex) or `key` (a keyDown), each with an
+//                                           optional @SECONDS time stamp (default: the previous event's)
 // Env: KACHING_BAR_FRONT_TTY   when set, the tab in front (instead of asking Terminal); empty = Terminal not in front
 //      KACHING_BAR_DISPATCHER_TTY  when set, the dispatcher's tty (instead of ps); empty = none   (tests)
 //      KACHING_BAR_AX_TRUSTED  1|0: report Accessibility as granted or not (tests)
+//      KACHING_BAR_PGREP       pgrep to look for a dispatcher being started (default /usr/bin/pgrep; tests)
 //      KACHING_BAR_NO_CUE=1    no sound (tests)        KACHING_BAR_AX_POLL_SECS (5)
 //      CLAUDE_DIR (~/.claude); AGENT_HOME, KACHING_DIR as in KachingBar.swift; CHING_* names still count.
 
@@ -45,22 +64,61 @@ import AppKit
 import ApplicationServices
 import Foundation
 
-// MARK: - Chord and permission
+// MARK: - Chord
 
-enum VoiceShortcut {
+/// The tap of Right Control + Left Option, as a state machine over the events the monitors see. step() says when to fire.
+struct ChordTap: Sendable, Equatable {
     static let rightControl: UInt = 0x0000_2000   // NX_DEVICERCTLKEYMASK
     static let leftOption: UInt = 0x0000_0020     // NX_DEVICELALTKEYMASK
-    static let blockers: UInt = NSEvent.ModifierFlags.command.rawValue | NSEvent.ModifierFlags.shift.rawValue
-    static let menuOn = "Voice: Right Ctrl + Left Option"
-    static let menuOff = "Voice shortcut off: allow KachingBar in Accessibility"
-    static let settingsURL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+    static let maxHold: Double = 1.5              // seconds from arming to release; longer is not a tap
+    /// The modifiers that count: shift, control, option, command and their device bits (left/right of each).
+    static let modifiers: UInt = NSEvent.ModifierFlags.shift.rawValue | NSEvent.ModifierFlags.control.rawValue
+        | NSEvent.ModifierFlags.option.rawValue | NSEvent.ModifierFlags.command.rawValue | 0x0000_207F
+    /// What the chord itself sets: the two device bits and their device-independent control and option.
+    static let chord: UInt = rightControl | leftOption | NSEvent.ModifierFlags.control.rawValue
+        | NSEvent.ModifierFlags.option.rawValue
+
+    enum Event: Sendable { case flags(UInt, at: Double), keyDown(at: Double) }
+
+    private(set) var armed = false
+    private var armedAt = 0.0
+    private var previous: UInt = 0
 
     static func bothHeld(_ raw: UInt) -> Bool { raw & rightControl != 0 && raw & leftOption != 0 }
+    static func neitherHeld(_ raw: UInt) -> Bool { raw & (rightControl | leftOption) == 0 }
+    static func others(_ raw: UInt) -> Bool { raw & modifiers & ~chord != 0 }
 
-    /// True on the transition into "both held", with neither command nor shift down.
-    static func fires(raw: UInt, previous: UInt) -> Bool {
-        bothHeld(raw) && !bothHeld(previous) && raw & blockers == 0
+    /// Feeds one event; true when the chord fires (both let go after a clean tap).
+    mutating func step(_ e: Event) -> Bool {
+        switch e {
+        case .keyDown:
+            armed = false
+            return false
+        case .flags(let raw, let at):
+            defer { previous = raw }
+            if Self.bothHeld(raw) && !Self.bothHeld(previous) && !armed {
+                armed = !Self.others(raw)
+                armedAt = at
+                return false
+            }
+            guard armed else { return false }
+            if Self.others(raw) { armed = false; return false }
+            guard Self.neitherHeld(raw) else { return false }   // one still down: wait for the other
+            armed = false
+            return at - armedAt <= Self.maxHold
+        }
     }
+
+    /// A hotkey went off with these modifiers: whatever was armed is not a tap.
+    mutating func cancel() { armed = false }
+}
+
+// MARK: - Permission and CLI
+
+enum VoiceShortcut {
+    static let menuOn = "Voice: Right Ctrl + Left Option"
+    static let menuOff = "Voice shortcut off: re-add KachingBar in Accessibility (needed after each rebuild)"
+    static let settingsURL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 
     static let trustOverride: Bool? = {
         switch kachingEnvironment()["KACHING_BAR_AX_TRUSTED"] {
@@ -101,10 +159,16 @@ enum VoiceShortcut {
         func usage(_ s: String) -> Int32 { FileHandle.standardError.write(Data("KachingBar: \(s)\n".utf8)); return 64 }
         switch args.first {
         case "--chord-test":
-            guard args.count == 3, let raw = parseFlags(args[1]), let prev = parseFlags(args[2]) else {
-                return usage("usage: --chord-test RAWFLAGS PREVFLAGS")
+            var tap = ChordTap(), at = 0.0, fired = 0
+            for word in args.dropFirst() {
+                let parts = word.split(separator: "@", maxSplits: 1).map(String.init)
+                if parts.count == 2 { guard let t = Double(parts[1]) else { return usage("bad time in \(word)") }; at = t }
+                if parts.first == "key" { if tap.step(.keyDown(at: at)) { fired += 1 }; continue }
+                guard let raw = parts.first.flatMap(parseFlags) else { return usage("usage: --chord-test (FLAGS|key)[@SECONDS]...") }
+                if tap.step(.flags(raw, at: at)) { fired += 1 }
             }
-            print("fire=\(fires(raw: raw, previous: prev) ? 1 : 0)")
+            guard args.count > 1 else { return usage("usage: --chord-test (FLAGS|key)[@SECONDS]...") }
+            print("fire=\(fired)")
             return 0
         case "--wake-once":
             let rest = args.dropFirst()
@@ -123,7 +187,7 @@ enum VoiceShortcut {
 
 // MARK: - Wake
 
-enum DispatcherState: String, Sendable { case absent, idle, busy }
+enum DispatcherState: String, Sendable { case absent, starting, idle, busy }
 enum WakeAction: String, Sendable { case start, wake, cue }
 
 struct DispatcherSession: Sendable, Equatable {
@@ -139,9 +203,10 @@ struct WakePlan: Sendable {
     var action: WakeAction
     var command: [String]      // argv; empty for a cue
     var reason: String         // why only a cue
+    var starting = false       // no session yet, but a start is under way (cooldown or a launch process)
 
     var state: DispatcherState {
-        guard let d = dispatcher else { return .absent }
+        guard let d = dispatcher else { return starting ? .starting : .absent }
         return d.status == "idle" ? .idle : .busy
     }
 
@@ -177,12 +242,14 @@ struct VoiceWake: Sendable {
     var logFile: URL { dispatcherDir.appendingPathComponent("shortcut.log") }
     var launchScript: URL { paths.kachingDir.appendingPathComponent("dispatcher/launch.sh") }
     var sendScript: URL { paths.kachingDir.appendingPathComponent("terminal/send.js") }
+    var startMarker: URL { dispatcherDir.appendingPathComponent("starting") }   // epoch of the last start request
+    static let startCooldown = 20                                                // seconds a start counts as under way
 
     /// One wake: plan, then (unless dryRun) write the focus file, run the command and log. Returns the report.
     func run(frontBundle: String?, dryRun: Bool, now: Date = Date()) -> String {
         let p = plan(frontBundle: frontBundle, dryRun: dryRun, now: now)
         guard !dryRun else { return p.report + "\ndry_run=yes" }
-        let (word, detail) = perform(p)
+        let (word, detail) = perform(p, now: now)
         log(word, "dispatcher=\(p.state.rawValue)" + (p.dispatcher.map { " pid=\($0.pid) tty=\($0.tty ?? "none")" } ?? "")
                 + " focus=\(p.focus)" + (detail.isEmpty ? "" : " \(detail)"), now: now)
         return p.report + "\ndry_run=no\nresult=\(word)" + (detail.isEmpty ? "" : " \(detail)")
@@ -201,12 +268,16 @@ struct VoiceWake: Sendable {
 
         let d = findDispatcher()
         var p = WakePlan(focus: focus, focusLine: line, dispatcher: d, action: .cue, command: [], reason: "")
+        if d == nil, let why = startUnderWay(now: now) { p.starting = true; p.reason = why }
         switch (d, p.state) {
+        case (nil, .starting):
+            break
         case (nil, _):
             let shell = "export AGENT_HOME=\(TerminalLauncher.quote(paths.agentHome.path)); "
                 + "\(TerminalLauncher.quote(launchScript.path)) \(TerminalLauncher.quote(Self.wakeText))"
             p.action = .start
-            p.command = ["/usr/bin/osascript", "-e", "tell application \"Terminal\" to do script \"\(Self.appleScriptEscape(shell))\""]
+            p.command = ["/usr/bin/osascript", "-e", "tell application \"Terminal\" to do script \"\(Self.appleScriptEscape(shell))\"",
+                         "-e", "tell application \"Terminal\" to activate"]
         case (let s?, .idle):
             if let t = s.tty {
                 p.action = .wake
@@ -220,28 +291,58 @@ struct VoiceWake: Sendable {
         return p
     }
 
-    /// Runs the plan. Returns the log word (started | woke | busy | error) and details.
-    func perform(_ p: WakePlan) -> (String, String) {
+    /// Runs the plan. Returns the log word (started | starting | woke | busy | error) and details. A focus file that
+    /// cannot be written is noted in the details; the wake goes on.
+    func perform(_ p: WakePlan, now: Date = Date()) -> (String, String) {
+        var note = ""
         if let line = p.focusLine {
             do {
                 try FileManager.default.createDirectory(at: dispatcherDir, withIntermediateDirectories: true)
                 try Data((line + "\n").utf8).write(to: focusFile, options: .atomic)
             } catch {
-                return ("error", "focus not written: \(error.localizedDescription)")
+                note = "(focus not written: \(error.localizedDescription))"
             }
         }
+        let (word, detail) = act(p, now: now)
+        return (word, [detail, note].filter { !$0.isEmpty }.joined(separator: " "))
+    }
+
+    private func act(_ p: WakePlan, now: Date) -> (String, String) {
         switch p.action {
         case .cue:
-            return p.state == .busy ? ("busy", "") : ("error", p.reason)
+            switch p.state {
+            case .busy: return ("busy", "")
+            case .starting: return ("starting", p.reason)
+            default: return ("error", p.reason)
+            }
         case .start:
             guard FileManager.default.isExecutableFile(atPath: launchScript.path) else { return ("error", "no launch.sh at \(launchScript.path)") }
+            try? FileManager.default.createDirectory(at: dispatcherDir, withIntermediateDirectories: true)
+            try? Data("\(Int(now.timeIntervalSince1970))\n".utf8).write(to: startMarker, options: .atomic)
             guard let r = Self.exec(p.command, timeout: 60) else { return ("error", "osascript did not finish") }
-            return r.status == 0 ? ("started", "") : ("error", "osascript exit \(r.status): \(r.out)")
+            // do script only opens the window: whether launch.sh got claude going is not known here
+            return r.status == 0 ? ("started", "start requested") : ("error", "osascript exit \(r.status): \(r.out)")
         case .wake:
             guard FileManager.default.fileExists(atPath: sendScript.path) else { return ("error", "no send.js at \(sendScript.path)") }
             guard let r = Self.exec(p.command, timeout: 60) else { return ("error", "send.js did not finish") }
             return r.out == "ok" ? ("woke", "") : ("error", r.out.isEmpty ? "send.js exit \(r.status)" : r.out)
         }
+    }
+
+    /// Why a start is already under way, so a second chord must not open a second window: a start requested less
+    /// than startCooldown seconds ago, or a launch.sh / `claude --name dispatcher` process that has no session file
+    /// yet (pgrep -f; KACHING_BAR_PGREP replaces /usr/bin/pgrep in tests). nil when none.
+    func startUnderWay(now: Date) -> String? {
+        if let s = try? String(contentsOf: startMarker, encoding: .utf8),
+           let t = Int(s.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            let age = Int(now.timeIntervalSince1970) - t
+            if age >= 0 && age < Self.startCooldown { return "start requested \(age)s ago" }
+        }
+        let pgrep = env["KACHING_BAR_PGREP"].flatMap { $0.isEmpty ? nil : $0 } ?? "/usr/bin/pgrep"
+        if let r = Self.exec([pgrep, "-f", "dispatcher/launch\\.sh|claude.* --name dispatcher( |$)"], timeout: 5), r.status == 0 {
+            return "a dispatcher process is starting"
+        }
+        return nil
     }
 
     /// The tty of Terminal's front window's selected tab, without /dev/; nil when Terminal cannot say.
@@ -313,7 +414,9 @@ struct VoiceWake: Sendable {
     }
 
     /// Runs argv with stdin closed; stdout and stderr together, trimmed. nil when it could not start or ran past timeout.
+    /// The output is read while it runs (on another thread), so a chatty command cannot fill the pipe and hang.
     static func exec(_ argv: [String], timeout: TimeInterval) -> (status: Int32, out: String)? {
+        final class Sink: @unchecked Sendable { var data = Data(); let done = DispatchSemaphore(value: 0) }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: argv[0])
         p.arguments = Array(argv.dropFirst())
@@ -322,11 +425,14 @@ struct VoiceWake: Sendable {
         p.standardError = out
         p.standardInput = FileHandle.nullDevice
         do { try p.run() } catch { return nil }
+        let sink = Sink(), reader = out.fileHandleForReading
+        DispatchQueue.global(qos: .utility).async { sink.data = reader.readDataToEndOfFile(); sink.done.signal() }
         let deadline = Date().addingTimeInterval(timeout)
         while p.isRunning && Date() < deadline { usleep(20_000) }
         if p.isRunning { p.terminate(); p.waitUntilExit(); return nil }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        return (p.terminationStatus, String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+        // a grandchild still holding the pipe open must not hang us: give the reader 2 s
+        guard sink.done.wait(timeout: .now() + 2) == .success else { return (p.terminationStatus, "") }
+        return (p.terminationStatus, String(decoding: sink.data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
 
@@ -341,7 +447,7 @@ final class VoiceKeys: NSObject {
     private var global: Any?
     private var local: Any?
     private var timer: Timer?
-    private var last: UInt = 0
+    private var tap = ChordTap()
     private var trusted = false
     private var inFlight = false
 
@@ -349,6 +455,10 @@ final class VoiceKeys: NSObject {
         wake = VoiceWake(env: env)
         pollSecs = TimeInterval(Int(env["KACHING_BAR_AX_POLL_SECS"] ?? "").flatMap { $0 > 0 ? $0 : nil } ?? 5)
     }
+
+    /// Call from a Carbon hotkey handler (Ctrl+Option+letter): its keyDown never reaches the monitors, so without
+    /// this letting go of the two keys afterwards would count as a tap.
+    static func cancelChord() { shared?.tap.cancel() }
 
     /// Called once from applicationDidFinishLaunching.
     static func start(env: [String: String]) {
@@ -359,9 +469,9 @@ final class VoiceKeys: NSObject {
     }
 
     private func begin() {
-        local = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] e in
-            let raw = e.modifierFlags.rawValue
-            MainActor.assumeIsolated { self?.flags(raw) }
+        local = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak self] e in
+            let ev = Self.event(e)
+            MainActor.assumeIsolated { self?.handle(ev) }
             return e
         }
         if !VoiceShortcut.trusted() { VoiceShortcut.prompt() }
@@ -380,9 +490,9 @@ final class VoiceKeys: NSObject {
         defer { trusted = now }
         guard now, !trusted else { return }
         if let g = global { NSEvent.removeMonitor(g) }
-        global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] e in
-            let raw = e.modifierFlags.rawValue
-            MainActor.assumeIsolated { self?.flags(raw) }
+        global = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak self] e in
+            let ev = Self.event(e)
+            MainActor.assumeIsolated { self?.handle(ev) }
         }
     }
 
@@ -400,10 +510,12 @@ final class VoiceKeys: NSObject {
 
     @objc private func openSettings() { VoiceShortcut.openSettings() }
 
-    private func flags(_ raw: UInt) {
-        let prev = last
-        last = raw
-        guard VoiceShortcut.fires(raw: raw, previous: prev) else { return }
+    nonisolated private static func event(_ e: NSEvent) -> ChordTap.Event {
+        e.type == .keyDown ? .keyDown(at: e.timestamp) : .flags(e.modifierFlags.rawValue, at: e.timestamp)
+    }
+
+    private func handle(_ e: ChordTap.Event) {
+        guard tap.step(e) else { return }
         VoiceShortcut.cue()
         guard !inFlight else { return }   // the previous wake is still running: the cue is enough
         inFlight = true

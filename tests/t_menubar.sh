@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The menu bar dot (ui/menubar): the watcher's heartbeat and dash.sh --counts (no swiftc needed), then, with swiftc,
 # the app bundle, the dot's state from fixture files (KachingBar --status-once), and install.sh --install-menubar in the
-# sandbox HOME: plist content, dry run, idempotence, uninstall. Also the voice shortcut: the chord function
+# sandbox HOME: plist content, dry run, idempotence, uninstall. Also the voice shortcut: the chord tap
 # (--chord-test), its menu line, and one wake on fixture sessions (--wake-once, mostly --dry-run). Without swiftc the
 # build half is skipped with a note.
 # shellcheck source=lib.sh
@@ -133,34 +133,45 @@ out=$(AGENT_HOME="$S_AH" LAUNCH_AGENTS_DIR="$S_LA" KACHING_DIR="$WORK/no-kit" "$
 assert_eq "status: no dash.sh -> still green/amber/grey from the heartbeat, counts unavailable" "unavailable" "$(kv "$out" counts)"
 assert_eq "status: without counts a running Kaching is green" "green" "$(kv "$out" state)"
 
-# ---------- the voice shortcut: the chord function (KachingBar --chord-test RAW PREV) ----------
+# ---------- the voice shortcut: the chord tap (KachingBar --chord-test EVENT...) ----------
 # raw flags as macOS sends them: control 0x40000 + right-control bit 0x2000, option 0x80000 + left-option bit 0x20,
-# 0x100 always set; command 0x100000 (left bit 0x8), shift 0x20000 (left bit 0x2)
-chord() { "$EXE" --chord-test "$1" "$2" 2>&1; }
-assert_eq "chord: right ctrl + left option pressed -> fires" "fire=1" "$(chord 0xC2120 0x42100)"
-assert_eq "chord: both from nothing -> fires" "fire=1" "$(chord 0xC2120 0x100)"
-assert_eq "chord: right ctrl only -> no" "fire=0" "$(chord 0x42100 0x100)"
-assert_eq "chord: left option only -> no" "fire=0" "$(chord 0x80120 0x100)"
-assert_eq "chord: left ctrl + left option -> no" "fire=0" "$(chord 0xC0121 0x40101)"
-assert_eq "chord: right ctrl + right option -> no" "fire=0" "$(chord 0xC2140 0x42100)"
-assert_eq "chord: with command held -> no" "fire=0" "$(chord 0x1C2128 0x142108)"
-assert_eq "chord: with shift held -> no" "fire=0" "$(chord 0xE2122 0x62102)"
-assert_eq "chord: still held (another modifier changed) -> no repeat" "fire=0" "$(chord 0xC2120 0xC2120)"
-assert_eq "chord: releasing command while both stay held -> no" "fire=0" "$(chord 0xC2120 0x1C2128)"
-assert_eq "chord: let go of option, pressed again -> fires again" "fire=1" "$(chord 0xC2120 0x42100)"
+# 0x100 always set; command 0x100000 (left bit 0x8), shift 0x20000 (left bit 0x2), caps lock 0x10000
+RC=0x42100; LO=0x80120; BOTH=0xC2120; NONE=0x100
+chord() { "$EXE" --chord-test "$@" 2>&1; }
+assert_eq "chord: tap (ctrl, option, let go of option, then ctrl) -> fires" "fire=1" "$(chord $RC $BOTH $RC $NONE)"
+assert_eq "chord: tap in the other order -> fires" "fire=1" "$(chord $LO $BOTH $LO $NONE)"
+assert_eq "chord: pressing alone does not fire (fires on release)" "fire=0" "$(chord $RC $BOTH)"
+assert_eq "chord: one let go, the other still held -> not yet" "fire=0" "$(chord $RC $BOTH $RC)"
+assert_eq "chord: a key while held (Ctrl+Option+N) -> no" "fire=0" "$(chord $RC $BOTH key $RC $NONE)"
+assert_eq "chord: two taps -> fires twice" "fire=2" "$(chord $RC $BOTH $RC $NONE $RC $BOTH $RC $NONE)"
+assert_eq "chord: a key before the chord does not matter" "fire=1" "$(chord key $RC $BOTH $RC $NONE)"
+assert_eq "chord: right ctrl only -> no" "fire=0" "$(chord $RC $NONE)"
+assert_eq "chord: left option only -> no" "fire=0" "$(chord $LO $NONE)"
+assert_eq "chord: left ctrl + left option -> no" "fire=0" "$(chord 0x40101 0xC0121 0x40101 $NONE)"
+assert_eq "chord: right ctrl + right option -> no" "fire=0" "$(chord $RC 0xC2140 $RC $NONE)"
+assert_eq "chord: command held first -> no" "fire=0" "$(chord 0x142108 0x1C2128 0x142108 $NONE)"
+assert_eq "chord: shift held first -> no" "fire=0" "$(chord 0x62102 0xE2122 0x62102 $NONE)"
+assert_eq "chord: command joins while armed -> no" "fire=0" "$(chord $RC $BOTH 0x1C2128 $BOTH $RC $NONE)"
+assert_eq "chord: left ctrl joins while armed -> no" "fire=0" "$(chord $RC $BOTH 0xC2121 $BOTH $RC $NONE)"
+assert_eq "chord: caps lock on does not count" "fire=1" "$(chord 0x52100 0xD2120 0x52100 0x10100)"
+assert_eq "chord: let go of one and press it again, then both up -> one tap" "fire=1" "$(chord $RC $BOTH $RC $BOTH $RC $NONE)"
+assert_eq "chord: held 1.4 s -> fires" "fire=1" "$(chord $RC@10 $BOTH@10 $RC@11.4 $NONE@11.4)"
+assert_eq "chord: held 2 s -> not a tap" "fire=0" "$(chord $RC@10 $BOTH@10 $RC@12 $NONE@12)"
 assert_eq "chord: decimal flags work too" "fire=1" "$(chord 8224 0)"
-assert_fails "chord: missing argument is refused" "$EXE" --chord-test 0x2020
+assert_fails "chord: no events is refused" "$EXE" --chord-test
+assert_fails "chord: a bad event is refused" "$EXE" --chord-test 0x2020 bogus
 assert_fails "wake: unknown --wake-once option is refused" "$EXE" --wake-once --bogus
 
 # ---------- the voice shortcut's menu line (Accessibility forced with KACHING_BAR_AX_TRUSTED) ----------
 assert_contains "voice: trusted -> the shortcut is shown" "$(KACHING_BAR_AX_TRUSTED=1 status)" "menu=Voice: Right Ctrl + Left Option [info]"
 out=$(KACHING_BAR_AX_TRUSTED=0 status)
-assert_contains "voice: not trusted -> the menu asks for Accessibility" "$out" "menu=Voice shortcut off: allow KachingBar in Accessibility"
+assert_contains "voice: not trusted -> the menu asks for Accessibility" "$out" "menu=Voice shortcut off: re-add KachingBar in Accessibility (needed after each rebuild)"
 assert_not_contains "voice: not trusted -> no 'Voice:' line" "$out" "menu=Voice: Right Ctrl"
 
 # ---------- one wake: KachingBar --wake-once [--dry-run] on fixture sessions ----------
 W_CD="$WORK/wake-claude"; W_AH="$WORK/wake-agent"; mkdir -p "$W_CD/sessions" "$W_AH/dispatcher"
-wake() { CLAUDE_DIR="$W_CD" AGENT_HOME="$W_AH" KACHING_DIR="$KIT" KACHING_BAR_NO_CUE=1 KACHING_BAR_DISPATCHER_TTY="${W_TTY-ttys009}" "$EXE" --wake-once "$@" 2>&1; }
+wake() { CLAUDE_DIR="$W_CD" AGENT_HOME="$W_AH" KACHING_DIR="$KIT" KACHING_BAR_NO_CUE=1 KACHING_BAR_DISPATCHER_TTY="${W_TTY-ttys009}" \
+  KACHING_BAR_PGREP="${W_PGREP:-/usr/bin/false}" "$EXE" --wake-once "$@" 2>&1; }   # false: no dispatcher process being started
 w_sess() { # file pid name cwd status
   printf '{"pid":%s,"sessionId":"x","cwd":"%s","name":"%s","status":"%s","updatedAt":1}\n' "$2" "$4" "$3" "$5" >"$W_CD/sessions/$1.json"
 }
@@ -178,6 +189,22 @@ if printf '%s\n' "$(kv "$out" focus_line)" | grep -Eq '^ttys003 [0-9]{10}$'; the
 assert_eq "wake: dry run says so" "yes" "$(kv "$out" dry_run)"
 assert_no_file "wake: dry run writes no focus file" "$W_AH/dispatcher/focus"
 assert_no_file "wake: dry run writes no log" "$W_AH/dispatcher/shortcut.log"
+assert_contains "wake: start brings Terminal to the front" "$(kv "$out" command)" "-e 'tell application \"Terminal\" to activate'"
+
+# a start already under way: no second window
+date +%s >"$W_AH/dispatcher/starting"
+out=$(wake --dry-run)
+assert_eq "wake: start requested under 20 s ago -> starting" "starting" "$(kv "$out" dispatcher)"
+assert_eq "wake: starting -> cue only" "cue" "$(kv "$out" action)"
+assert_eq "wake: starting -> no command" "none" "$(kv "$out" command)"
+assert_contains "wake: starting says why" "$(kv "$out" reason)" "start requested"
+echo $(( $(date +%s) - 60 )) >"$W_AH/dispatcher/starting"
+assert_eq "wake: a start requested a minute ago is over -> start again" "start" "$(kv "$(wake --dry-run)" action)"
+out=$(W_PGREP=/usr/bin/true wake --dry-run)
+assert_eq "wake: a launch.sh / claude --name dispatcher process -> starting" "starting" "$(kv "$out" dispatcher)"
+assert_eq "wake: the process is the reason" "a dispatcher process is starting" "$(kv "$out" reason)"
+assert_contains "wake: for real, no launch.sh -> error, nothing run" "$(CLAUDE_DIR="$W_CD" AGENT_HOME="$W_AH" KACHING_DIR="$WORK/no-kit" KACHING_BAR_NO_CUE=1 KACHING_BAR_FRONT_TTY= KACHING_BAR_PGREP=/usr/bin/false "$EXE" --wake-once 2>&1)" "result=error no launch.sh at $WORK/no-kit/dispatcher/launch.sh"
+rm -f "$W_AH/dispatcher/starting" "$W_AH/dispatcher/shortcut.log"
 
 w_sess dead "$DEAD" dispatcher "$W_AH/dispatcher" idle
 assert_eq "wake: a dead pid counts as absent" "absent" "$(kv "$(wake --dry-run)" dispatcher)"
@@ -219,6 +246,11 @@ printf 'ttys001 1\n' >"$W_AH/dispatcher/focus"
 KACHING_BAR_FRONT_TTY= wake >/dev/null
 assert_eq "wake: Terminal not in front leaves the older focus file" "ttys001 1" "$(cat "$W_AH/dispatcher/focus")"
 assert_eq "wake: one log line per chord" "2" "$(wc -l <"$W_AH/dispatcher/shortcut.log" | tr -d ' ')"
+rm -f "$W_AH/dispatcher/focus"; mkdir "$W_AH/dispatcher/focus"   # a focus file that cannot be written
+out=$(KACHING_BAR_FRONT_TTY=ttys003 wake)
+assert_contains "wake: a failed focus write does not stop the wake" "$(kv "$out" result)" "busy (focus not written:"
+assert_contains "wake: the failed focus write is logged" "$(tail -1 "$W_AH/dispatcher/shortcut.log")" "(focus not written:"
+rmdir "$W_AH/dispatcher/focus"
 kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null
 
 # ---------- install.sh --install-menubar in the sandbox HOME ----------
