@@ -263,6 +263,8 @@ func TestNWCommandOptions(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(work) })
 	m := newModel()
 	m.w, m.h = 140, 40
+	m.agents = []Agent{{SID: "s1", Name: "miso", Cwd: work, InTerminal: true}} // the panel's title shows the options
+	m.selSID = "s1"
 	m.cfg.NWModel, m.cfg.NWPerm = "", ""
 	mm, _ := m.command("NW " + work + " sonnet high")
 	m = mm.(model)
