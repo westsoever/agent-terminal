@@ -24,6 +24,7 @@ type Keys struct {
 	Reply   string `toml:"type_reply"`
 	Open    string `toml:"open_file"`
 	Goto    string `toml:"go_to_window"`
+	Here    string `toml:"bring_here"`
 	Command string `toml:"command"`
 	Wall    string `toml:"wall"`
 	Zoom    string `toml:"zoom"`
@@ -50,7 +51,8 @@ prev = "j"            # previous agent (up the list)
 next_waiting = " "    # space alone: next agent that waits for you
 type_reply = "k"      # write a reply (enter sends, esc keeps a draft)
 open_file = "o"       # then a letter: open that mentioned file
-go_to_window = "g"    # bring the agent's own Terminal window forward
+go_to_window = "g"    # bring the agent's own Terminal window forward, where it is
+bring_here = "h"      # bring the agent's window to the main display and into focus, to type in it
 command = "/"         # command line: IN AG FL RP PR PC A<n> HELP QUIT
 wall = "W"            # every agent as tiles
 zoom = "z"            # in the wall: one tile full screen
@@ -137,6 +139,7 @@ func loadConfig() (Config, time.Time, error) {
 	fill(&c.Keys.Reply, def.Keys.Reply)
 	fill(&c.Keys.Open, def.Keys.Open)
 	fill(&c.Keys.Goto, def.Keys.Goto)
+	fill(&c.Keys.Here, def.Keys.Here)
 	fill(&c.Keys.Command, def.Keys.Command)
 	fill(&c.Keys.Wall, def.Keys.Wall)
 	fill(&c.Keys.Zoom, def.Keys.Zoom)

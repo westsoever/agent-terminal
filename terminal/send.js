@@ -5,6 +5,9 @@
 //   keys TTY KEY...      press keys: 0-9, enter, esc, tab, up, down, left, right, backspace
 //   raise TTY            select the tab, bring its window to the front and activate Terminal (the `g` key)
 //   ttys                 every Terminal tab's tty, one per line (which sessions can be typed into)
+//   tabs                 every Terminal tab as "tty window_id tab_index" (1-based), one per line
+//   tabgroups            macOS window tabs (Window > Merge All Windows: each tab is its own window): one line per
+//                        tab bar, its tab titles in order, tab-separated (read through System Events)
 //   screen TTY           what the tab shows now (its visible text), for reading a menu the agent shows
 //   answer TTY N TEXT    in a menu, pick option N (its "Type something." line) and type TEXT; the newline that
 //                        do script adds submits it, so no extra Enter
@@ -83,7 +86,29 @@ function press(t, win, tab, keys) {
 function run(argv) {
   const [cmd, tty] = argv;
   const t = Application('Terminal');
-  if (!t.running()) return cmd === 'ttys' ? '' : 'error: Terminal not running';
+  if (!t.running()) return cmd === 'ttys' || cmd === 'tabs' || cmd === 'tabgroups' ? '' : 'error: Terminal not running';
+  if (cmd === 'tabgroups') {
+    const out = [];
+    try {
+      const p = Application('System Events').processes.byName('Terminal');
+      p.windows().forEach(w => {
+        try {
+          const titles = w.tabGroups[0].radioButtons.title();
+          if (titles && titles.length > 1) out.push(titles.join('\t'));
+        } catch (e) {}
+      });
+    } catch (e) { return ''; }
+    return out.join('\n');
+  }
+  if (cmd === 'tabs') {
+    const out = [];
+    t.windows().forEach(w => {
+      let ttys, id;
+      try { ttys = w.tabs.tty(); id = w.id(); } catch (e) { return; }
+      (ttys || []).forEach((x, i) => { if (x) out.push(String(x).replace('/dev/', '') + ' ' + id + ' ' + (i + 1)); });
+    });
+    return out.join('\n');
+  }
   if (cmd === 'ttys') {
     const out = [];
     t.windows().forEach(w => {

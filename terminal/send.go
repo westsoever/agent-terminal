@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 //go:embed send.js
@@ -43,15 +44,51 @@ func answerTyped(tty string, n int, text string) string {
 	return osa("answer", tty, strconv.Itoa(n), text)
 }
 
-// terminalTTYs is the set of ttys that are Terminal.app tabs.
-func terminalTTYs() map[string]bool {
-	m := map[string]bool{}
-	for _, l := range strings.Split(osa("ttys"), "\n") {
-		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "error") {
-			m[l] = true
+// tabPos is where a tty sits in Terminal: its window and its tab's place in that window (1-based).
+type tabPos struct{ win, tab int }
+
+// terminalTabs: every Terminal.app tab by tty.
+func terminalTabs() map[string]tabPos {
+	m := map[string]tabPos{}
+	for _, l := range strings.Split(osa("tabs"), "\n") {
+		f := strings.Fields(l)
+		if len(f) != 3 || strings.HasPrefix(l, "error") {
+			continue
 		}
+		w, _ := strconv.Atoi(f[1])
+		t, _ := strconv.Atoi(f[2])
+		m[f[0]] = tabPos{w, t}
 	}
 	return m
+}
+
+// tabGroups: the macOS window-tab bars of Terminal, each as the session names of its tabs in order. A tab's
+// title is "<folder> — <spinner> <session name> — <process>"; the name is its middle part without the spinner.
+func tabGroups() [][]string {
+	var out [][]string
+	for _, l := range strings.Split(osa("tabgroups"), "\n") {
+		if l == "" || strings.HasPrefix(l, "error") {
+			continue
+		}
+		var names []string
+		for _, title := range strings.Split(l, "\t") {
+			names = append(names, titleName(title))
+		}
+		out = append(out, names)
+	}
+	return out
+}
+
+func titleName(title string) string {
+	parts := strings.Split(title, " — ")
+	if len(parts) < 2 {
+		return ""
+	}
+	n := strings.TrimSpace(parts[1])
+	if r := []rune(n); len(r) > 2 && !unicode.IsLetter(r[0]) && !unicode.IsDigit(r[0]) && r[1] == ' ' {
+		n = string(r[2:]) // the spinner Claude Code puts in front of the name
+	}
+	return n
 }
 
 func openPath(cmd, path string) error {
