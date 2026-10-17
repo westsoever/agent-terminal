@@ -11,14 +11,16 @@
 #           a stack). Only the window whose own event fired comes over, never a backlog (D38). A window on the
 #           main display is never moved (it is one of yours). With kaching open nothing moves (D37).
 #   back    the session was prompted (session-start.sh touch): forget its tab; when no other tab of a parked
-#           window still waits, move the window back to exactly the saved frame.
+#           window still waits, move the window back to exactly the saved frame. That includes a window you
+#           brought over by hand (show / h, or a drag) and holds while kaching is open (D43).
 #   forget  the session ended (session-start.sh end): forget its tab and, when nothing else waits there, the
 #           parked window too, without moving it.
 #   next    raise the next waiting tab's window wherever it is (after the one shown last, wrapping, oldest
 #           first), select the tab, activate Terminal. Prints one line for a Raycast HUD.
 #   dragged the menu bar app saw window ID change display by hand; X Y W H is its frame before. Onto the main
-#           display: it takes the park frame and its cell stays reserved. Back onto the other display: into
-#           exactly its reserved cell. Any other window put on the other display joins the grid (D38).
+#           display: it takes the park frame and its cell stays reserved; it stays until you drag it back or
+#           its session is prompted (D43). Back onto the other display: into exactly its reserved cell. Any
+#           other window put on the other display joins the grid (D38).
 #   show    put that agent's window on the main display now, as if dragged there.
 #   return  kaching sent that agent an answer: a window the queue moved to the main display (by its event, show
 #           or a drag) goes back to its cell, also while kaching is open; not while another tab of it waits (D42).
@@ -59,7 +61,7 @@ case "$(config_get queue_tile on | tr '[:upper:]' '[:lower:]')" in off|0|no|fals
 QDIR="$AGENT_HOME/queue"
 WAITING="$QDIR/waiting"   # one file per waiting tab: <tty>, holding "epoch session_id kind name" (name may hold spaces)
 PARKED="$QDIR/parked"     # one file per moved window: <window id>, holding its old frame, when and how:
-                          # "x y w h epoch auto|hand" (hand: dragged over by you; only a drag sends it back)
+                          # "x y w h epoch auto|hand" (hand: dragged over by you; a drag back or a prompt sends it back)
 COME="$QDIR/come"         # one file per tab whose own park event may bring its window over: <tty>
 TABS="$QDIR/tabs"         # one file per Terminal session: <session id>, holding "tty window_id tab_index name"
 mkdir -p "$WAITING" "$PARKED" "$TABS" "$COME"
@@ -220,7 +222,7 @@ single_mode() {
 #   kaching open (D37): nothing moves. kaching's list is the inbox.
 #   kaching closed: the windows with a waiting tab whose own park event asked to come (come/<tty>) are parked;
 #           a window parked that way goes back to its cell once none of its tabs wants it. A window you dragged
-#           over (hand) stays until you drag it back.
+#           over (hand) is not sent back here: only a drag back or a prompt of its session (send_back) moves it.
 # A window that is wanted and not parked is parked; an auto-parked window that is not wanted goes back.
 reconcile() {
   local want="" win f id target t
@@ -265,6 +267,22 @@ park_window() { # id auto|hand [x y w h: the cell to keep, default where it is n
   # shellcheck disable=SC2086
   relocate "$id" $target
   ev queue_park "$(jq -nc --arg w "$id" --arg h "$2" '{window:$w,how:$h}')"
+}
+
+# send_back TTY HOW: the session of TTY was prompted or answered, so its window, when the queue moved it to the
+# main display (its own event, show / h, or a drag), goes back to exactly its cell, also while kaching is open:
+# it is the owner's own action (D42, D43). Not while another tab of that window still waits. Prints what it did.
+send_back() {
+  local win id
+  win=$(window_of "$1")
+  id=${win%% *}
+  if [ -z "$win" ] || [ ! -f "$PARKED/$id" ]; then echo "Not parked"; return 0; fi
+  if others_waiting "$win" "$1"; then echo "Another tab waits"; return 0; fi
+  # shellcheck disable=SC2046
+  relocate "$id" $(cut -d' ' -f1-4 "$PARKED/$id")
+  rm -f "$PARKED/$id" "$COME/$1"
+  ev queue_back "$(jq -nc --arg w "$id" --arg h "$2" '{window:$w,how:$h}')"
+  echo "Returned"
 }
 
 on_main() { # x y w h -> true when that frame's centre is on the main display
@@ -350,7 +368,10 @@ case "$CMD" in
                       # its own event, kaching closed, not the idle reminder: this window may come over (D38)
                       if ! single_mode && [ "${QUEUE_KIND:-done}" != idle ]; then : >"$COME/$TTY"; fi
                       lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
-      back)   job() { rm -f "$WAITING/$TTY" "$COME/$TTY"; lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
+      back)   job() { rm -f "$WAITING/$TTY" "$COME/$TTY"; lock || return 0; load_windows; register "$TTY"
+                      send_back "$TTY" prompted >/dev/null; reconcile
+                      # kaching open: reconcile moves nothing and does not flush; apply the send_back move alone
+                      if single_mode && [ -n "${MOVES// /}" ]; then flush >/dev/null; fi; } ;;
       retile) job() { lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
       forget) job() { # the session ended: its tab leaves the queue; a parked window with nothing else waiting
                       # stays where it is (it is yours now)
@@ -371,16 +392,8 @@ case "$CMD" in
     if [ -z "$tty" ]; then echo "Unknown session: $NAME_ARG"; exit 0; fi
     lock || { echo "Queue busy, try again"; exit 0; }
     load_windows
-    win=$(window_of "$tty")
-    id=${win%% *}
-    if [ -z "$win" ] || [ ! -f "$PARKED/$id" ]; then echo "Not parked"; exit 0; fi
-    if others_waiting "$win" "$tty"; then echo "Another tab waits"; exit 0; fi
-    # shellcheck disable=SC2046
-    relocate "$id" $(cut -d' ' -f1-4 "$PARKED/$id")
-    rm -f "$PARKED/$id" "$COME/$tty"
-    ev queue_back "$(jq -nc --arg w "$id" '{window:$w,how:"answered"}')"
-    flush >/dev/null
-    echo "Returned" ;;
+    send_back "$tty" answered
+    flush >/dev/null ;;
   show|dismiss)
     # show SESSION_ID: put that agent's window on the main display now, as if you dragged it there.
     # dismiss SESSION_ID: take the agent out of the queue without an answer; a window the queue brought over

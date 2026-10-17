@@ -217,7 +217,8 @@ assert_eq "dismiss: back in its cell" "2100 600 800 400" "$(win 202)"
 assert_eq "dismiss: no longer waiting" "" "$(ls "$QD/waiting")"
 assert_eq "dismiss: unknown session" "Unknown session: nope" "$("$Q" dismiss nope)"
 
-# kaching open (a live pid in terminal/open, D37): no window moves; kaching's list is the inbox
+# kaching open (a live pid in terminal/open, D37): no window moves on its own; kaching's list is the inbox. A prompt
+# still sends a window back (D43).
 reset "211 2000 100 800 500 ttys210" "212 2100 600 800 400 ttys211" "213 2900 100 800 400 ttys212"
 mkdir -p "$AGENT_HOME/terminal"
 QUEUE_SID=s212 QUEUE_TTY=ttys212 "$Q" park early             # waits before kaching opens: comes over (normal mode)
@@ -230,7 +231,7 @@ assert_eq "kaching open: a waiting window stays in its cell" "2000 100 800 500" 
 assert_eq "kaching open: the next one too" "2100 600 800 400" "$(win 212)"
 assert_eq "kaching open: one parked before stays where it is (no moves at all)" "40 70 800 400" "$(win 213)"
 QUEUE_SID=s212 QUEUE_TTY=ttys212 "$Q" back
-assert_eq "kaching open: answered, it still does not move" "40 70 800 400" "$(win 213)"
+assert_eq "kaching open: prompted, it goes back to its cell (D43)" "2900 100 800 400" "$(win 213)"
 QUEUE_SID=s210 QUEUE_TTY=ttys210 "$Q" back
 assert_eq "kaching open: nothing came over" "2100 600 800 400" "$(win 212)"
 # kaching closed (a dead pid): no backlog comes over; only a window whose own event fires now
@@ -255,9 +256,9 @@ awk '$1 == 303 { $2 = 500; $3 = 300 } { print }' "$FT/windows" >"$FT/w.tmp" && m
 assert_eq "drag to main: the park frame" "320 70 690 948" "$(win 303)"
 assert_eq "drag to main: its cell is kept" "1920 473 960 540 hand" "$(cut -d' ' -f1-4,6 "$QD/parked/303")"
 assert_eq "drag to main: the others keep the 2x2 grid" "2880 473 960 540" "$(win 304)"
-# a prompt or another session's event does not send a hand-dragged window back
-QUEUE_SID=s302 QUEUE_TTY=ttys302 "$Q" back
-assert_eq "hand-dragged: a prompt leaves it on the main display" "320 70 690 948" "$(win 303)"
+# another session's prompt or event does not send a hand-dragged window back
+QUEUE_SID=s300 QUEUE_TTY=ttys300 "$Q" back
+assert_eq "hand-dragged: another session's prompt leaves it on the main display" "320 70 690 948" "$(win 303)"
 # drag it back (dropped somewhere on monitor 2): exactly into its reserved cell
 awk '$1 == 303 { $2 = 3000; $3 = 100 } { print }' "$FT/windows" >"$FT/w.tmp" && mv "$FT/w.tmp" "$FT/windows"
 "$Q" dragged 303 320 70 690 948
@@ -297,5 +298,20 @@ QUEUE_SID=s321 QUEUE_NAME=b QUEUE_TTY=ttys321 "$Q" retile
 QUEUE_KIND=input QUEUE_SID=s321 QUEUE_NAME=b QUEUE_TTY=ttys321 "$Q" park b
 assert_eq "return: another tab waits, the window stays" "Another tab waits" "$("$Q" return s320)"
 assert_eq "return: still parked" "321" "$(ls "$QD/parked")"
+# its own session is prompted (D43): a window brought over by hand (show / h, or a drag) goes back to its cell,
+# also while kaching is open
+reset "331 1920 -67 960 1080 ttys330"
+QUEUE_SID=s330 QUEUE_NAME=c QUEUE_TTY=ttys330 "$Q" retile
+"$Q" show s330 >/dev/null
+assert_eq "shown: on the main display" "320 70 690 948" "$(win 331)"
+QUEUE_SID=s330 QUEUE_TTY=ttys330 "$Q" back
+# (tiling is on here: the one window on monitor 2 fills it)
+assert_eq "shown, then prompted with kaching open: back on monitor 2" "1920 -67 1920 1080" "$(win 331)"
+assert_no_file "shown, then prompted: no longer parked" "$QD/parked/331"
 rm -f "$AGENT_HOME/terminal/open"
+awk '$1 == 331 { $2 = 500; $3 = 300 } { print }' "$FT/windows" >"$FT/w.tmp" && mv "$FT/w.tmp" "$FT/windows"
+"$Q" dragged 331 1920 -67 960 1080
+QUEUE_SID=s330 QUEUE_TTY=ttys330 "$Q" back
+assert_eq "dragged, then prompted with kaching closed: back on monitor 2" "1920 -67 1920 1080" "$(win 331)"
+assert_no_file "dragged, then prompted: no longer parked" "$QD/parked/331"
 exit 0
