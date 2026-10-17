@@ -78,6 +78,15 @@ allow_b "dash.sh --next via the absolute installed path" "$DASH_ABS --next"
 allow_b "dash.sh --hours 6 --all" '~/.claude/kaching/bin/dash.sh --hours 6 --all'
 allow_b "dash.sh with no flag (the table)" '~/.claude/kaching/bin/dash.sh'
 allow_b "dash.sh via the kit's own bin dir" "$KIT/bin/dash.sh --speak"
+allow_b "dash.sh --route (the routing list)" '~/.claude/kaching/bin/dash.sh --route'
+allow_b "dash.sh --route via the absolute installed path" "$DASH_ABS --route"
+deny_b "dash.sh --route piped anywhere" '~/.claude/kaching/bin/dash.sh --route | cat'
+deny_b "dash.sh --route with a redirect" '~/.claude/kaching/bin/dash.sh --route > /tmp/out'
+deny_b "dash.sh --route with another flag" '~/.claude/kaching/bin/dash.sh --route --all'
+deny_b "dash.sh --route after another flag" '~/.claude/kaching/bin/dash.sh --speak --route'
+deny_b "dash.sh --route twice" '~/.claude/kaching/bin/dash.sh --route --route'
+assert_contains "the unknown-flag deny names --route among the allowed flags" \
+  "$(gate_out Bash "$(bash_in '~/.claude/kaching/bin/dash.sh --evil')")" "--route"
 deny_b "an ordinary command" 'ls -la'
 deny_b "rm -rf" 'rm -rf /tmp/x'
 deny_b "reading .env through cat" 'cat ~/.miso/.env.local'

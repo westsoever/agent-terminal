@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dash.sh [--speak | --inbox | --next | --counts] [--hours N] [--all]
+# dash.sh [--speak | --inbox | --next | --counts | --route] [--hours N] [--all]
 # Machine-wide view: one line per Claude session on this computer.
 # Sources: (1) ~/.agent/sessions/*/meta written by the hooks and kaching-watch.sh, (2) transcripts in
 # ~/.claude/projects/*/*.jsonl modified recently (sessions that predate the hooks), (3) worktrees
@@ -18,11 +18,17 @@
 #   --counts   machine-readable key=value lines for the menu bar dot (ui/menubar): sessions, active, blocked, input,
 #              needs (blocked + input), proposals. Cheap and read-only: the registry only (no transcript scan, no git, so
 #              sessions predating the hooks and worktree-only rows are not counted) and it never writes inbox.seen.
+#   --route    the voice dispatcher's routing list, for a model to read (no ANSI, no speech): a header line, then one TSV
+#              line per LIVE Claude Code session ($CLAUDE_DIR/sessions/*.json, kill -0 pid; the dispatcher and claude-mem
+#              observers left out):  name  message_to  status  state  state_dir  notes  focus  branch
+#              message_to is the json name (what SendMessage takes); name is "home" for ~; a missing value is "-".
+#              Focused first (its tty is in $AGENT_HOME/dispatcher/focus, "<tty> <epoch>", at most DASH_FOCUS_MAX_AGE
+#              seconds old), then busy, idle, then by name. Columns and DASH_PS_TTY_CMD: see route_list in this file.
 # Git sync (bin/sync-check.sh writes $AGENT_HOME/sync-check.md): the default view ends with one `sync:` line when the
 #   snapshot lists repos that need attention, or is older than 24 h; --inbox ends with a SYNC lane, oldest first, that
 #   shows the snapshot age ("stale snapshot" over 24 h, "never run" without one). No snapshot: the default view is unchanged.
 # Notes come from the STATE.md checkpoint `blocker:` (unless none), else the first "## Blocked" bullet.
-# Env: AGENT_HOME CLAUDE_DIR AGENT_REPOS_FILE DASH_NOW (epoch, tests) DASH_ACTIVE_MINS (30)
+# Env: AGENT_HOME CLAUDE_DIR AGENT_REPOS_FILE DASH_NOW (epoch, tests) DASH_ACTIVE_MINS (30) DASH_FOCUS_MAX_AGE (600) DASH_PS_TTY_CMD
 set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
@@ -35,10 +41,11 @@ while [ $# -gt 0 ]; do
     --inbox) MODE=inbox; shift ;;
     --next) MODE=next; shift ;;
     --counts) MODE=counts; shift ;;
+    --route) MODE=route; shift ;;
     --hours) HOURS=${2:?}; shift 2 ;;
     --all) HOURS=720; shift ;;
     -h|--help) sed -n '2,/^# Env:/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "dash: unknown argument $1" >&2; exit 64 ;;
+    *) echo "dash: unknown argument $1 (use --speak, --inbox, --next, --counts, --route, --hours N, --all or --help)" >&2; exit 64 ;;
   esac
 done
 
@@ -133,6 +140,116 @@ meta_load() {
   done <"$1"
   return 0
 }
+
+# ---- --route: the dispatcher's routing list. Reads only the Claude Code session files, the metas of those
+# sessions and the focus file: none of the registry, transcript or worktree scans below.
+#   source     $CLAUDE_DIR/sessions/*.json (one jq over all files; one per file only when a file is unreadable).
+#   skipped    dead pids (kill -0), files without a pid, a kind other than interactive, the dispatcher itself (json
+#              name "dispatcher" or cwd $AGENT_HOME/dispatcher), claude-mem observer sessions (cwd under
+#              /.claude-mem/observer-sessions, as terminal/snapshot.go hidden()).
+#   name       the display name used elsewhere (name_for: repo/worktree dir, else the folder), "home" for the home folder
+#   message_to the json name: what ListAgents shows and SendMessage takes
+#   status     json busy|idle;  state: Kaching's meta state= (working/input/blocked/done/...)
+#   state_dir  $AGENT_HOME/sessions/<sid> if it holds STATE.md, else <root>/.agent if that does (root: meta root=,
+#              else the git toplevel of cwd), else $AGENT_HOME/sessions/<sid>;  notes: yes when state_dir has STATE.md
+#   focus      "focused" for the session whose tty is named in $AGENT_HOME/dispatcher/focus ("<tty> <epoch>", written
+#              by KachingBar on the voice shortcut; a /dev/ prefix is fine) while that epoch (else the file's mtime) is
+#              at most DASH_FOCUS_MAX_AGE (600) seconds old
+#   branch     meta branch=, else `git symbolic-ref --short -q HEAD` in cwd
+# A missing value is "-", so no field is ever empty. Sorted focused first, then busy, idle, other, then name and
+# message_to. No live session: the header only. The ttys come from ONE `ps -o pid=,tty= -p <pid,pid,...>`;
+# DASH_PS_TTY_CMD (tests) replaces it: it is run with the comma-separated pid list as its one argument and prints
+# "pid tty" lines. ----
+route_list() {
+  local sdir="$CLAUDE_DIR/sessions" f files=() raw rc
+  local jqf='def v: if . == null then "-" else tostring | if . == "" then "-" else . end end;
+    select(type == "object" and (.pid | type) == "number" and .pid > 0)
+    | [(.pid | tostring), (.sessionId | v), (.cwd | v), (.name | v), (.status | v), (.kind | v)] | @tsv'
+  printf 'name\tmessage_to\tstatus\tstate\tstate_dir\tnotes\tfocus\tbranch\n'
+  [ -d "$sdir" ] || return 0
+  for f in "$sdir"/*.json; do [ -f "$f" ] && files+=("$f"); done
+  [ "${#files[@]}" -gt 0 ] || return 0
+  # one jq over every file; a file that is not JSON (being rewritten, say) aborts it, so then one jq per file
+  rc=0; raw=$(jq -r "$jqf" "${files[@]}" 2>/dev/null) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    raw=$(for f in "${files[@]}"; do jq -r "$jqf" "$f" 2>/dev/null || true; done)
+  fi
+
+  local home_l=$HOME home_p disp_l="$AGENT_HOME/dispatcher" disp_p
+  home_p=$(cd "$HOME" 2>/dev/null && pwd -P || printf '%s' "$HOME")
+  disp_p=$(cd "$disp_l" 2>/dev/null && pwd -P || printf '%s' "$disp_l")
+  local pid sid cwd jname jstatus kind live="$TMP/route.live" pids=""
+  : >"$live"
+  while IFS=$'\t' read -r pid sid cwd jname jstatus kind; do
+    [ -n "$pid" ] || continue
+    case "$kind" in -|interactive) ;; *) continue ;; esac
+    [ "$jname" != dispatcher ] || continue
+    if [ "$cwd" = "$disp_l" ] || [ "$cwd" = "$disp_p" ]; then continue; fi
+    case "$cwd" in */.claude-mem/observer-sessions|*/.claude-mem/observer-sessions/*) continue ;; esac
+    kill -0 "$pid" 2>/dev/null || continue
+    printf '%s\t%s\t%s\t%s\t%s\n' "$pid" "$sid" "$cwd" "$jname" "$jstatus" >>"$live"
+    pids="${pids:+$pids,}$pid"
+  done <<<"$raw"
+  [ -n "$pids" ] || return 0
+
+  # ttys: one ps call for every pid. TTYS holds " pid=tty " pairs; "??" (no terminal) never matches a focus.
+  local TTYS=" " p t
+  while read -r p t; do
+    case "$p" in ''|*[!0-9]*) continue ;; esac
+    TTYS="$TTYS$p=${t#/dev/} "
+  done < <(if [ -n "${DASH_PS_TTY_CMD:-}" ]; then "$DASH_PS_TTY_CMD" "$pids"; else ps -o pid=,tty= -p "$pids"; fi 2>/dev/null || true)
+
+  # the focus file: "<tty> <epoch>"; fresh when the epoch (else the file's mtime) is at most DASH_FOCUS_MAX_AGE old
+  local ffile="$AGENT_HOME/dispatcher/focus" ftty="" fep="" fage max=${DASH_FOCUS_MAX_AGE:-600} focus_tty=""
+  case "$max" in ''|*[!0-9]*) max=600 ;; esac
+  if [ -f "$ffile" ]; then
+    read -r ftty fep _ <"$ffile" || true
+    ftty=${ftty#/dev/}
+    case "$fep" in ''|*[!0-9]*) fep=$(file_mtime "$ffile") ;; esac
+    fage=$((NOW - fep))
+    if [ "$fage" -le "$max" ] && [ -n "$ftty" ] && [ "$ftty" != "??" ]; then focus_tty=$ftty; fi
+  fi
+
+  # git lookups (only for what the meta lacks), cached per cwd: many sessions share a folder
+  local nl=$'\n' us=$'\037' gcache=$'\n' rest g_root g_branch
+  local root branch state sd notes focus name tty srank frank
+  while IFS=$'\t' read -r pid sid cwd jname jstatus; do
+    # the registry dir name, as hook_init derives it from the session id
+    case "$sid" in .*|*..*|*[!A-Za-z0-9._-]*) sid="sid-$(printf '%s' "$sid" | shasum | cut -c1-16)" ;; esac
+    [ "${#sid}" -le 128 ] || sid="sid-$(printf '%s' "$sid" | shasum | cut -c1-16)"
+    sd="$AGENT_HOME/sessions/$sid"
+    meta_load "$sd/meta"
+    root=$M_root; branch=$M_branch
+    if { [ -z "$root" ] || [ -z "$branch" ]; } && [ -d "$cwd" ]; then
+      case "$gcache" in
+        *"$nl$cwd$us"*)
+          rest=${gcache#*"$nl$cwd$us"}; g_root=${rest%%"$us"*}; rest=${rest#*"$us"}; g_branch=${rest%%"$nl"*} ;;
+        *)
+          g_root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)
+          g_branch=""; [ -z "$g_root" ] || g_branch=$(git -C "$cwd" symbolic-ref --short -q HEAD 2>/dev/null || true)
+          gcache="$gcache$cwd$us$g_root$us$g_branch$nl" ;;
+      esac
+      [ -n "$root" ] || root=$g_root
+      [ -n "$branch" ] || branch=$g_branch
+    fi
+    if [ "$cwd" = "$home_l" ] || [ "$cwd" = "$home_p" ]; then name=home
+    elif [ "$cwd" = "-" ]; then name="-"
+    else name=$(name_for "$cwd" "$root"); [ "$name" != "~" ] || name=home; fi
+    [ -n "$name" ] || name="-"
+    state=${M_state:--}
+    if [ -f "$sd/STATE.md" ]; then notes=yes
+    elif [ -n "$root" ] && [ -f "$root/.agent/STATE.md" ]; then sd="$root/.agent"; notes=yes
+    else notes=no; fi
+    tty=""
+    case "$TTYS" in *" $pid="*) tty=${TTYS#*" $pid="}; tty=${tty%% *} ;; esac
+    focus="-"; frank=1
+    if [ -n "$focus_tty" ] && [ "$tty" = "$focus_tty" ]; then focus=focused; frank=0; fi
+    case "$jstatus" in busy) srank=0 ;; idle) srank=1 ;; *) srank=2 ;; esac
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$frank" "$srank" "$name" "$jname" "$jstatus" "$state" "$sd" \
+      "$notes" "$focus" "${branch:--}"
+  done <"$live" | LC_ALL=C sort -t $'\t' -k1,1n -k2,2n -k3,3 -k4,4 | cut -f3-
+}
+if [ "$MODE" = route ]; then route_list; exit 0; fi
 
 # ---- 1. registry ----
 # A machine collects thousands of ended session metas (one runaway loop made 4,655 in a day), so this loop

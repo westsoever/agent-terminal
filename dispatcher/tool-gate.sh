@@ -14,6 +14,7 @@
 #
 # Bash grammar (a command that does not match it exactly is denied; no shell is involved in the decision):
 #   <dash.sh> [--speak|--inbox|--next|--all|--hours N]...       single spaces, flags from this list only
+#   <dash.sh> --route                                           the routing list; alone, with no other flag
 #   <relay-log.sh> <state dir> yes|no '<single-quoted text>'    text: no quote inside except '\'' , at most 2000 chars
 # where <dash.sh> / <relay-log.sh> is one of ~/.claude/kaching/..., $HOME/.claude/kaching/..., $CLAUDE_DIR/kaching/...
 # or this kit's own directory. No ;, &, |, <, >, $(), backticks, newlines or tabs can get through: the flags are
@@ -75,7 +76,7 @@ is_script() { # word suffix: is the word <one of the known kaching dirs>/<suffix
 
 check_dash_args() { # everything after the dash.sh word
   local args=$1 tok want_num=0 toks=()
-  if [ -z "$args" ]; then allow; fi
+  if [ -z "$args" ] || [ "$args" = "--route" ]; then allow; fi
   local IFS=' '
   read -r -a toks <<<"$args"
   if [ "${toks[*]}" != "$args" ]; then emit_deny "dash.sh arguments must be single-space separated flags"; fi
@@ -87,7 +88,8 @@ check_dash_args() { # everything after the dash.sh word
     case "$tok" in
       --speak|--inbox|--next|--all) ;;
       --hours) want_num=1 ;;
-      *) emit_deny "the dispatcher may run dash.sh with --speak, --inbox, --next, --all and --hours N only" ;;
+      --route) emit_deny "dash.sh --route takes no other flag; run it alone" ;;
+      *) emit_deny "the dispatcher may run dash.sh with --route alone, or with --speak, --inbox, --next, --all and --hours N only" ;;
     esac
   done
   if [ "$want_num" -eq 1 ]; then emit_deny "--hours takes a number of hours"; fi
