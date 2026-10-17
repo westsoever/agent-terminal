@@ -86,10 +86,6 @@ type leaderTimeout int
 type statusMsg string
 type pcMsg PCState
 type execDone struct{ err error }
-type editorDone struct {
-	path string
-	err  error
-}
 
 func newModel() model {
 	cfg, ct, err := loadConfig()
@@ -313,16 +309,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ed.resize(m.editorWidth())
 		}
 		return m, nil
-	case editorDone:
-		if b, err := os.ReadFile(msg.path); err == nil {
-			m.ed.ta.SetValue(strings.TrimRight(string(b), "\n"))
-			m.ed.resize(m.editorWidth())
-		}
-		_ = os.Remove(msg.path)
-		if msg.err != nil {
-			m.setErr("editor: " + msg.err.Error())
-		}
-		return m, m.ed.ta.Focus()
 	case tickMsg:
 		m.refresh()
 		cmds := []tea.Cmd{tick()}
@@ -553,16 +539,9 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ed.close()
 		m.mode = mKeys
 		if strings.TrimSpace(m.ed.drafts[m.ed.target]) != "" {
-			m.setStatus("draft kept: r opens it again")
+			m.setStatus("draft kept: " + m.cfg.Keys.Reply + " opens it again")
 		}
 		return m, nil
-	case edExternal:
-		c, path := m.ed.externalEditor()
-		if c == nil {
-			m.setErr("could not open an editor")
-			return m, nil
-		}
-		return m, tea.ExecProcess(c, func(err error) tea.Msg { return editorDone{path, err} })
 	case edImage:
 		if p := pasteImage(); p != "" {
 			m.ed.insert(p+" ", w)
