@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dash.sh [--speak | --inbox | --next] [--hours N] [--all]
+# dash.sh [--speak | --inbox | --next | --counts] [--hours N] [--all]
 # Machine-wide view: one line per Claude session on this computer.
 # Sources: (1) ~/.agent/sessions/*/meta written by the hooks and ching-watch.sh, (2) transcripts in
 # ~/.claude/projects/*/*.jsonl modified recently (sessions that predate the hooks), (3) worktrees
@@ -15,6 +15,9 @@
 #              $AGENT_HOME/inbox.seen, so the next --inbox does not list those again. One entry per session.
 #   --next     top 5 by urgency x importance x recency (blocked and input sessions stay above working ones),
 #              each with its checkpoint next_action
+#   --counts   machine-readable key=value lines for the menu bar dot (ui/menubar): sessions, active, blocked, input,
+#              needs (blocked + input), proposals. Cheap and read-only: the registry only (no transcript scan, no git, so
+#              sessions predating the hooks and worktree-only rows are not counted) and it never writes inbox.seen.
 # Git sync (bin/sync-check.sh writes $AGENT_HOME/sync-check.md): the default view ends with one `sync:` line when the
 #   snapshot lists repos that need attention, or is older than 24 h; --inbox ends with a SYNC lane, oldest first, that
 #   shows the snapshot age ("stale snapshot" over 24 h, "never run" without one). No snapshot: the default view is unchanged.
@@ -31,6 +34,7 @@ while [ $# -gt 0 ]; do
     --speak) MODE=speak; shift ;;
     --inbox) MODE=inbox; shift ;;
     --next) MODE=next; shift ;;
+    --counts) MODE=counts; shift ;;
     --hours) HOURS=${2:?}; shift 2 ;;
     --all) HOURS=720; shift ;;
     -h|--help) sed -n '2,/^# Env:/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -153,6 +157,8 @@ if [ -d "$AGENT_HOME/sessions" ]; then
     if [ -n "$root" ] && [ -f "$root/.agent/GOAL.md" ]; then sdir="$root/.agent"; fi
     note=$(state_note "$sdir/STATE.md")
     [ -z "$note" ] || [ "$state" = blocked ] || [ "$state" = input ] || state=blocked
+    # --counts needs only the time and the state: no forks for the name, tokens, importance or next action
+    if [ "$MODE" = counts ]; then row "$upd" "$sid" "${cwd:-?}" "" "" "$state" "" registry "" "" "" "" ""; continue; fi
     row "$upd" "$sid" "${cwd:-?}" "$(display_name "${cwd:-?}" "$root")" "$M_branch" "$state" "$note" registry \
       "$M_ctx" "$(tok_for "$sid")" "$M_stalled" "$(importance "$root")" \
       "$(next_of "$sdir/STATE.md")"
@@ -163,7 +169,7 @@ fi
 # Ids are matched with case, not `printf ids | grep -q`: grep stops at its first hit, a long list makes printf die
 # of SIGPIPE, and under pipefail that reads as "not found" (a registered session listed again from its transcript).
 nl=$'\n'; seen="$nl$(cut -d$'\037' -f2 "$ROWS")$nl"
-if [ -d "$CLAUDE_DIR/projects" ]; then
+if [ "$MODE" != counts ] && [ -d "$CLAUDE_DIR/projects" ]; then
   for t in "$CLAUDE_DIR"/projects/*/*.jsonl; do
     [ -f "$t" ] || continue
     tm=$(file_mtime "$t")
@@ -184,7 +190,8 @@ if [ -d "$CLAUDE_DIR/projects" ]; then
 fi
 
 # ---- 3. worktrees of every repo found (+ ~/.agent-repos) with repo state but no live session ----
-{
+: >"$TMP/repos"
+[ "$MODE" = counts ] || { {
   cut -d$'\037' -f3 "$ROWS" | while IFS= read -r c; do [ -d "$c" ] && git -C "$c" rev-parse --show-toplevel 2>/dev/null; done || true
   if [ -f "$REPOS_FILE" ]; then
     grep -v '^[[:space:]]*#' "$REPOS_FILE" | sed 's/[[:space:]]*$//' | while IFS= read -r p; do
@@ -194,7 +201,7 @@ fi
       [ -d "$p" ] && git -C "$p" rev-parse --show-toplevel 2>/dev/null
     done || true
   fi
-} | sort -u >"$TMP/repos"
+} | sort -u >"$TMP/repos"; }
 while IFS= read -r repo; do
   [ -n "$repo" ] || continue
   git -C "$repo" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | while IFS= read -r wt; do
@@ -323,6 +330,11 @@ proposal_rows() { # the open proposals, most sessions first: "kind id: first sen
 }
 
 case "$MODE" in
+  counts)
+    printf 'sessions=%s\nactive=%s\nblocked=%s\ninput=%s\nneeds=%s\nproposals=%s\n' \
+      "$total" "$active" "$blocked" "$waiting" $((blocked + waiting)) "$(proposal_rows | grep -c . || true)"
+    exit 0 ;;
+
   table)
     if [ "$total" -eq 0 ]; then echo "no Claude sessions seen in the last ${HOURS}h"; sync_line; exit 0; fi
     while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do

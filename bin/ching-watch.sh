@@ -17,6 +17,8 @@
 # of the last start; a snapshot younger than the interval (an on-demand run) counts as a run too. The tick never waits
 # for it; a failure of the check is a line in $AGENT_HOME/watch.log, never a non-zero exit. Env: SYNC_CHECK_MAX_SECS
 # (300) SYNC_CHECK_CMD (tests).
+# Heartbeat: every tick, before taking the lock, rewrites $AGENT_HOME/watch.heartbeat (the time, epoch); the menu bar dot
+# reads its mtime.
 # Env: AGENT_HOME WATCH_NOW (epoch, tests) WATCH_STALL_MINS (20) WATCH_ROTATE_BYTES (20971520)
 #      TOKEN_BUDGET_DAILY (unset = no token alerts; also read from $AGENT_HOME/defaults/ching.env)
 set -euo pipefail
@@ -49,6 +51,9 @@ num_or() { # value default -> value as a decimal number when it is 1 to 9 digits
 }
 DAY=$(date -u -r "$NOW" +%Y-%m-%d)
 mkdir -p "$AGENT_HOME/tokens"
+# Heartbeat for the menu bar dot (ui/menubar): the mtime of $AGENT_HOME/watch.heartbeat says launchd still runs this
+# job. Written before the lock, so a tick that finds the previous one still busy counts as alive too. Never fails the tick.
+{ date +%s >"$AGENT_HOME/watch.heartbeat"; } 2>/dev/null || true
 
 LOCK="$AGENT_HOME/watch.lock"
 if ! mkdir "$LOCK" 2>/dev/null; then

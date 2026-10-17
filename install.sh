@@ -5,6 +5,7 @@
 #   install.sh --uninstall [--dry-run] [--yes]
 #   install.sh --install-prepush <repo> [--dry-run]
 #   install.sh --install-dispatcher [--dry-run] [--yes]
+#   install.sh --install-menubar [--dry-run] [--yes]
 #
 # What it changes:
 #   $SETTINGS_FILE (default ~/.claude/settings.json): merges hook entries with jq (backup first, unified
@@ -24,6 +25,9 @@
 #   .claude/settings.json (its permissions and the tool-gate hook), mcp.json (VoiceMode, converse only) and AGENTS.md /
 #   CLAUDE.md links to dispatcher/AGENTS.md. It never touches the settings file above. Start it with
 #   $CLAUDE_DIR/ching/dispatcher/launch.sh. To remove it: rm -r the folder (it holds two generated files and two links).
+# --install-menubar builds $CHING_APPS_DIR/ChingBar.app (default ~/Applications; ui/menubar/build.sh, swiftc from $SWIFTC
+#   or /usr/bin) only when its source hash differs, and installs $LAUNCH_AGENTS_DIR/org.ching.menubar.plist (RunAtLoad;
+#   KeepAlive unless it quit cleanly). --uninstall also removes both (the app only when its bundle id is ours).
 # The preview shows the settings diff and the plist diff. Nothing is applied (settings, symlinks, plist,
 # launchctl) without --yes or a "y" at a terminal; with no terminal and no --yes it prints what it would
 # change and exits 1. --dry-run prints the same preview and exits 0.
@@ -31,7 +35,7 @@
 # "Session finished" popup is removed ONLY with --replace-popup.
 #
 # Overrides (for tests): SETTINGS_FILE, CLAUDE_DIR (default: dirname of SETTINGS_FILE when that is set,
-# else ~/.claude), AGENT_REPOS_FILE, AGENT_HOME, CLAUDE_MEM_SETTINGS, LAUNCHCTL, LAUNCH_AGENTS_DIR.
+# else ~/.claude), AGENT_REPOS_FILE, AGENT_HOME, CLAUDE_MEM_SETTINGS, CHING_APPS_DIR, SWIFTC, LAUNCHCTL, LAUNCH_AGENTS_DIR.
 set -euo pipefail
 
 CHING_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -43,7 +47,7 @@ if [ -z "${AGENT_REPOS_FILE:-}" ]; then
 fi
 LINK="$CLAUDE_DIR/ching"
 
-DRY=0; YES=0; POPUP=0; UNINSTALL=0; PREPUSH=""; DISPATCHER=0
+DRY=0; YES=0; POPUP=0; UNINSTALL=0; PREPUSH=""; DISPATCHER=0; MENUBAR=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1; shift ;;
@@ -52,6 +56,7 @@ while [ $# -gt 0 ]; do
     --uninstall) UNINSTALL=1; shift ;;
     --install-prepush) PREPUSH=${2:?--install-prepush needs a repo path}; shift 2 ;;
     --install-dispatcher) DISPATCHER=1; shift ;;
+    --install-menubar) MENUBAR=1; shift ;;
     -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "install: unknown argument $1" >&2; exit 64 ;;
   esac
@@ -64,6 +69,16 @@ act() { if [ "$DRY" -eq 1 ]; then say "would: $*"; else say "did:   $*"; fi; }
 would() { say "would: $*"; }
 TMPD=""
 tmpd() { if [ -z "$TMPD" ]; then TMPD=$(mktemp -d "${TMPDIR:-/tmp}/ching-install.XXXXXX"); trap 'rm -rf "$TMPD"' EXIT; fi; }
+# values go into XML text: & < > in a path would otherwise break the plist (launchd then refuses to load it)
+xml_esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+LAUNCH_AGENTS_DIR=${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}
+LAUNCHCTL=${LAUNCHCTL:-launchctl}
+AH=${AGENT_HOME:-$HOME/.agent}
+# the menu bar dot (ui/menubar): its app bundle and its launchd job
+MB_APP="${CHING_APPS_DIR:-$HOME/Applications}/ChingBar.app"
+MB_PLIST="$LAUNCH_AGENTS_DIR/org.ching.menubar.plist"
+MB_ID=org.ching.menubar
+mb_app_id() { /usr/bin/plutil -extract CFBundleIdentifier raw "$MB_APP/Contents/Info.plist" 2>/dev/null || true; }
 
 # ---------------- pre-push hook for one repo ----------------
 if [ -n "$PREPUSH" ]; then
@@ -95,7 +110,6 @@ plan_link() { # target link
 
 # ---------------- the voice dispatcher's own folder ----------------
 if [ "$DISPATCHER" -eq 1 ]; then
-  AH=${AGENT_HOME:-$HOME/.agent}
   DDIR=${DISPATCHER_DIR:-$AH/dispatcher}
   VM=$(command -v voicemode 2>/dev/null || echo voicemode)
   render() { # template -> the template with its @placeholders@ filled in (jq: any character in a path is safe)
@@ -149,6 +163,93 @@ $DDIR/mcp.json|$CHING_ROOT/dispatcher/mcp.json"
     mkdir -p "$(dirname "$l")"; ln -s "$t" "$l"; act "symlink $l -> $t"
   done <<<"$link_plan"
   say "dispatcher ready. Start it with: $LINK/dispatcher/launch.sh"
+  exit 0
+fi
+
+# ---------------- the menu bar dot (ui/menubar): ChingBar.app and its launchd job ----------------
+if [ "$MENUBAR" -eq 1 ]; then
+  [ "$UNINSTALL" -eq 0 ] || { echo "install: --uninstall removes the menu bar dot too; run it without --install-menubar" >&2; exit 64; }
+  if [ -e "$MB_APP" ] && [ "$(mb_app_id)" != "$MB_ID" ]; then
+    echo "install: $MB_APP exists and is not ChingBar ($MB_ID); leaving it alone" >&2; exit 1
+  fi
+  BUILD="$CHING_ROOT/ui/menubar/build.sh"
+  if ! want_hash=$("$BUILD" --hash 2>&1); then echo "install: $want_hash" >&2; exit 1; fi
+  have_hash=$(/usr/bin/plutil -extract ChingSourceHash raw "$MB_APP/Contents/Info.plist" 2>/dev/null || true)
+  NEED_APP=0; [ "$have_hash" = "$want_hash" ] && [ -x "$MB_APP/Contents/MacOS/ChingBar" ] || NEED_APP=1
+  X_EXE=$(xml_esc "$MB_APP/Contents/MacOS/ChingBar"); X_AH=$(xml_esc "$AH"); X_LINK=$(xml_esc "$LINK")
+  MB_BODY=$(cat <<EOP
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$MB_ID</string>
+  <key>ProgramArguments</key><array><string>$X_EXE</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>AGENT_HOME</key><string>$X_AH</string>
+    <key>CHING_DIR</key><string>$X_LINK</string>
+  </dict>
+  <key>StandardOutPath</key><string>$X_AH/menubar.log</string>
+  <key>StandardErrorPath</key><string>$X_AH/menubar.log</string>
+</dict>
+</plist>
+EOP
+)
+  NEED_MB_PLIST=0; [ -f "$MB_PLIST" ] && [ "$(cat "$MB_PLIST")" = "$MB_BODY" ] || NEED_MB_PLIST=1
+  if [ "$(readlink "$LINK" 2>/dev/null)" != "$CHING_ROOT" ]; then
+    say "warning: $LINK is not the kit's symlink yet. The dot reads dash.sh through it: run install.sh first."
+  fi
+  if [ "$NEED_APP" -eq 0 ] && [ "$NEED_MB_PLIST" -eq 0 ]; then say "nothing to do"; exit 0; fi
+  if [ "$NEED_APP" -eq 1 ]; then
+    say "== app: $MB_APP"
+    say "source hash ${want_hash}; installed: ${have_hash:-none}"
+  fi
+  if [ "$NEED_MB_PLIST" -eq 1 ]; then
+    say "== launchd: $MB_PLIST"
+    tmpd; printf '%s\n' "$MB_BODY" >"$TMPD/mb.new"
+    if [ -f "$MB_PLIST" ]; then
+      diff -u --label "$MB_PLIST (current)" --label "$MB_PLIST (after install)" "$MB_PLIST" "$TMPD/mb.new" || true
+    else
+      diff -u --label "$MB_PLIST (absent)" --label "$MB_PLIST (after install)" /dev/null "$TMPD/mb.new" || true
+    fi
+  fi
+  mb_plan() {
+    [ "$NEED_APP" -eq 0 ] || would "build $MB_APP (ui/menubar/build.sh)"
+    if [ "$NEED_MB_PLIST" -eq 1 ]; then would "write $MB_PLIST and launchctl bootstrap it"
+    else would "launchctl kickstart -k gui/$(id -u)/$MB_ID (restart the rebuilt app)"; fi
+  }
+  if [ "$DRY" -eq 1 ]; then mb_plan; exit 0; fi
+  if [ "$YES" -eq 0 ]; then
+    mb_plan
+    if [ -t 0 ]; then
+      printf 'Apply these changes? [y/N] '; read -r ans
+      case "$ans" in y|Y|yes) ;; *) say "aborted"; exit 1 ;; esac
+    else
+      echo "install: not a terminal; re-run with --yes to apply the changes shown above" >&2; exit 1
+    fi
+  fi
+  if [ "$NEED_APP" -eq 1 ]; then
+    "$BUILD" "$(dirname "$MB_APP")" --force >/dev/null || { echo "install: building $MB_APP failed" >&2; exit 1; }
+    act "built $MB_APP"
+  fi
+  if [ "$NEED_MB_PLIST" -eq 1 ]; then
+    mkdir -p "$LAUNCH_AGENTS_DIR" "$AH"
+    printf '%s\n' "$MB_BODY" >"$MB_PLIST.tmp"; mv "$MB_PLIST.tmp" "$MB_PLIST"
+    "$LAUNCHCTL" bootout "gui/$(id -u)/$MB_ID" >/dev/null 2>&1 || true
+    if ! "$LAUNCHCTL" bootstrap "gui/$(id -u)" "$MB_PLIST"; then
+      rm -f "$MB_PLIST"
+      echo "install: launchctl bootstrap failed; removed $MB_PLIST so the next run retries" >&2
+      exit 1
+    fi
+    act "loaded $MB_PLIST (the menu bar dot, at login)"
+  else
+    "$LAUNCHCTL" kickstart -k "gui/$(id -u)/$MB_ID" >/dev/null 2>&1 || true
+    act "restarted $MB_ID"
+  fi
   exit 0
 fi
 
@@ -231,12 +332,7 @@ NEED_REPOS=0
 if [ "$UNINSTALL" -eq 0 ] && [ ! -e "$AGENT_REPOS_FILE" ]; then NEED_REPOS=1; fi
 
 # ---------------- launchd watcher (ching-watch.sh every 5 minutes) ----------------
-LAUNCH_AGENTS_DIR=${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}
-LAUNCHCTL=${LAUNCHCTL:-launchctl}
 PLIST="$LAUNCH_AGENTS_DIR/org.ching.watch.plist"
-AH=${AGENT_HOME:-$HOME/.agent}
-# values go into XML text: & < > in a path would otherwise break the plist (launchd then refuses to load it)
-xml_esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 X_LINK=$(xml_esc "$LINK"); X_AH=$(xml_esc "$AH")
 PLIST_BODY=$(cat <<EOP
 <?xml version="1.0" encoding="UTF-8"?>
@@ -311,8 +407,17 @@ if [ -f "$CM_FILE" ]; then
   fi
 fi
 
+# ---------------- the menu bar dot: only --uninstall touches it here (--install-menubar is its own step above) ----------------
+NEED_MB_RM=0; NEED_MB_APP_RM=0
+if [ "$UNINSTALL" -eq 1 ]; then
+  [ ! -f "$MB_PLIST" ] || NEED_MB_RM=1
+  if [ -e "$MB_APP" ]; then
+    if [ "$(mb_app_id)" = "$MB_ID" ]; then NEED_MB_APP_RM=1; else say "warning: $MB_APP is not ChingBar ($MB_ID); leaving it alone"; fi
+  fi
+fi
+
 if [ "$CHANGED" -eq 0 ] && [ -z "$link_plan" ] && [ "$NEED_REPOS" -eq 0 ] && [ "$NEED_PLIST" -eq 0 ] \
-   && [ "$NEED_LPLIST" -eq 0 ] && [ "$CM_CHANGED" -eq 0 ]; then
+   && [ "$NEED_LPLIST" -eq 0 ] && [ "$CM_CHANGED" -eq 0 ] && [ "$NEED_MB_RM" -eq 0 ] && [ "$NEED_MB_APP_RM" -eq 0 ]; then
   say "nothing to do"; exit 0
 fi
 
@@ -333,6 +438,7 @@ show_plist_diff() { # file body
 }
 [ "$NEED_PLIST" -eq 0 ] || show_plist_diff "$PLIST" "$PLIST_BODY"
 [ "$NEED_LPLIST" -eq 0 ] || show_plist_diff "$LPLIST" "$LPLIST_BODY"
+[ "$NEED_MB_RM" -eq 0 ] || show_plist_diff "$MB_PLIST" ""
 if [ "$CM_CHANGED" -eq 1 ]; then
   say "== claude-mem: $CM_FILE"
   tmpd
@@ -345,6 +451,8 @@ plan_lines() { # everything this run would do, whether or not settings.json chan
   [ "$CHANGED" -eq 0 ] || would "back up and rewrite $SETTINGS_FILE"
   [ "$NEED_PLIST" -eq 0 ] || { if [ "$UNINSTALL" -eq 1 ]; then would "launchctl bootout and remove $PLIST"; else would "write $PLIST and launchctl bootstrap it"; fi; }
   [ "$NEED_LPLIST" -eq 0 ] || { if [ "$UNINSTALL" -eq 1 ]; then would "launchctl bootout and remove $LPLIST"; else would "write $LPLIST and launchctl bootstrap it"; fi; }
+  [ "$NEED_MB_RM" -eq 0 ] || would "launchctl bootout and remove $MB_PLIST"
+  [ "$NEED_MB_APP_RM" -eq 0 ] || would "remove $MB_APP"
   [ "$CM_CHANGED" -eq 0 ] || { if [ "$UNINSTALL" -eq 1 ]; then would "back up $CM_FILE and take $CM_PATH out of CLAUDE_MEM_EXCLUDED_PROJECTS"; else would "back up $CM_FILE and add $CM_PATH to CLAUDE_MEM_EXCLUDED_PROJECTS"; fi; }
 }
 if [ "$DRY" -eq 1 ]; then plan_lines; exit 0; fi
@@ -409,5 +517,7 @@ apply_plist() { # file body label what
 }
 [ "$NEED_PLIST" -eq 0 ] || apply_plist "$PLIST" "$PLIST_BODY" org.ching.watch "ching-watch every 5 minutes"
 [ "$NEED_LPLIST" -eq 0 ] || apply_plist "$LPLIST" "$LPLIST_BODY" org.ching.learn "learn.sh every day at 05:30"
-if [ "$UNINSTALL" -eq 1 ]; then say "note: --uninstall removes hook entries, the watcher and the learner job; symlinks, a removed popup and the converse entries in permissions.allow (they may predate the install) are left as they are."; fi
+[ "$NEED_MB_RM" -eq 0 ] || apply_plist "$MB_PLIST" "" "$MB_ID" "the menu bar dot"
+if [ "$NEED_MB_APP_RM" -eq 1 ]; then rm -rf "$MB_APP"; act "removed $MB_APP"; fi
+if [ "$UNINSTALL" -eq 1 ]; then say "note: --uninstall removes hook entries, the watcher, the learner job and the menu bar dot; symlinks, a removed popup and the converse entries in permissions.allow (they may predate the install) are left as they are."; fi
 exit 0
