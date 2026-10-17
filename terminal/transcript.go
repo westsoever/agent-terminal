@@ -161,8 +161,8 @@ func mentionedFiles(text, cwd string) []string {
 		if i := strings.LastIndex(p, ":"); i > 0 { // file.go:42
 			p = p[:i]
 		}
-		if !strings.Contains(p, "/") && !strings.Contains(p, ".") {
-			continue
+		if (!strings.Contains(p, "/") && !strings.Contains(p, ".")) || strings.Trim(p, "/.") == "" {
+			continue // a lone "/" or "." is no file
 		}
 		switch {
 		case strings.HasPrefix(p, "~/"):

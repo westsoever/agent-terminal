@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,7 +27,8 @@ type editor struct {
 	comp     []string // suggestions shown now ('' kind when none)
 	compKind byte     // '@' or '/'
 	compSel  int
-	compTok  string // the token being completed, as typed
+	compTok  string            // the token being completed, as typed
+	compDesc map[string]string // "/name" -> its description
 
 	files   map[string][]string // cwd -> its files, for @
 	filesAt map[string]time.Time
@@ -137,7 +139,6 @@ const (
 	edNone editorAction = iota
 	edSend
 	edClose
-	edExternal
 	edImage
 )
 
@@ -176,8 +177,6 @@ func (e *editor) key(k tea.KeyMsg, width int) (editorAction, tea.Cmd) {
 			return edNone, nil
 		}
 		return edSend, nil
-	case "ctrl+g":
-		return edExternal, nil
 	case "ctrl+v":
 		return edImage, nil
 	}
@@ -221,7 +220,17 @@ func (e *editor) suggest() {
 		items = rank(e.cwdFiles(), tok[1:], "@")
 		e.compKind = '@'
 	case strings.HasPrefix(tok, "/") && tok == v:
-		items = rank(slashCommands(e.cwd), tok[1:], "/")
+		cmds := slashCommands(e.cwd)
+		names := make([]string, len(cmds))
+		e.compDesc = map[string]string{}
+		for i, c := range cmds {
+			names[i] = c.name
+			e.compDesc["/"+c.name] = c.desc
+		}
+		if tok == "/" {
+			sort.Strings(names)
+		}
+		items = rank(names, tok[1:], "/")
 		e.compKind = '/'
 	default:
 		return
@@ -229,8 +238,8 @@ func (e *editor) suggest() {
 	if len(items) == 1 && items[0] == tok {
 		return // already complete
 	}
-	if len(items) > 6 {
-		items = items[:6]
+	if len(items) > 8 {
+		items = items[:8]
 	}
 	if e.compTok != tok {
 		e.compSel = 0
@@ -251,6 +260,13 @@ func (e *editor) accept() {
 // starts with q, then q appears in one piece, then the shortest. Each gets prefix in front.
 func rank(cands []string, q, prefix string) []string {
 	ql := strings.ToLower(q)
+	if ql == "" { // nothing typed yet: keep the given order
+		res := make([]string, len(cands))
+		for i, c := range cands {
+			res[i] = prefix + c
+		}
+		return res
+	}
 	type sc struct {
 		s     string
 		score int
@@ -263,6 +279,9 @@ func rank(cands []string, q, prefix string) []string {
 		}
 		score := len(c)
 		base := strings.ToLower(filepath.Base(c))
+		if i := strings.LastIndex(base, ":"); i >= 0 { // plugin:name -> name
+			base = base[i+1:]
+		}
 		switch {
 		case strings.HasPrefix(base, ql) || strings.HasPrefix(cl, ql):
 			score -= 10000
@@ -333,37 +352,154 @@ func (e *editor) cwdFiles() []string {
 	return files
 }
 
-var builtinSlash = []string{"add-dir", "agents", "clear", "compact", "config", "context", "cost", "doctor", "exit",
-	"export", "help", "hooks", "init", "mcp", "memory", "model", "permissions", "plugin", "pr-comments", "release-notes",
-	"rename", "resume", "review", "rewind", "security-review", "skills", "status", "statusline", "todos", "usage"}
+// builtinSlash: Claude Code's own commands, with the short descriptions it shows.
+var builtinSlash = [][2]string{
+	{"add-dir", "Add a new working directory"},
+	{"agents", "Manage agent configurations"},
+	{"clear", "Clear conversation history and free up context"},
+	{"compact", "Clear history but keep a summary in context"},
+	{"config", "Open the settings"},
+	{"context", "Show current context usage"},
+	{"cost", "Show the cost and duration of this session"},
+	{"doctor", "Check the health of the Claude Code installation"},
+	{"exit", "Exit the session"},
+	{"export", "Export the conversation to a file or the clipboard"},
+	{"help", "Show help and available commands"},
+	{"hooks", "Manage hook configurations"},
+	{"init", "Initialize a CLAUDE.md file with codebase documentation"},
+	{"mcp", "Manage MCP servers"},
+	{"memory", "Edit Claude memory files"},
+	{"model", "Set the AI model"},
+	{"permissions", "Manage allow and deny tool permission rules"},
+	{"plugin", "Manage plugins"},
+	{"pr-comments", "Get comments from a GitHub pull request"},
+	{"release-notes", "View release notes"},
+	{"rename", "Rename the session"},
+	{"resume", "Resume a conversation"},
+	{"review", "Review a pull request"},
+	{"rewind", "Restore the code and/or conversation to an earlier point"},
+	{"security-review", "Security review of the pending changes"},
+	{"skills", "List available skills"},
+	{"status", "Show version, model, account and connectivity"},
+	{"statusline", "Set up the status line"},
+	{"todos", "List the current todo items"},
+	{"usage", "Show plan usage limits"},
+}
 
-// slashCommands: Claude Code's built-ins, the owner's commands and skills, and the agent folder's own.
-func slashCommands(cwd string) []string {
+type slashEntry struct{ name, desc string }
+
+var slashCache = map[string][]slashEntry{}
+var slashAt = map[string]time.Time{}
+
+// slashCommands: Claude Code's built-ins, the owner's commands and skills, the agent folder's own, and the
+// commands and skills of the enabled plugins (as plugin:name), each with its description. Cached a minute.
+func slashCommands(cwd string) []slashEntry {
+	if at, ok := slashAt[cwd]; ok && time.Since(at) < time.Minute {
+		return slashCache[cwd]
+	}
 	seen := map[string]bool{}
-	var out []string
-	add := func(n string) {
+	var out []slashEntry
+	add := func(n, d string) {
 		if n != "" && !seen[n] {
 			seen[n] = true
-			out = append(out, n)
+			out = append(out, slashEntry{n, d})
 		}
 	}
 	for _, b := range builtinSlash {
-		add(b)
+		add(b[0], b[1])
 	}
 	home := os.Getenv("HOME")
-	for _, base := range []string{filepath.Join(home, ".claude"), filepath.Join(cwd, ".claude")} {
+	addDir := func(base, prefix string) {
 		cmds, _ := filepath.Glob(filepath.Join(base, "commands", "*.md"))
 		for _, c := range cmds {
-			add(strings.TrimSuffix(filepath.Base(c), ".md"))
+			add(prefix+strings.TrimSuffix(filepath.Base(c), ".md"), mdDescription(c))
 		}
 		skills, _ := os.ReadDir(filepath.Join(base, "skills"))
-		for _, s := range skills {
-			if !strings.HasPrefix(s.Name(), ".") {
-				add(s.Name())
+		for _, sk := range skills {
+			if !strings.HasPrefix(sk.Name(), ".") {
+				add(prefix+sk.Name(), mdDescription(filepath.Join(base, "skills", sk.Name(), "SKILL.md")))
 			}
 		}
 	}
+	addDir(filepath.Join(home, ".claude"), "")
+	if cwd != "" && cwd != home {
+		addDir(filepath.Join(cwd, ".claude"), "")
+	}
+	for _, pd := range enabledPluginDirs(home) {
+		addDir(pd.dir, pd.name+":")
+	}
+	slashCache[cwd], slashAt[cwd] = out, time.Now()
 	return out
+}
+
+type pluginDir struct{ name, dir string }
+
+// enabledPluginDirs: for each plugin enabled in ~/.claude/settings.json ("name@marketplace": true), its newest
+// version folder in the plugin cache.
+func enabledPluginDirs(home string) []pluginDir {
+	b, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if err != nil {
+		return nil
+	}
+	var st struct {
+		Enabled map[string]bool `json:"enabledPlugins"`
+	}
+	if json.Unmarshal(b, &st) != nil {
+		return nil
+	}
+	var out []pluginDir
+	for id, on := range st.Enabled {
+		name, market, ok := strings.Cut(id, "@")
+		if !on || !ok {
+			continue
+		}
+		versions, _ := filepath.Glob(filepath.Join(home, ".claude", "plugins", "cache", market, name, "*"))
+		newest, newestAt := "", time.Time{}
+		for _, v := range versions {
+			if fi, err := os.Stat(v); err == nil && fi.IsDir() && fi.ModTime().After(newestAt) {
+				newest, newestAt = v, fi.ModTime()
+			}
+		}
+		if newest != "" {
+			out = append(out, pluginDir{name, newest})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
+	return out
+}
+
+// mdDescription: the description: line of a command's or skill's front matter, else its first line of text.
+func mdDescription(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(b), "\n")
+	if len(lines) > 60 {
+		lines = lines[:60]
+	}
+	inFront := len(lines) > 0 && strings.TrimSpace(lines[0]) == "---"
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if inFront && i > 0 && t == "---" {
+			inFront = false
+			continue
+		}
+		if inFront {
+			if v, ok := strings.CutPrefix(t, "description:"); ok {
+				v = strings.Trim(strings.TrimSpace(v), `"'`)
+				if (v == ">" || v == "|" || v == ">-" || v == "|-") && i+1 < len(lines) {
+					v = strings.TrimSpace(lines[i+1])
+				}
+				return v
+			}
+			continue
+		}
+		if t != "" && !strings.HasPrefix(t, "#") && t != "---" {
+			return t
+		}
+	}
+	return ""
 }
 
 // pasteImage saves an image on the clipboard as a PNG and returns its path; ” when the clipboard holds none.
@@ -400,46 +536,40 @@ func (e *editor) insert(s string, width int) {
 	e.afterEdit(width)
 }
 
-// externalEditor: the text in $VISUAL / $EDITOR (nano when neither is set), back into the box when it closes.
-func (e *editor) externalEditor() (*exec.Cmd, string) {
-	f, err := os.CreateTemp("", "kaching-reply-*.md")
-	if err != nil {
-		return nil, ""
-	}
-	_, _ = f.WriteString(e.ta.Value())
-	f.Close()
-	ed := os.Getenv("VISUAL")
-	if ed == "" {
-		ed = os.Getenv("EDITOR")
-	}
-	if ed == "" {
-		ed = "nano"
-	}
-	parts := strings.Fields(ed)
-	return exec.Command(parts[0], append(parts[1:], f.Name())...), f.Name()
-}
-
 // lines renders the box for the agent panel: suggestions, the text area, and one line of keys.
-func (e *editor) lines(width int) []string {
+func (e *editor) lines(w int) []string {
 	var out []string
+	nameW := 0
+	for _, c := range e.comp {
+		if w := width(c); w > nameW {
+			nameW = w
+		}
+	}
+	if nameW > 34 {
+		nameW = 34
+	}
 	for i, c := range e.comp {
+		desc := ""
+		if e.compKind == '/' {
+			desc = e.compDesc[c]
+		}
 		if i == e.compSel {
-			out = append(out, row(width, s(padTo(" "+c, width), cSel)))
+			out = append(out, row(w, s(padTo(" "+padTo(c, nameW)+"  "+desc, w), cSel)))
 		} else {
-			out = append(out, row(width, s(" "+c, cGrey)))
+			out = append(out, row(w, s(" "+padTo(c, nameW), cWhite), s("  "+desc, cDark)))
 		}
 	}
 	for _, l := range strings.Split(e.ta.View(), "\n") {
 		lw := lipgloss.Width(l)
-		if lw < width {
-			l += strings.Repeat(" ", width-lw)
+		if lw < w {
+			l += strings.Repeat(" ", w-lw)
 		}
 		out = append(out, l)
 	}
-	hint := "⏎ send · ⌥⏎ new line · @ file · / command · ctrl+v image · ctrl+g editor · esc keeps draft"
+	hint := "⏎ send · ⌥⏎ new line · @ file · / command · ctrl+v image · esc keeps draft"
 	if len(e.comp) > 0 {
 		hint = "tab or ⏎ takes it · ↑↓ choose · esc closes the list"
 	}
-	out = append(out, row(width, s(hint, cDark)))
+	out = append(out, row(w, s(hint, cDark)))
 	return out
 }
