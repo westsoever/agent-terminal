@@ -134,7 +134,7 @@ func (m model) commandLine() string {
 		if m.view == vPaperclip && m.listSel < len(m.pc.Items) {
 			target = m.pc.Items[m.listSel].Ref
 		}
-		left = []seg{s(" reply to "+target+" > ", cOrange), s(m.buf, cWhite), s("█", cOrange)}
+		left = []seg{s(" writing to ", cGrey), s(target, cWhite)}
 	case mOpen:
 		left = []seg{s(" open file: press its letter", cOrange)}
 	default:
@@ -162,15 +162,20 @@ func (m model) commandLine() string {
 
 // ---- desk
 
-func (m model) desk(h int) []string {
-	lw := m.w * 32 / 100
+// deskWidths: the agent list's and the agent panel's outer widths for a screen w wide.
+func deskWidths(w int) (lw, rw int) {
+	lw = w * 32 / 100
 	if lw < 30 {
 		lw = 30
 	}
 	if lw > 46 {
 		lw = 46
 	}
-	rw := m.w - lw - 2
+	return lw, w - lw - 2
+}
+
+func (m model) desk(h int) []string {
+	lw, rw := deskWidths(m.w)
 	left := m.queuePanel(lw, h)
 	right := m.agentPanel(rw, h)
 	out := make([]string, h)
@@ -310,8 +315,8 @@ func (m model) agentPanel(w, h int) []string {
 	switch {
 	case !a.InTerminal:
 		tail = append(tail, row(in, s("not a Terminal tab: look only", cDark)))
-	case m.mode == mTyping:
-		tail = append(tail, row(in, s("> ", cOrange), s(m.buf, cWhite), s("█", cOrange)))
+	case m.mode == mTyping && m.ed.target == a.SID:
+		tail = append(tail, m.ed.lines(in)...)
 	default:
 		tail = append(tail, row(in, s("> ", cOrange), s("r to type", cDark)))
 	}
@@ -523,6 +528,16 @@ func (m model) paperclipView(h int) []string {
 	for _, it := range m.pc.Items {
 		details = append(details, it.Detail)
 	}
+	if m.mode == mTyping && m.listSel < len(m.pc.Items) {
+		ed := m.ed.lines(m.w - 6)
+		eh := len(ed) + 2
+		var body []string
+		for _, l := range ed {
+			body = append(body, " "+l+" ")
+		}
+		list := m.listBox("PAPERCLIP   r comment · enter open in browser", items, h-eh, "loading…", details...)
+		return append(list, indent(box(m.w-2, eh, []seg{s("COMMENT ON "+m.pc.Items[m.listSel].Ref, cWhite)}, cOrange, body))...)
+	}
 	return m.listBox("PAPERCLIP   r comment · enter open in browser", items, h, "loading…", details...)
 }
 
@@ -570,11 +585,18 @@ func (m model) helpView(h int) []string {
 		row2(k(K.Next)+" / "+k(K.Prev), "next / previous agent"),
 		row2(k(K.Waiting), "next agent that waits for you"),
 		row2("1-9", "send that numbered answer"),
-		row2(K.Reply, "write a message: enter sends, esc cancels"),
+		row2(K.Reply, "write a message (keys below); esc keeps it as a draft"),
 		row2(K.Open+" then a-i", "open that file"),
 		row2(K.Goto, "show the agent's own Terminal window"),
 		row2(K.Dismiss, "remove a waiting agent from the list, no answer"),
 		row2(K.Refresh, "read all data again"),
+		"",
+		"## Writing a message",
+		row2("enter", "send   ·   option+enter, ctrl+j or \\ enter: new line"),
+		row2("option+key", "your layout's character: option+l @, option+5 [, option+8 {, option+7 |"),
+		row2("@ / /", "suggest the agent's files / commands; tab or enter takes one"),
+		row2("ctrl+v", "paste a clipboard image (saved, its path goes in); cmd+v pastes text"),
+		row2("ctrl+g", "edit in $EDITOR   ·   option+arrows: by word   ·   option+backspace: word"),
 		"",
 		"## Wall",
 		row2("1-9", "select that tile"),

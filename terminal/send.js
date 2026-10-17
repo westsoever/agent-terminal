@@ -1,6 +1,7 @@
 // send.js - deliver the owner's input to a Claude Code session in a Terminal.app tab, as if typed there.
 // Run as: osascript -l JavaScript send.js CMD TTY [ARGS]   (TTY like ttys005, without /dev/)
-//   text TTY TEXT        type TEXT into the tab (Terminal scripting, no focus change), then press Enter
+//   text TTY TEXT        type TEXT into the tab (Terminal scripting, no focus change), then press Enter; a TEXT
+//                        with line breaks goes in as one bracketed paste
 //   keys TTY KEY...      press keys: 0-9, enter, esc, tab, up, down, left, right, backspace
 //   raise TTY            select the tab, bring its window to the front and activate Terminal (the `g` key)
 //   ttys                 every Terminal tab's tty, one per line (which sessions can be typed into)
@@ -36,7 +37,7 @@ function inInputBox(tab, text) {
   if (rules.length < 2) return false;
   const a = rules[rules.length - 2], b = rules[rules.length - 1];
   const box = lines.slice(a + 1, b).join(' ').replace(/\s+/g, ' ');
-  const want = text.replace(/\s+/g, ' ').trim().slice(0, 24);
+  const want = text.split('\n')[0].replace(/\s+/g, ' ').trim().slice(0, 24);
   return want.length > 0 && box.includes(want);
 }
 
@@ -79,7 +80,9 @@ function run(argv) {
     if (cmd === 'text') {
       const text = argv.slice(2).join(' ');
       if (!text) return 'error: empty text';
-      t.doScript(text, { in: tab });
+      // several lines go in as one bracketed paste, so Claude Code keeps the line breaks instead of
+      // submitting at the first one
+      t.doScript(text.includes('\n') ? '\u001b[200~' + text + '\u001b[201~' : text, { in: tab });
       // Enter, then make sure the text left the input box: an Enter that lands while Claude Code still
       // treats the burst as a paste is swallowed. Retried with growing waits; a short text that the
       // newline of do script already submitted needs no Enter at all.

@@ -68,6 +68,7 @@ type model struct {
 	pcAt      time.Time
 	props     []string
 	sync      []string
+	ed        *editor
 }
 
 type cachedLast struct {
@@ -85,10 +86,14 @@ type leaderTimeout int
 type statusMsg string
 type pcMsg PCState
 type execDone struct{ err error }
+type editorDone struct {
+	path string
+	err  error
+}
 
 func newModel() model {
 	cfg, ct, err := loadConfig()
-	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}}
+	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor()}
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
 	}
@@ -304,7 +309,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
+		if m.mode == mTyping {
+			m.ed.resize(m.editorWidth())
+		}
 		return m, nil
+	case editorDone:
+		if b, err := os.ReadFile(msg.path); err == nil {
+			m.ed.ta.SetValue(strings.TrimRight(string(b), "\n"))
+			m.ed.resize(m.editorWidth())
+		}
+		_ = os.Remove(msg.path)
+		if msg.err != nil {
+			m.setErr("editor: " + msg.err.Error())
+		}
+		return m, m.ed.ta.Focus()
 	case tickMsg:
 		m.refresh()
 		cmds := []tea.Cmd{tick()}
@@ -355,12 +373,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	ks := k.String()
+	if m.mode == mTyping {
+		return m.typingKey(k)
+	}
 	if ks == "ctrl+c" {
+		if m.mode != mKeys { // ctrl+c leaves the command line or file choice; only in key mode does it quit
+			m.mode, m.buf = mKeys, ""
+			return m, nil
+		}
 		removeState()
 		return m, tea.Quit
 	}
 	switch m.mode {
-	case mTyping, mCommand:
+	case mCommand:
 		switch k.Type {
 		case tea.KeyEsc:
 			m.mode, m.buf = mKeys, ""
@@ -372,23 +397,7 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if buf == "" {
 				return m, nil
 			}
-			if md == mTyping && m.view == vPaperclip {
-				if m.listSel >= len(m.pc.Items) {
-					return m, nil
-				}
-				it := m.pc.Items[m.listSel]
-				m.setStatus("posting comment on " + it.Ref + "…")
-				return m, func() tea.Msg {
-					res := "ok"
-					if err := pcComment(it.ID, buf); err != nil {
-						res = "error: " + err.Error()
-					}
-					return sentMsg{"", it.Ref, "comment", res}
-				}
-			}
-			if md == mTyping {
-				return m, m.deliver(buf, nil)
-			}
+			_ = md
 			return m.command(buf)
 		case tea.KeyBackspace:
 			if r := []rune(m.buf); len(r) > 0 {
@@ -482,7 +491,16 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.answer(int(ks[0] - '0'))
 	case ks == K.Reply:
-		m.mode, m.buf = mTyping, ""
+		a := m.sel()
+		if a == nil {
+			return m, nil
+		}
+		if !a.InTerminal {
+			m.setErr(a.Name + " isn't in a Terminal tab: look only (g opens it)")
+			return m, nil
+		}
+		m.mode = mTyping
+		return m, m.ed.open(a.SID, a.Cwd, m.editorWidth())
 	case ks == K.Open:
 		if len(m.last(m.sel()).Files) == 0 {
 			m.setErr("no files mentioned")
@@ -524,6 +542,83 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// typingKey: every key while writing goes to the editor; enter sends to the agent (or the Paperclip issue).
+func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	w := m.editorWidth()
+	act, cmd := m.ed.key(k, w)
+	switch act {
+	case edClose:
+		m.ed.close()
+		m.mode = mKeys
+		if strings.TrimSpace(m.ed.drafts[m.ed.target]) != "" {
+			m.setStatus("draft kept: r opens it again")
+		}
+		return m, nil
+	case edExternal:
+		c, path := m.ed.externalEditor()
+		if c == nil {
+			m.setErr("could not open an editor")
+			return m, nil
+		}
+		return m, tea.ExecProcess(c, func(err error) tea.Msg { return editorDone{path, err} })
+	case edImage:
+		if p := pasteImage(); p != "" {
+			m.ed.insert(p+" ", w)
+			m.setStatus("image saved: " + tildify(p))
+		} else {
+			m.ed.insert(clipboardText(), w)
+		}
+		return m, nil
+	case edSend:
+		text := strings.TrimRight(m.ed.ta.Value(), " \n")
+		text = strings.TrimLeft(text, " \n")
+		if text == "" {
+			return m, nil
+		}
+		target := m.ed.target
+		m.ed.sent()
+		m.mode = mKeys
+		if strings.HasPrefix(target, "pc:") {
+			id := strings.TrimPrefix(target, "pc:")
+			ref := id
+			for _, it := range m.pc.Items {
+				if it.ID == id {
+					ref = it.Ref
+				}
+			}
+			m.setStatus("posting comment on " + ref + "…")
+			return m, func() tea.Msg {
+				res := "ok"
+				if err := pcComment(id, text); err != nil {
+					res = "error: " + err.Error()
+				}
+				return sentMsg{"", ref, "comment", res}
+			}
+		}
+		if a := m.sel(); a == nil || a.SID != target {
+			for _, ag := range m.agents {
+				if ag.SID == target {
+					m.selSID = ag.SID
+				}
+			}
+		}
+		return m, m.deliver(text, nil)
+	}
+	return m, cmd
+}
+
+// editorWidth: the reply box's width in the view that shows it.
+func (m model) editorWidth() int {
+	switch {
+	case m.view == vPaperclip:
+		return m.w - 6
+	case m.view == vWall:
+		return m.w - 4
+	}
+	_, rw := deskWidths(m.w)
+	return rw - 4
 }
 
 // listKey handles j/k/enter and the view's own keys in the list views. done=false lets the key fall through.
@@ -600,8 +695,8 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 		}
 	}
 	if m.view == vPaperclip && m.listSel < len(m.pc.Items) && ks == m.cfg.Keys.Reply {
-		m.mode, m.buf = mTyping, ""
-		return true, nil
+		m.mode = mTyping
+		return true, m.ed.open("pc:"+m.pc.Items[m.listSel].ID, "", m.editorWidth())
 	}
 	return false, nil
 }
