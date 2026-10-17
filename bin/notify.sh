@@ -55,6 +55,10 @@ clean() { printf '%s' "$1" | tr '\n\r\t' '   ' | tr -d '\000-\037' | cut -c1-200
 TITLE=$(clean "$TITLE")
 MSG=$(clean "$MSG")
 
+# The monitor queue (queue.sh): a session that now waits for you moves its Terminal window to the main display.
+# Only a call from inside the session has its tty; the watcher's calls find none and do nothing there.
+case "$KIND" in done|input|blocked|ready|idle) "$SELF_DIR/queue.sh" park "$NAME" </dev/null || true ;; esac
+
 mkdir -p "$AGENT_HOME/notify"
 LAST="$AGENT_HOME/notify/$SESSION.last"
 NOW=${NOTIFY_NOW:-$(date +%s)}

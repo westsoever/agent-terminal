@@ -108,6 +108,17 @@ Click it for the menu: a status line ("Ching running · 3 sessions · 1 needs yo
 
 **Coming later:** reading back the transcript of a conversation from the menu (the greyed-out "Transcripts (coming soon)" item), and notifications from the dot for sessions that need your input.
 
+## Monitor queue: waiting agents come to your main screen
+
+Hand a task to an agent, put its Terminal window on your second display, and forget about it. When the session finishes its turn or needs your input, its window moves to the main display (the one with the menu bar). When you prompt it, the window goes back to where it was. So if your main display shows only your own windows, every agent is busy.
+
+- **Next waiting agent:** `bin/queue.sh next` brings the oldest waiting window to the front with the waiting tab selected. Each press after that shows the next one, wrapping around. Bind it to a hotkey with Raycast: Extensions > Script Commands > Add Directories > `~/bbq/ching/ui/raycast`, then give **Next Waiting Agent** a hotkey. It shows "Ching01 (2 more waiting)" as a small message.
+- **A lead agent and its workers:** open the workers as tabs of the lead's window (Cmd+T, or Window > Merge All Windows). The window moves as one: it comes over when any of its tabs waits and goes back once none does. `next` selects the tab that is waiting.
+- **What counts as waiting:** the same moments Ching notifies for: done, needs input, blocked, ready, and the idle prompt. A window already on the main display is never moved.
+- **Only Terminal.app.** A session inside VS Code or Cursor has no window of its own to move, so it is left alone.
+- **Status:** `bin/queue.sh status` lists the waiting tabs. State is in `~/.agent/queue/`.
+- **Settings** in `~/.agent/config`: `queue=off` turns it off; `queue_main_display=DELL` picks the main display by part of its name instead of the menu bar display.
+
 ## The guard
 
 `bin/guard.sh` runs before Bash, file and selected MCP tool calls in every session, including `bypassPermissions` sessions. A denial tells the session what to do instead.

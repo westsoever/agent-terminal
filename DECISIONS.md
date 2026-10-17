@@ -2,6 +2,10 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D29 (2026-10-17): Monitor queue for waiting agents
+
+**Decision (user):** waiting agents come to the main display, built into Ching. The owner works on the main display and parks agent Terminals on the second one. A session that finishes or needs input moves its window to the main display; prompting it sends the window back. Native macOS Spaces were considered and rejected: macOS has no supported way to move a Space to another display (yabai needs SIP partly off; AeroSpace replaces the window manager). The main display itself is the queue instead, with a "next waiting agent" hotkey (Raycast script command, `ui/raycast`). A lead agent and its workers are grouped as tabs of one window and move together.
+
 ## D28 (2026-10-17): Spot-check policy, auto-title removed, menu bar dot, overnight autonomy
 
 **Decisions (user):**
