@@ -18,31 +18,31 @@
 #      a run cut by it is a failure, "timed out")
 #      STOP_CHECK_DEADLINE (the whole hook, 780 s: 2 minutes of margin under the 900 s hook timeout)
 #      STOP_CHECK_SKIP_TTL (1800 s: how long an unchanged tree's green run is trusted; 0 = always run)
-#      CHING_NO_CHECKPOINT=1 (scripted runs: never ask for the checkpoint; see checkpoint_gate)
+#      KACHING_NO_CHECKPOINT=1 (scripted runs: never ask for the checkpoint; see checkpoint_gate)
 # Checkpoint rule (repo mode, once a prompt is recorded, only when the turn changed the tree): STATE.md must hold
 # a valid <!-- ching:checkpoint --> block, written after the prompt: the six keys, none empty, and none of result,
 # next_action, examined, not_examined still the template's "(none)". A touch of STATE.md is not enough (F7). When it
 # is missing or invalid the stop is blocked once and the block's hash is kept in the session meta
 # (ckpt_hash_at_block); the next stop of the same prompt passes only if the block CHANGED since then and is valid,
 # else it is blocked one more time, and the stop after that is allowed with a checkpoint_unmet event. At most two
-# blocks per prompt, whatever stop_hook_active says, so it can never loop. Opt-outs: CHING_NO_CHECKPOINT=1,
+# blocks per prompt, whatever stop_hook_active says, so it can never loop. Opt-outs: KACHING_NO_CHECKPOINT=1,
 # CLAUDE_CODE_ENTRYPOINT=sdk-*. Residual: a valid block left over from an earlier turn, with STATE.md touched this
 # turn, passes on the first stop (nothing says the block was not rewritten).
-#      CHING_TEST_MODELS CHING_TEST_CALL_TIMEOUT CHING_TEST_MAX_TURNS (see test-escalate.sh)
+#      KACHING_TEST_MODELS KACHING_TEST_CALL_TIMEOUT KACHING_TEST_MAX_TURNS (see test-escalate.sh)
 set -euo pipefail
-# A learner model call (learn_model_call sets CHING_LEARNER=1) is no session: no check, no gate, no notification.
-[ "${CHING_LEARNER:-}" != 1 ] || exit 0
+# A learner model call (learn_model_call sets KACHING_LEARNER=1) is no session: no check, no gate, no notification.
+[ "${KACHING_LEARNER:-${CHING_LEARNER:-}}" != 1 ] || exit 0
 START=$(date +%s)
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
 
 # A model started by test-escalate.sh inherits this hook: its stop is never gated, counted or notified.
-[ -z "${CHING_ESCALATING:-}" ] || exit 0
+[ -z "${KACHING_ESCALATING:-}" ] || exit 0
 # The same for anything the test_command itself starts (a claude -p smoke test, an Agent-SDK test, a suite
-# with a live test): it inherits CHING_STOP_CHECK_RUNNING from the run below, so its own Stop hook ends here
+# with a live test): it inherits KACHING_STOP_CHECK_RUNNING from the run below, so its own Stop hook ends here
 # instead of running the test_command again under a new session id without end.
-[ -z "${CHING_STOP_CHECK_RUNNING:-}" ] || exit 0
+[ -z "${KACHING_STOP_CHECK_RUNNING:-}" ] || exit 0
 
 # No verdict (exit 3): the hook cannot do its own bookkeeping (jq missing, the session record cannot be
 # written, the session folder is gone, any other unexpected failure). The stop is allowed, stderr says why
@@ -51,7 +51,7 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DONE=""; OUT=""
 no_verdict() { # reason
   DONE=1
-  printf 'ching stop-check: no verdict (%s). The stop is allowed; no check result was recorded.\n' "$1" >&2
+  printf 'kaching stop-check: no verdict (%s). The stop is allowed; no check result was recorded.\n' "$1" >&2
   ev stop_no_verdict "$(jq -nc --arg r "$1" '{reason:$r}' 2>/dev/null || true)" 2>/dev/null || true
   exit 3
 }
@@ -125,7 +125,7 @@ tree_changed_since() {
 # not updated since that prompt (see the header for the full rule: at most two blocks per prompt). A fresh, valid
 # checkpoint is checked first so the checkpoint event is logged whether the model wrote it unprompted or after a
 # block. Not asked: when the turn changed nothing in the tree (a question answered), and in scripted runs, where the
-# block would replace the run's answer: CHING_NO_CHECKPOINT=1, or CLAUDE_CODE_ENTRYPOINT=sdk-* (Claude Code sets
+# block would replace the run's answer: KACHING_NO_CHECKPOINT=1, or CLAUDE_CODE_ENTRYPOINT=sdk-* (Claude Code sets
 # sdk-cli for claude -p, sdk-ts/sdk-py for the Agent SDK, cli for an interactive session; seen in the 2.1 binary, not
 # documented, hence the explicit switch too).
 # prompt_state: set PROMPTED (epoch of the last prompt, '' when none or not in repo mode) and TREE_CHANGED
@@ -220,7 +220,7 @@ checkpoint_gate() {
     ckpt_event "$st"
     return 0
   fi
-  [ "${CHING_NO_CHECKPOINT:-}" != 1 ] || return 0
+  [ "${KACHING_NO_CHECKPOINT:-}" != 1 ] || return 0
   case "${CLAUDE_CODE_ENTRYPOINT:-}" in sdk-*) return 0 ;; esac
   [ "$TREE_CHANGED" -eq 1 ] || return 0
   if [ "$nblocks" -ge 2 ]; then   # asked twice for this prompt: allow, say so, never loop
@@ -295,7 +295,7 @@ if [ -n "$ROOT" ] && [ -f "$PASS_FILE" ]; then
   fi
 fi
 
-OUT=$(mktemp "${TMPDIR:-/tmp}/ching-stop.XXXXXX")   # removed by on_exit
+OUT=$(mktemp "${TMPDIR:-/tmp}/kaching-stop.XXXXXX")   # removed by on_exit
 
 # The retry count so far, read before the run: when it is already at the cap, this is the stop that will
 # be allowed whatever happens, so the paid model ladder must not run for it.
@@ -316,13 +316,13 @@ remember_ladder_failed() { # fingerprint...
 
 rc=0
 # test-escalate.sh runs the check with no model first; only on failure does it call the cheapest model
-# (Haiku), then the next (Sonnet), re-running the check after each. CHING_TEST_MODELS="" turns that off.
-# CHING_STOP_CHECK_RUNNING marks everything the test command starts (see the guard at the top). It is not
-# CHING_ESCALATING: test-escalate.sh would switch the model ladder off for this run too.
-export CHING_STOP_CHECK_RUNNING=1
-if [ "$n" -ge "$MAX" ]; then export CHING_TEST_MODELS=""
+# (Haiku), then the next (Sonnet), re-running the check after each. KACHING_TEST_MODELS="" turns that off.
+# KACHING_STOP_CHECK_RUNNING marks everything the test command starts (see the guard at the top). It is not
+# KACHING_ESCALATING: test-escalate.sh would switch the model ladder off for this run too.
+export KACHING_STOP_CHECK_RUNNING=1
+if [ "$n" -ge "$MAX" ]; then export KACHING_TEST_MODELS=""
 elif [ -n "$ROOT" ] && [ -f "$LADDER_FAILED" ] && grep -qxF "$FP" "$LADDER_FAILED" 2>/dev/null; then
-  export CHING_TEST_MODELS=""
+  export KACHING_TEST_MODELS=""
   ev ladder_skipped '{"reason":"same-tree"}'
 fi
 prompt_state   # before the run: files the check writes are not the turn's work (checkpoint gate)
@@ -346,7 +346,7 @@ trap 'on_signal TERM' TERM; trap 'on_signal INT' INT; trap 'on_signal HUP' HUP
 # --timeout kills the whole process group of a run that takes too long (exit 142), not only its top bash;
 # --deadline makes every run and model call fit in what is left of the hook's budget; --report lists the
 # models really called.
-CHING_TEST_NOTIFY=0 perl -e 'use POSIX (); POSIX::setsid() or setpgrp(0, 0); exec { $ARGV[0] } @ARGV or exit 127' \
+KACHING_TEST_NOTIFY=0 perl -e 'use POSIX (); POSIX::setsid() or setpgrp(0, 0); exec { $ARGV[0] } @ARGV or exit 127' \
   "$SELF_DIR/test-escalate.sh" -C "$WORK_DIR" --timeout "$TIMEOUT" --deadline "$DEADLINE" --report "$OUT.report" -- \
   bash -c "$TEST_CMD" >"$OUT" 2>&1 </dev/null &
 ESC_PID=$!

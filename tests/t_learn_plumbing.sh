@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # t_learn_plumbing.sh - Phase 6 plumbing (spec 5, 6, 7): bin/learn.sh (component order, lock, weekly stamp,
-# LEARN_DISABLE, missing components, fail quiet), bin/ching-proposals (list, show, diff, approve at a TTY only,
+# LEARN_DISABLE, missing components, fail quiet), bin/kaching-proposals (list, show, diff, approve at a TTY only,
 # reject, snooze), the learn_model_call flags, and the registry-leak shape (spec question 10).
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -10,7 +10,7 @@ FX="$KIT/tests/fixtures/learn"
 EVF="$AGENT_HOME/events.jsonl"
 P="$AGENT_HOME/proposals"
 L="$BIN/learn.sh"
-CP="$BIN/ching-proposals"
+CP="$BIN/kaching-proposals"
 evs() { jq -c 'select(.kind == "learn_run") | .data' "$EVF" 2>/dev/null; }
 reset_ev() { rm -f "$EVF"; }
 
@@ -18,13 +18,13 @@ reset_ev() { rm -f "$EVF"; }
 CD="$WORK/components"; mkdir -p "$CD"
 mkcomp() { # name [exit code] [sleep secs]: a fake component that records its order, cwd and learner env
   cat >"$CD/learn-$1.sh" <<EOS
-printf '%s cwd=%s learner=%s mem=%s\n' "$1" "\$(pwd -P)" "\${CHING_LEARNER:-}" "\${CLAUDE_MEM_INTERNAL:-}" >>"$WORK/order.log"
+printf '%s cwd=%s learner=%s mem=%s\n' "$1" "\$(pwd -P)" "\${KACHING_LEARNER:-}" "\${CLAUDE_MEM_INTERNAL:-}" >>"$WORK/order.log"
 echo "output of $1"
 ${3:+sleep $3}
 exit ${2:-0}
 EOS
 }
-lrun() { env -u CHING_LEARNER -u CLAUDE_MEM_INTERNAL LEARN_COMPONENT_DIR="$CD" "$L" "$@" 2>&1; }
+lrun() { env -u KACHING_LEARNER -u CLAUDE_MEM_INTERNAL LEARN_COMPONENT_DIR="$CD" "$L" "$@" 2>&1; }
 
 # no component exists yet: every one is skipped with outcome missing, the run still exits 0
 reset_ev
@@ -45,7 +45,7 @@ out=$(lrun); rc=$?
 WORKP=$(cd "$P/.work" && pwd -P)
 assert_eq "learn: first run of the week (no stamp) is weekly: all four in order" "extract corrections skills report " \
   "$(cut -d' ' -f1 "$WORK/order.log" | tr '\n' ' ')"
-assert_eq "learn: every component runs in .work with CHING_LEARNER=1 and CLAUDE_MEM_INTERNAL=1" "4" \
+assert_eq "learn: every component runs in .work with KACHING_LEARNER=1 and CLAUDE_MEM_INTERNAL=1" "4" \
   "$(grep -c "cwd=$WORKP learner=1 mem=1" "$WORK/order.log")"
 assert_eq "learn: the weekly stamp holds this ISO week" "$(date +%G-W%V)" "$(cat "$P/.work/weekly-stamp")"
 assert_contains "learn: component output goes to learn.log" "$(cat "$P/.work/learn.log")" "output of skills"
@@ -109,7 +109,7 @@ alive() { kill -0 "$1" 2>/dev/null && [ "$(ps -o stat= -p "$1" 2>/dev/null | cut
 for sig in TERM INT; do
   rm -f "$WORK/comp.pid" "$WORK/grandchild.pid" "$WORK/late.log"; reset_ev
   # perl puts INT back to its default: a background job of a script starts with INT ignored, and then cannot trap it
-  perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV' env -u CHING_LEARNER -u CLAUDE_MEM_INTERNAL LEARN_COMPONENT_DIR="$CD" "$L" --weekly >"$WORK/sig.out" 2>&1 &
+  perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV' env -u KACHING_LEARNER -u CLAUDE_MEM_INTERNAL LEARN_COMPONENT_DIR="$CD" "$L" --weekly >"$WORK/sig.out" 2>&1 &
   lp=$!
   for _ in $(seq 1 100); do [ -s "$WORK/grandchild.pid" ] && break; sleep 0.1; done
   cpid=$(cat "$WORK/comp.pid" 2>/dev/null); gpid=$(cat "$WORK/grandchild.pid" 2>/dev/null)
@@ -158,13 +158,13 @@ out=$(LEARN_DISABLE=all "$L" --weekly 2>&1); rc=$?
 assert_eq "learn: default component dir, all disabled: exits 0" "0" "$rc"
 
 # ================= learn_model_call flags (the real-format check, 2026-10-17) =================
-export CHING_CLAUDE_BIN="$FX/claude-stub" CLAUDE_STUB_LOG="$WORK/call.log"
+export KACHING_CLAUDE_BIN="$FX/claude-stub" CLAUDE_STUB_LOG="$WORK/call.log"
 printf 'ching-learn-task: skills\n' | learn_model_call haiku >/dev/null
 assert_contains "model call: no MCP servers and no skills (--tools \"\" alone keeps MCP tools)" "$(cat "$WORK/call.log")" \
   "ARGS: -p --model haiku --tools  --output-format json --strict-mcp-config --disable-slash-commands"
-unset CHING_CLAUDE_BIN CLAUDE_STUB_LOG
+unset KACHING_CLAUDE_BIN CLAUDE_STUB_LOG
 
-# ================= ching-proposals =================
+# ================= kaching-proposals =================
 reset_ev
 FA="$WORK/fresh-ah"
 out=$(AGENT_HOME="$FA" "$CP" list); rc=$?
@@ -200,9 +200,9 @@ assert_eq "cli: list: open proposals, most sessions first, kind id: first senten
 latest weekly report: $(cd "$P" && pwd -P)/report-2026-W41.md" "$ls_out"
 
 # show: the whole file, the patch coloured only when asked (or at a terminal)
-plain=$(CHING_COLOR=never "$CP" show rule-no-version-bump)
+plain=$(KACHING_COLOR=never "$CP" show rule-no-version-bump)
 assert_eq "cli: show prints the file as it is" "$(cat "$P/rule-no-version-bump.md")" "$plain"
-col=$(CHING_COLOR=always "$CP" show rule-no-version-bump)
+col=$(KACHING_COLOR=always "$CP" show rule-no-version-bump)
 assert_contains "cli: show colours added patch lines green" "$col" $'\033[32m+## Versions'
 assert_not_contains "cli: show leaves the evidence uncoloured" "$(printf '%s\n' "$col" | sed -n '/## evidence/,/## patch/p')" $'\033[3'
 assert_not_contains "cli: show to a pipe is not coloured by default" "$("$CP" show rule-no-version-bump)" $'\033['
@@ -210,7 +210,7 @@ assert_eq "cli: show of a bad id exits 2" "2" "$("$CP" show ../../etc/passwd >/d
 assert_eq "cli: show of an unknown id exits 1" "1" "$("$CP" show rule-nope >/dev/null 2>&1; echo $?)"
 
 # diff: the patch applied to a copy of the live target
-d=$(CHING_COLOR=never "$CP" diff rule-no-version-bump); rc=$?
+d=$(KACHING_COLOR=never "$CP" diff rule-no-version-bump); rc=$?
 assert_eq "cli: diff exits 0" "0" "$rc"
 assert_contains "cli: diff labels the live target" "$d" "--- ~/.agents/CLAUDE.md (now)"
 assert_contains "cli: diff shows the added rule" "$d" "+Never bump the version number. The owner releases by hand."
@@ -230,13 +230,13 @@ assert_contains "cli: approve with stdin piped and stdout piped is refused too" 
 
 # ---- approve is for a person, never a Claude Code session (spec 6.4) ----
 # The suite may itself run inside a session, so the person's path (PERSON) clears every session variable the CLI checks
-# and ends its parent walk at this test (CHING_TEST=1 + CHING_TEST_ANCESTRY_STOP, honoured only in /tmp/ching-tests.*).
+# and ends its parent walk at this test (KACHING_TEST=1 + KACHING_TEST_ANCESTRY_STOP, honoured only in /tmp/kaching-tests.*).
 SESSION_VARS=$(sed -n 's/^SESSION_VARS="\(.*\)"$/\1/p' "$CP")
 [ -n "$SESSION_VARS" ] || { fail "session: no SESSION_VARS line in the CLI"; SESSION_VARS=CLAUDECODE; }
 assert_contains "session: the checked variables include CLAUDECODE" " $SESSION_VARS " " CLAUDECODE "
 assert_contains "session: ... and CLAUDE_CODE_ENTRYPOINT" " $SESSION_VARS " " CLAUDE_CODE_ENTRYPOINT "
 UNSET=(); for v in $SESSION_VARS; do UNSET+=(-u "$v"); done
-PERSON=(env "${UNSET[@]}" CHING_TEST=1 "CHING_TEST_ANCESTRY_STOP=$$")
+PERSON=(env "${UNSET[@]}" KACHING_TEST=1 "KACHING_TEST_ANCESTRY_STOP=$$")
 # two stand-ins for a claude process up the chain: a binary named claude (the native install; it stays the parent
 # because its -c holds two commands) and a script named claude run by an interpreter (as `node .../bin/claude`)
 mkdir -p "$WORK/fake-native" "$WORK/fake-node"
@@ -266,11 +266,11 @@ out=$(PATH="$WORK/badps:$PATH" "${PERSON[@]}" "$CP" approve rule-no-version-bump
 # the outcome (verifier 2, N4); here the real walk runs, finds no claude, and the no-terminal check refuses
 assert_eq "session: a fake ps first on PATH changes nothing (still refused)" "1" "$rc"
 assert_not_contains "session: ... the fake ps was not used" "$out" "cannot read the process table"
-out=$(env "${UNSET[@]}" CHING_TEST=1 "CHING_TEST_ANCESTRY_STOP=$$" HOME=/var/empty "$CP" approve rule-no-version-bump </dev/null 2>&1); rc=$?
-assert_eq "test seam: CHING_TEST with HOME outside the /tmp/ching-tests sandbox exits 3" "3" "$rc"
+out=$(env "${UNSET[@]}" KACHING_TEST=1 "KACHING_TEST_ANCESTRY_STOP=$$" HOME=/var/empty "$CP" approve rule-no-version-bump </dev/null 2>&1); rc=$?
+assert_eq "test seam: KACHING_TEST with HOME outside the /tmp/kaching-tests sandbox exits 3" "3" "$rc"
 assert_contains "test seam: ... and says so" "$out" "honoured only inside the test sandbox"
-out=$(env "${UNSET[@]}" CHING_TEST=1 "CHING_TEST_ANCESTRY_STOP=$$" AGENT_HOME="$WORK/../../.." "$CP" approve rule-no-version-bump </dev/null 2>&1); rc=$?
-assert_eq "test seam: CHING_TEST with an AGENT_HOME that climbs out of the sandbox exits 3" "3" "$rc"
+out=$(env "${UNSET[@]}" KACHING_TEST=1 "KACHING_TEST_ANCESTRY_STOP=$$" AGENT_HOME="$WORK/../../.." "$CP" approve rule-no-version-bump </dev/null 2>&1); rc=$?
+assert_eq "test seam: KACHING_TEST with an AGENT_HOME that climbs out of the sandbox exits 3" "3" "$rc"
 not_approved "session checks"
 
 # reject: fingerprint and reason in rejected.txt, file archived, event, never proposed again
@@ -313,7 +313,7 @@ if [ "$(uname)" = Darwin ] && printf '' | script -q /dev/null true >/dev/null 2>
     # CODE types the code the CLI showed, as a person reading the screen does; anything else is typed blind.
     local ans=$1 i=0; shift
     : >"$WORK/tty.out"
-    { while [ "$i" -lt 50 ] && ! grep -q 'to confirm\|ching-proposals:' "$WORK/tty.out"; do sleep 0.2; i=$((i + 1)); done
+    { while [ "$i" -lt 50 ] && ! grep -q 'to confirm\|kaching-proposals:' "$WORK/tty.out"; do sleep 0.2; i=$((i + 1)); done
       if [ "$ans" = CODE ]; then ans=$(sed -n 's/.*Type \([a-z0-9]\{4\}\) to confirm.*/\1/p' "$WORK/tty.out" | tail -1); fi
       printf '%s\n' "$ans"; sleep 0.4; } \
       | script -q /dev/null "$@" >"$WORK/tty.out" 2>&1
@@ -328,8 +328,8 @@ if [ "$(uname)" = Darwin ] && printf '' | script -q /dev/null true >/dev/null 2>
   q=$(printf '%q' "$CP")
   ATTACKS=(
     "fake pty (script -q /dev/null), blind y :: $q approve rule-no-version-bump"
-    "echo approve | xargs ching-proposals :: echo approve rule-no-version-bump | xargs $q"
-    "a=approve; ching-proposals \$a :: a=approve; $q \$a rule-no-version-bump"
+    "echo approve | xargs kaching-proposals :: echo approve rule-no-version-bump | xargs $q"
+    "a=approve; kaching-proposals \$a :: a=approve; $q \$a rule-no-version-bump"
     "\$(echo approve) :: $q \$(echo approve) rule-no-version-bump"
     "backticks :: $q \`echo approve\` rule-no-version-bump"
     "appr\${x}ove :: x=; $q appr\${x}ove rule-no-version-bump"
@@ -343,7 +343,7 @@ if [ "$(uname)" = Darwin ] && printf '' | script -q /dev/null true >/dev/null 2>
   }
   for a in "${ATTACKS[@]}"; do
     name=${a%% :: *}; cmd=${a#* :: }
-    reset_rule; tty_run y env "${UNSET[@]}" CLAUDECODE=1 CHING_TEST=1 "CHING_TEST_ANCESTRY_STOP=$$" bash -c "$cmd; exit \$?"
+    reset_rule; tty_run y env "${UNSET[@]}" CLAUDECODE=1 KACHING_TEST=1 "KACHING_TEST_ANCESTRY_STOP=$$" bash -c "$cmd; exit \$?"
     not_approved "bypass $name, as a session"
     assert_contains "bypass $name, as a session: refused as a session" "$(cat "$WORK/tty.out")" "not a Claude Code session (CLAUDECODE is set)"
     reset_rule; tty_run y "${PERSON[@]}" "$WORK/fake-native/claude" -c "$cmd; exit \$?"
@@ -403,15 +403,15 @@ if [ "$(uname)" = Darwin ] && printf '' | script -q /dev/null true >/dev/null 2>
   assert_eq "tty: lesson approve appends to profile/lessons.jsonl" "lesson-plain-words Use plain words." \
     "$(jq -r '"\(.id) \(.text)"' "$AGENT_HOME/profile/lessons.jsonl")"
 else
-  echo "no usable script(1) pty: ching-proposals tty tests skipped" >"$T_ROOT/skipped.t_learn_plumbing"
+  echo "no usable script(1) pty: kaching-proposals tty tests skipped" >"$T_ROOT/skipped.t_learn_plumbing"
 fi
 
-# ================= lint: ching-proposals has no .sh suffix, so t_lint does not see it =================
-assert_ok "lint: bash -n ching-proposals" bash -n "$CP"
-assert_contains "lint: ching-proposals runs in strict mode" "$(sed -n 1,40p "$CP")" "set -euo pipefail"
+# ================= lint: kaching-proposals has no .sh suffix, so t_lint does not see it =================
+assert_ok "lint: bash -n kaching-proposals" bash -n "$CP"
+assert_contains "lint: kaching-proposals runs in strict mode" "$(sed -n 1,40p "$CP")" "set -euo pipefail"
 SC=$(command -v shellcheck || true); [ -n "$SC" ] || { [ -x /tmp/sc-venv/bin/shellcheck ] && SC=/tmp/sc-venv/bin/shellcheck; }
 if [ -n "$SC" ]; then
-  out=$(cd "$BIN" && "$SC" -x -S warning ching-proposals 2>&1) && pass "lint: shellcheck ching-proposals" || fail "lint: shellcheck ching-proposals" "$out"
+  out=$(cd "$BIN" && "$SC" -x -S warning kaching-proposals 2>&1) && pass "lint: shellcheck kaching-proposals" || fail "lint: shellcheck kaching-proposals" "$out"
 fi
 
 # ================= registry leak (spec question 10) =================

@@ -16,8 +16,8 @@ assert_contains "autonomy: Stop cap is retries in a row" "$(cat "$A")" "3 retrie
 assert_contains "autonomy: Stop cap resets after a green run" "$(cat "$A")" "resets after a green run"
 assert_not_contains "autonomy: Stop cap is not described as per session" "$(cat "$A")" "retries per session"
 # shipping step 4 is pasted into other repos: kit paths say so, the diff base is the GOAL.md base_branch
-assert_contains "autonomy: lenses are in the ching kit" "$(cat "$A")" "templates/review-lenses/\` in the ching kit"
-assert_contains "autonomy: REVIEW.md is in the ching kit" "$(cat "$A")" "templates/REVIEW.md\` in the ching kit"
+assert_contains "autonomy: lenses are in the kaching kit" "$(cat "$A")" "templates/review-lenses/\` in the kaching kit"
+assert_contains "autonomy: REVIEW.md is in the kaching kit" "$(cat "$A")" "templates/REVIEW.md\` in the kaching kit"
 assert_contains "autonomy: review diff uses base_branch" "$(cat "$A")" "git diff origin/<base_branch>...HEAD"
 assert_not_contains "autonomy: no hard-coded origin/main" "$(cat "$A")" "origin/main"
 assert_contains "autonomy: fixing a blocking finding makes a new HEAD" "$(cat "$A")" "creates a new HEAD"

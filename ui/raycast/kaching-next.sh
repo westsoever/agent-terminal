@@ -9,7 +9,8 @@
 
 # Optional parameters:
 # @raycast.icon 🟠
-# @raycast.packageName Ching
+# @raycast.packageName Kaching
 # @raycast.description Brings the oldest waiting agent's Terminal window to the front, then the next one on each press.
 
-exec "$HOME/.claude/ching/bin/queue.sh" next
+K="$HOME/.claude/kaching"; [ -d "$K" ] || K="$HOME/.claude/ching"   # before install.sh ran since the rename (D35)
+exec "$K/bin/queue.sh" next

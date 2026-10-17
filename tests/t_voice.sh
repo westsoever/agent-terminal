@@ -10,11 +10,11 @@ assert_file "3.2: commands/dash.md exists" "$CMD"
 body=$(cat "$CMD" 2>/dev/null || true)
 fm=$(awk 'NR == 1 && $0 == "---" { f = 1; next } f && $0 == "---" { exit } f { print }' "$CMD")
 assert_contains "3.2: frontmatter has a description" "$fm" "description:"
-assert_contains "3.2: frontmatter allows dash.sh through Bash" "$fm" "Bash(~/.claude/ching/bin/dash.sh:*)"
+assert_contains "3.2: frontmatter allows dash.sh through Bash" "$fm" "Bash(~/.claude/kaching/bin/dash.sh:*)"
 assert_contains "3.2: frontmatter allows converse (MCP server name)" "$fm" "mcp__voicemode__converse"
 assert_contains "3.2: frontmatter allows converse (plugin name)" "$fm" "mcp__plugin_voicemode_voicemode__converse"
 assert_not_contains "3.2: no broad Bash allowance" "$fm" "Bash(*"
-assert_contains "3.2: runs the installed dash.sh" "$body" "~/.claude/ching/bin/dash.sh"
+assert_contains "3.2: runs the installed dash.sh" "$body" "~/.claude/kaching/bin/dash.sh"
 assert_contains "3.2: default mode is the spoken summary" "$body" "dash.sh --speak"
 assert_contains "3.2: speaks without listening" "$body" "wait_for_response"
 assert_contains "3.2: a refused or missing voice is not retried" "$body" "currently holds the voice channel"

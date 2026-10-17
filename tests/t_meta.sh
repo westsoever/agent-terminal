@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# meta_set: the hooks and the watcher (ching-watch.sh) write the same meta file; concurrent writers must not
+# meta_set: the hooks and the watcher (kaching-watch.sh) write the same meta file; concurrent writers must not
 # lose keys, a writer that dies must not leave a lock behind, and nobody waits long.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"

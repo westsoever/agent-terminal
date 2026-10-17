@@ -13,7 +13,7 @@ VOICE=${SPEAK_VOICE:-af_sky}
 CURL=${SPEAK_CURL:-curl}
 PLAYER=${SPEAK_PLAYER:-afplay}
 
-TMP=$(mktemp "${TMPDIR:-/tmp}/ching-speak.XXXXXX")
+TMP=$(mktemp "${TMPDIR:-/tmp}/kaching-speak.XXXXXX")
 trap 'rm -f "$TMP"' EXIT
 
 BODY=$(jq -nc --arg t "$TEXT" --arg v "$VOICE" '{model:"kokoro", input:$t, voice:$v, response_format:"mp3"}')
