@@ -1,6 +1,7 @@
 #!/bin/bash
 # Raycast script command: lay out the Terminal windows of each display in a grid (bin/queue.sh tile).
-# Add this folder in Raycast (Extensions > Script Commands > Add Directories) and give the command a hotkey.
+# KachingBar runs it from its hotkeys (ui/menubar/Hotkeys.swift, ~/.agent/hotkeys). Raycast can run it too: Settings >
+# Script Commands > Script Folders > + (this folder), then Record Hotkey on the command.
 
 # Required parameters:
 # @raycast.schemaVersion 1

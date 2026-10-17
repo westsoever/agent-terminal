@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# ui/menubar/build.sh - build KachingBar.app (the Kaching menu bar dot) from KachingBar.swift.
+# ui/menubar/build.sh - build KachingBar.app (the Kaching menu bar dot) from every ui/menubar/*.swift.
 #
 #   build.sh <target-dir> [--force]   builds <target-dir>/KachingBar.app; prints its path
 #   build.sh --hash                   prints the source hash only (install.sh compares it with the installed app)
 #
-# Idempotent: the bundle's Info.plist carries KachingSourceHash (sha256 of KachingBar.swift, this script and the
+# Idempotent: the bundle's Info.plist carries KachingSourceHash (sha256 of every .swift file, this script and the
 # swiftc version). When the bundle in <target-dir> already has the current hash, nothing is compiled or written
 # ("up to date"); --force rebuilds anyway. A new bundle is built next to the target and swapped in with mv, so a
 # failed build leaves the old one in place. Needs /usr/bin/swiftc (Xcode command line tools); no Xcode project.
 # Env: SWIFTC (default /usr/bin/swiftc, else swiftc on PATH)
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
-SRC="$HERE/KachingBar.swift"
+SRCS=()
+while IFS= read -r f; do SRCS+=("$f"); done < <(find "$HERE" -maxdepth 1 -name '*.swift' | LC_ALL=C sort)
 BUNDLE_ID=org.kaching.menubar
 NAME=KachingBar
 
@@ -22,7 +23,7 @@ fi
 [ -n "$SWIFTC" ] && [ -x "$SWIFTC" ] || { echo "build: swiftc not found (install the Xcode command line tools: xcode-select --install)" >&2; exit 2; }
 
 src_hash() {
-  { cat "$SRC" "$HERE/build.sh"; "$SWIFTC" --version 2>/dev/null; } | shasum -a 256 | cut -c1-16
+  { cat "${SRCS[@]}" "$HERE/build.sh"; "$SWIFTC" --version 2>/dev/null; } | shasum -a 256 | cut -c1-16
 }
 
 TARGET=""; FORCE=0
@@ -51,7 +52,8 @@ STAGE=$(mktemp -d "$TARGET/.$NAME.build.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
 NEW="$STAGE/$NAME.app"
 mkdir -p "$NEW/Contents/MacOS" "$NEW/Contents/Resources"
-"$SWIFTC" -O -swift-version 6 -parse-as-library -module-name "$NAME" -framework AppKit "$SRC" -o "$NEW/Contents/MacOS/$NAME"
+"$SWIFTC" -O -swift-version 6 -parse-as-library -module-name "$NAME" -framework AppKit -framework ApplicationServices \
+  -framework Carbon "${SRCS[@]}" -o "$NEW/Contents/MacOS/$NAME"
 
 cat >"$NEW/Contents/Info.plist" <<EOP
 <?xml version="1.0" encoding="UTF-8"?>
@@ -69,6 +71,7 @@ cat >"$NEW/Contents/Info.plist" <<EOP
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppleEventsUsageDescription</key><string>The Kaching hotkeys move and raise your Terminal windows; the voice shortcut reads which Terminal tab is in front and wakes the voice dispatcher in its tab.</string>
   <key>KachingSourceHash</key><string>$HASH</string>
 </dict>
 </plist>

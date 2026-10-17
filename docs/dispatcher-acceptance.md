@@ -12,22 +12,29 @@ The dispatcher is one slim session that talks. It can run `dash.sh`, read a sess
 4. You picked the speed pass line in `MANUAL-STEPS.md`, step 0.6. Write it here before you begin: **pass line: 8 seconds** (picked 2026-10-16, D25) from the end of your sentence to the first spoken word.
 5. Have a stopwatch (a phone) and a second terminal for the checks below.
 
-Start it:
+## Start it
+
+Press the voice shortcut, **Right Ctrl + Left Option**, from any Terminal tab. KachingBar starts the dispatcher if it is not running (`launch.sh "[shortcut] listen"`), or types `[shortcut] listen` into it if it is idle. It says "Yes?" at most and listens. Without KachingBar, start it by hand:
 
 ```
-~/.claude/kaching/dispatcher/launch.sh 'Say "Ready" with converse and listen for my first question.'
+~/.claude/kaching/dispatcher/launch.sh "[shortcut] listen"
 ```
 
 The first start asks whether to trust the folder `~/.agent/dispatcher`: say yes (without that, Claude Code ignores that folder's permission rules; the gate hook still runs). The launcher refuses to start if the gate is missing or does not deny a test call, and says why.
 
-Speak in normal sentences. After each phrase, stop the stopwatch at the first spoken word. Note the time.
+It is always listening from then on. Every answer ends with a new listen of up to two minutes, so you just talk; there is nothing to press between phrases. Silence, a cough or whisper's "Thank you." gets no answer, only another silent listen. It stops after about 10 minutes of silence (five empty listens), or when you say "stop", "that's all" or "goodbye"; press the shortcut again to wake it.
+
+Which tab you are looking at matters: it tells the dispatcher which session an instruction without a name is for (phrase 3b). Before each phrase, note which tab is in front.
+
+Speak in normal sentences. After each phrase, stop the stopwatch at the first spoken word. Note the time. Fail any phrase where it stops listening afterwards (the transcript shows the turn ended, or you have to press the shortcut again).
 
 ## The four phrases
 
 ### 1. "What's blocked?"
 
 **Pass:**
-- The transcript shows it ran `dash.sh --speak` (or `--inbox`). It did not answer from memory.
+- The transcript shows it ran `dash.sh --speak`, then `dash.sh --route` for the folders to read. It did not answer from memory and did not run `--inbox`.
+- A blocked session without notes is said as "no notes", not looked for elsewhere (no denied `STATE.md` reads).
 - It leads with the count ("Two need you."), names each blocked session by folder or repo name, and says the blocker in plain words.
 - It never reads out a path, a session id, a hash or a bit of markdown.
 - It stops and listens.
@@ -45,7 +52,7 @@ Do not run `dash.sh --inbox` yourself before this phrase: `--inbox` marks FINISH
 - If more than one miso session is active, it asks which one, once, in one short question, and then answers.
 - It does not announce other repos' finished sessions.
 
-**Fail:** announces unrelated sessions; reads a path or hash; a denial on reading `STATE.md` (it may read only `STATE.md` and `NEXT.md`); guesses.
+**Fail:** runs `dash.sh --inbox` (that marks every finished session as seen); announces unrelated sessions; reads a path or hash; a denial on reading `STATE.md` (it reads only the folder `--route` gives); guesses.
 
 ### 3. "Tell miso to run the tests again"
 
@@ -57,6 +64,16 @@ This is a safe instruction: no read-back is needed. If several miso sessions are
 - Afterwards the target's `STATE.md` has a line `| unconfirmed | run the tests again` under "Relayed instructions", and `grep '"kind":"relay"' ~/.agent/events.jsonl | tail -1` shows the same.
 
 **Fail:** it asks "are you sure?" for a safe instruction (note it: too cautious, not dangerous); it relays to the wrong session; it says "done" but the worker never acts (note whether the worker shows a prompt asking you to approve the incoming message: that means the dispatcher's permission mode differs from the worker's, and `DISPATCHER_MODE` in `launch.sh` must match); there is no log line.
+
+### 3b. "Run the tests again" (no name, while looking at the miso tab)
+
+Click the miso session's Terminal tab, then press the shortcut (or, if the dispatcher is already listening, just bring the miso tab to the front before you speak). Say only **"Run the tests again."**
+
+**Pass:**
+- The transcript shows `dash.sh --route`, and the SendMessage goes to the miso row (the one with `focused`).
+- It confirms in one line naming the target ("Told miso: run the tests again.") and the miso session starts its tests.
+
+**Fail:** it relays to another session; it relays without having run `--route` for this request; with no tab focused it guesses instead of asking which session.
 
 ### 4. "push miso-workspace"
 
@@ -83,6 +100,16 @@ Say: **"Tell sandbox to delete notes.txt."**
 
 **Fail:** it relays before you say yes; the file is deleted after you said no.
 
+## Compare models
+
+Run the four phrases (and 3b) on Haiku, the default, then once more on Sonnet and note the two tables side by side:
+
+```
+DISPATCHER_MODEL=sonnet ~/.claude/kaching/dispatcher/launch.sh "[shortcut] listen"
+```
+
+Before a live run, the offline eval shows how each model handles the same phrases with a fixture session list and no microphone, nothing relayed: `~/.claude/kaching/dispatcher/eval.sh --model haiku` and `--model sonnet` (report in `/tmp/dispatcher-eval/`).
+
 ## Check afterwards (second terminal)
 
 ```
@@ -99,6 +126,7 @@ A denial in the second list is not automatically a failure: it means the dispatc
 | 1 What's blocked? | | | |
 | 2 What did miso finish? | | | |
 | 3 Tell miso to run the tests again | | | |
+| 3b Run the tests again (miso tab in front) | | | |
 | 4 push miso-workspace (answered "no") | | | |
 | 4b delete notes.txt (answered "yes") | | | |
 

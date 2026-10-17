@@ -14,7 +14,19 @@
 # session in a different mode may be held for approval instead of delivered (not verified here). The restriction
 # does not depend on the mode. DISPATCHER_MODE=dontAsk runs it under the settings file's permission rules instead.
 #
-# Env: AGENT_HOME, DISPATCHER_DIR, CLAUDE_BIN (claude), DISPATCHER_MODEL (haiku), DISPATCHER_MODE (bypassPermissions)
+# Always listening: AGENTS.md ends every turn with a converse listen of up to 120 s. Claude Code moves an MCP call that
+# runs longer than its auto-background limit (about 120 s) into a background task, and a listen plus speech plus
+# transcription goes past that; the owner's first run lost the conversation that way. So this switches MCP
+# auto-backgrounding off for the dispatcher (CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0 and
+# CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND=1, unless already set). A stdio MCP call may stay silent for 30 minutes
+# before Claude Code aborts it, far above one listen.
+#
+# Models: haiku by default. To compare, start the same session on Sonnet:
+#   DISPATCHER_MODEL=sonnet ~/.claude/kaching/dispatcher/launch.sh "[shortcut] listen"
+# Any model name or alias claude --model takes is passed through as is. dispatcher/eval.sh runs the offline eval.
+#
+# Env: AGENT_HOME, DISPATCHER_DIR, CLAUDE_BIN (claude), DISPATCHER_MODEL (haiku), DISPATCHER_MODE (bypassPermissions),
+#      DISPATCHER_NAME (dispatcher; eval.sh uses another name so no worker message reaches an eval run)
 set -euo pipefail
 
 AGENT_HOME=${AGENT_HOME:-$HOME/.agent}
@@ -40,7 +52,12 @@ case "$canary" in
   *) echo "launch: the tool gate did not deny a test Edit call; refusing to start." >&2; exit 1 ;;
 esac
 
+# Eval mode is for dispatcher/eval.sh's own hook wrapper only; it never comes in from the caller's environment.
+unset DISPATCHER_GATE_EVAL DISPATCHER_GATE_EVAL_LOG DISPATCHER_GATE_EVAL_DASH DISPATCHER_GATE_EVAL_RELAY DISPATCHER_GATE_EVAL_FIXTURE
+export CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=${CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS:-0}
+export CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND=${CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND:-1}
+
 cd "$DIR"
-exec "$CLAUDE_BIN" --name dispatcher --model "${DISPATCHER_MODEL:-haiku}" --setting-sources project \
+exec "$CLAUDE_BIN" --name "${DISPATCHER_NAME:-dispatcher}" --model "${DISPATCHER_MODEL:-haiku}" --setting-sources project \
   --strict-mcp-config --mcp-config "$DIR/mcp.json" --tools "Bash,Read,ToolSearch,ListAgents,SendMessage" \
   --permission-mode "${DISPATCHER_MODE:-bypassPermissions}" --disable-slash-commands "$@"
