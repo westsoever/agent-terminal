@@ -225,7 +225,7 @@ SAH="$WORK/sync-ah"; SREC="$WORK/sync-rec.log"
 cat >"$WORK/sync-fake.sh" <<EOF
 #!/usr/bin/env bash
 printf '%s|%s\n' "\$AGENT_HOME" "\$*" >>"$SREC"
-case "\${FAKE_MODE:-}" in fail) exit 3 ;; hang) sleep 25 ;; slow) sleep 4 ;; esac
+case "\${FAKE_MODE:-}" in fail) exit 3 ;; hang) sleep 25.31 ;; slow) sleep 4 ;; esac
 exit 0
 EOF
 chmod +x "$WORK/sync-fake.sh"
@@ -287,7 +287,7 @@ sreset; rc=0; FAKE_MODE=hang SYNC_CHECK_MAX_SECS=1 srun || rc=$?
 assert_eq "sync: a hanging check: the watcher exits 0" "0" "$rc"
 assert_eq "sync: ... it is stopped at the time ceiling and watch.log says so" "1" "$(wlog_has 'stopped after 1s')"
 sleep 1
-assert_eq "sync: ... and nothing of it is left running" "0" "$(pgrep -f 'sleep 25' | wc -l | tr -d ' ')"
+assert_eq "sync: ... and nothing of it is left running" "0" "$(pgrep -f "sleep 25.31" | wc -l | tr -d ' ')"
 # the real check under the ceiling: a fetch that hangs inside it goes down with it (its own session included)
 mkdir -p "$WORK/shim"
 cat >"$WORK/shim/git" <<'EOF'

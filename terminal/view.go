@@ -41,6 +41,8 @@ func (m model) View() string {
 		body = m.recapsView(bodyH)
 	case vPaperclip:
 		body = m.paperclipView(bodyH)
+	case vFind:
+		body = m.findView(bodyH)
 	case vHelp:
 		body = m.helpView(bodyH)
 	}
@@ -167,8 +169,15 @@ func (m model) commandLine() string {
 			}
 		}
 		left = []seg{s(" writing to ", cGrey), s(target, cWhite)}
+		if group, ok := strings.CutPrefix(m.ed.target, "all:"); ok {
+			left = []seg{s(" writing "+m.allHeader(group), cGrey), s("  enter sends it", cGrey)}
+		}
 		if dir, ok := strings.CutPrefix(m.ed.target, "nw:"); ok {
-			left = []seg{s(" new background agent in ", cGrey), s(tildify(dir), cWhite), s("  enter starts it", cGrey)}
+			left = []seg{s(" new background agent in ", cGrey), s(tildify(dir), cWhite)}
+			if o := m.nw.summary(); o != "" {
+				left = append(left, s("  "+o, cOrange))
+			}
+			left = append(left, s("  enter starts it", cGrey))
 		}
 	case mOpen:
 		left = []seg{s(" open file: press its letter", cOrange)}
@@ -180,6 +189,9 @@ func (m model) commandLine() string {
 			if t.v == m.view {
 				code = t.code
 			}
+		}
+		if m.view == vFind {
+			code = "FIND"
 		}
 		left = []seg{s(" > ", cOrange), s(code, cWhite), s(" <GO>", cGrey)}
 		if m.leader {
@@ -403,7 +415,8 @@ func trunc(t string, w int) string {
 func (m model) agentPanel(w, h int) []string {
 	a := m.sel()
 	in := w - 4 // 2 borders + 1 space margin each side
-	newAgent := m.mode == mTyping && strings.HasPrefix(m.ed.target, "nw:")
+	// the box of /NW and /ALL is written below the selected agent, with its own title
+	newAgent := m.mode == mTyping && (strings.HasPrefix(m.ed.target, "nw:") || strings.HasPrefix(m.ed.target, "all:"))
 	if a == nil {
 		var body []string
 		if newAgent {
@@ -444,6 +457,7 @@ func (m model) agentPanel(w, h int) []string {
 			hint += " · " + m.cfg.Keys.Reply + " writes your own answer"
 		}
 		tail = append(tail, row(in, s(hint, cDark)))
+		tail = append(tail, askSummary(l.Ask, in, m.cfg.Keys.Quick)...)
 	} else if len(l.Options) > 0 {
 		tail = append(tail, "")
 		if l.Question != "" {
@@ -470,10 +484,27 @@ func (m model) agentPanel(w, h int) []string {
 			tail = append(tail, row(in, s(string(rune('a'+i)), cOrange), s("  "+tildify(f), cGrey)))
 		}
 	}
-	if newAgent { // /NW: the first message of a new background agent, written below the selected agent
-		dir := tildify(strings.TrimPrefix(m.ed.target, "nw:"))
-		hd := "─ new background agent in " + dir + " "
+	if newAgent {
+		var hd string
+		var who []string
+		if group, ok := strings.CutPrefix(m.ed.target, "all:"); ok { // /ALL: one message to a group of agents
+			hd = "─ " + m.allHeader(group) + " "
+			send, skipped := m.recipients(group)
+			who = wrap(names2(send), in)
+			if len(skipped) > 0 {
+				who = append(who, trunc("left out: "+strings.Join(skipped, ", "), in))
+			}
+		} else { // /NW: the first message of a new background agent
+			dir := tildify(strings.TrimPrefix(m.ed.target, "nw:"))
+			hd = "─ new background agent in " + dir + " "
+			if o := m.nw.summary(); o != "" {
+				hd = "─ new background agent in " + dir + " · " + o + " "
+			}
+		}
 		tail = append(tail, "", row(in, s(hd, cOrange), s(strings.Repeat("─", max(0, in-width(hd))), cOrange)))
+		for _, l := range who {
+			tail = append(tail, row(in, s(l, cGrey)))
+		}
 		tail = append(tail, m.ed.lines(in)...)
 	} else {
 		tail = append(tail, "", row(in, s("─ reply ", cDark), s(strings.Repeat("─", max(0, in-8)), cDark)))
@@ -1019,10 +1050,19 @@ func (m model) pcPanel(w, h int) []string {
 			msg = append(msg, "", row(in, s("─ the request ", cOrange), s(strings.Repeat("─", max(0, in-14)), cOrange)))
 			msg = append(msg, textRows(a.Details, in, m.cfg.Tables)...)
 		}
+		if a := d.Ask; a != nil && a.Spec != nil && len(a.Options) == 0 { // the current item in full (pcview.go)
+			msg = append(msg, m.pcSpecDetail(a, in)...)
+		}
 	}
 	// the bottom: what it asks, the answers, the comment box
 	K := m.cfg.Keys
-	if loaded && d.Ask != nil {
+	if loaded && d.Ask != nil && d.Ask.Spec != nil && len(d.Ask.Options) == 0 { // a form: ticks, questions, verdicts (pcview.go)
+		room := h - 2 - 3 - 3 // minus the comment box (3 rows) and 3 rows of the thread
+		if m.mode == mTyping {
+			room -= len(m.ed.lines(in))
+		}
+		tail = append(tail, m.pcSpecBlock(d.Ask, in, room)...)
+	} else if loaded && d.Ask != nil {
 		a := d.Ask
 		head := "IT ASKS YOU"
 		if a.Kind == "recovery" {
@@ -1045,15 +1085,17 @@ func (m model) pcPanel(w, h int) []string {
 			tail = append(tail, row(in, s(fmt.Sprint(i+1), cOrange), s(" "+o.Label, cWhite)))
 		}
 		if len(a.Options) == 0 {
-			tail = append(tail, row(in, s("kaching can't answer a "+strings.ReplaceAll(a.Kind, "_", " ")+": enter opens it in Paperclip", cDark)))
+			for _, l := range wrap("kaching can't answer a "+strings.ReplaceAll(a.Kind, "_", " ")+": enter opens it in Paperclip", in) {
+				tail = append(tail, row(in, s(l, cDark)))
+			}
 		}
 	}
 	box := "─ comment "
-	if m.mode == mTyping && strings.HasPrefix(m.ed.target, "pcno:") {
-		box = "─ why you decline (enter declines) "
+	if t := m.pcBoxTitle(); t != "" {
+		box = t
 	}
 	tail = append(tail, "", row(in, s(box, cDark), s(strings.Repeat("─", max(0, in-width(box))), cDark)))
-	if m.mode == mTyping && (m.ed.target == "pc:"+it.ID || m.ed.target == "pcno:"+it.ID) {
+	if m.mode == mTyping && (m.ed.target == "pc:"+it.ID || pcNoteFor(m.ed.target, it.ID)) {
 		tail = append(tail, m.ed.lines(in)...)
 	} else {
 		scroll := K.Older + "/" + K.Newer
@@ -1062,7 +1104,7 @@ func (m model) pcPanel(w, h int) []string {
 		}
 		hint := K.Reply + " comment · enter opens in Paperclip · " + scroll + " scroll"
 		if loaded && d.Ask != nil && len(d.Ask.Options) > 0 {
-			hint = "1-" + fmt.Sprint(len(d.Ask.Options)) + " answer · " + hint
+			hint = pcAnswerHint(d.Ask) + hint
 		}
 		tail = append(tail, row(in, s("> ", cOrange), s(hint, cDark)))
 	}
@@ -1112,9 +1154,11 @@ func (m model) helpView(h int) []string {
 		row2("RC", "recaps: what each agent summed up while you were away (enter goes to it)"),
 		row2("PR", "pull requests: the open ones that involve you on GitHub, the last updated first; "+K.Reply+" opens one on the right (description, files, thread), "+K.Reply+" again comments: enter starts a new agent with your comment as its task; 1 review it, 2 merge it; enter opens it in the browser"),
 		row2("PO", "proposals: enter shows, a approve, x reject, z hide 7 days (the tab is orange while some are open)"),
-		row2("PC", "Paperclip issues, the selected one's thread on the right: 1-9 answer what it asks (approve, decline, …), "+K.Reply+" comment, enter opens it in the browser (orange while one needs you)"),
-		row2("NW [folder]", "start a background agent: write its first message, enter starts it (folder: a path, a folder in ~/bbq, an agent's name; none: the selected agent's)"),
+		row2("PC", "Paperclip issues and company approvals, the selected one's thread on the right: 1-9 answer what it asks (approve, decline, …), "+K.Reply+" comment, enter opens it in the browser (orange while one needs you); the keys below"),
+		row2("NW [folder] [opts]", "start a background agent: write its first message, enter starts it (folder: a path, a folder in ~/bbq, an agent's name; none: the selected agent's). Opts, in any place: a model (opus sonnet haiku fable), an effort (low … max), a mode (plan auto bypass accept manual dontask), e.g. NW soii sonnet high"),
+		row2("FIND words", "find a session: by its name, then by what was said in it (one message with all the words), then Claude picks (s). See Find below"),
 		row2("STOP", "stop the selected background agent (its conversation stays)"),
+		row2("ALL group", "one message to a group of agents: waiting (INPUT and WAITING), input, idle or working; agents with a menu on screen are left out"),
 		row2("A3, or a name", "select agent 3, or the first agent whose name starts so"),
 		row2("HELP, QUIT", "this page; stop kaching (ctrl+c also stops it)"),
 		"",
@@ -1124,6 +1168,7 @@ func (m model) helpView(h int) []string {
 		row2(k(K.Older)+" / "+k(K.Newer), "scroll the agent's conversation 3 lines back / on (also when zoomed, and while writing on the draft's first / last line)"),
 		row2("pgup / pgdown", "a page back / on   ·   home: its start   ·   end: the newest"),
 		row2("1-9", "send that numbered answer"),
+		row2(K.Quick, "an agent asks questions: take the recommended answer (★, the one the agent marks) of every question and submit; it refuses when a question has none"),
 		row2("enter, ←, →", "when the agent asks: confirm, previous / next part"),
 		row2(K.Reply, "write a message (keys below); esc keeps it as a draft; sending it sends a window on monitor 1 back"),
 		row2(K.Open+" then a-i", "open that file"),
@@ -1135,7 +1180,8 @@ func (m model) helpView(h int) []string {
 		"## Writing a message",
 		row2("enter", "send   ·   option+enter, ctrl+j or \\ enter: new line"),
 		row2("option+key", "your layout's character: option+l @, option+5 [, option+8 {, option+7 |"),
-		row2("@ / /", "suggest the agent's files / commands; tab or enter takes one"),
+		row2("@ / /", "suggest the agent's files and the other sessions / commands; tab or enter takes one"),
+		row2("@Name text", "a message that starts with a live session's name goes to that session (@\"two words\" for names with spaces); a mention elsewhere stays in the text, and the agent itself passes it on"),
 		row2("ctrl+v", "paste a clipboard image (saved, its path goes in); cmd+v pastes text"),
 		row2("option+arrows", "move by word   ·   option+backspace: delete a word"),
 		"",
@@ -1144,6 +1190,22 @@ func (m model) helpView(h int) []string {
 		row2("enter", "open its folder; on GitHub only: asks, then enter or y opens it on GitHub"),
 		row2("b, opt+enter", "open it on GitHub (option+enter; shift+enter too, where the terminal tells it from enter)"),
 		row2(K.Reply, "its folders on the right: "+K.Reply+" goes into a folder or opens a file, h (or backspace) up, enter shows it in Finder, esc closes"),
+		"",
+		"## Paperclip requests (PC)",
+		row2("1-9", "answer; in a list: tick the item; in a question: pick the option; with verdicts: give the current item that verdict"),
+		row2("approvals", "1 approve, 2 reject, 3 request revision (needs a note), 4 approve with a note, 5 reject with a note"),
+		row2("s", "send the ticks, the answers or the verdicts"),
+		row2("x / r", "decline a list of choices or tasks / decline with a reason (the box opens)"),
+		row2("← / →", "the previous / next question or item"),
+		row2("o", "write your own answer to a question (enter keeps it)"),
+		row2("a", "questions: give every ★ recommended answer and send; it says which question has none and sends nothing"),
+		row2("n / p", "next / previous page of a long list"),
+		"",
+		"## Find (/FIND words)",
+		row2(k(K.Next)+" / "+k(K.Prev), "next / previous result"),
+		row2("enter", "a live session: go to it on the desk. An ended one: read the messages that match, with the message before and after (esc closes)"),
+		row2("s", "ask Claude which sessions fit (it runs by itself when names and text find nothing)"),
+		row2("r", "resume an ended session in a new Terminal window: cd to its folder, claude --resume"),
 		"",
 		"## Wall (push " + K.Wall + ")",
 		row2("1-9", "select that tile"),
@@ -1188,11 +1250,17 @@ func (m model) footer() []string {
 		add(&r1, "esc", "desk")
 	case vPaperclip:
 		add(&r1, K.Next+" "+K.Prev, "issue")
-		add(&r1, "1-9", "answer")
+		for _, kv := range m.pcFooterKeys() { // the numbers, and the keys of a form
+			add(&r1, kv[0], kv[1])
+		}
 		add(&r1, key(K.Older)+key(K.Newer), "scroll")
 		add(&r1, K.Reply, "comment")
 		add(&r1, "enter", "in browser")
 		add(&r1, "esc", "desk")
+	case vFind:
+		for _, h := range m.findHints() {
+			add(&r1, h[0], h[1])
+		}
 	case vPulls:
 		add(&r1, K.Next+" "+K.Prev, "move")
 		if m.prOpen {
@@ -1229,6 +1297,9 @@ func (m model) footer() []string {
 		add(&r1, K.Command, "command")
 	default:
 		add(&r1, "1-9", "answer")
+		if a := m.sel(); a != nil && len(m.last(a).Ask) > 0 {
+			add(&r1, K.Quick, "quick approve")
+		}
 		add(&r1, K.Next+" "+K.Prev, "next/prev")
 		add(&r1, key(K.Older)+key(K.Newer), "scroll")
 		add(&r1, key(K.Waiting), "longest input")

@@ -2,7 +2,7 @@
 // Run as: osascript -l JavaScript send.js CMD TTY [ARGS]   (TTY like ttys005, without /dev/)
 //   text TTY TEXT        type TEXT into the tab (Terminal scripting, no focus change), then press Enter; a TEXT
 //                        with line breaks goes in as one bracketed paste
-//   keys TTY KEY...      press keys: 0-9, enter, esc, tab, up, down, left, right, backspace
+//   keys TTY KEY...      press keys: 0-9, enter, esc, tab, up, down, left, right, backspace; pause waits 0.35 s
 //   raise TTY            select the tab, bring its window to the front and activate Terminal (the `g` key)
 //   ttys                 every Terminal tab's tty, one per line (which sessions can be typed into)
 //   tabs                 every Terminal tab as "tty window_id tab_index" (1-based), one per line
@@ -73,6 +73,7 @@ function press(t, win, tab, keys) {
     return 'error: could not bring its window to the front, no key sent';
   }
   for (const k of keys) {
+    if (k === 'pause') { delay(0.35); continue; } // let the menu draw its next question
     const c = CODES[k];
     if (c === undefined) return 'error: unknown key ' + k;
     [true, false].forEach(d => $.CGEventPostToPid(pid, $.CGEventCreateKeyboardEvent(null, c, d)));

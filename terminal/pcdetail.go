@@ -10,6 +10,8 @@ package main
 //   POST /api/issues/:id/interactions/:iid/reject {reason}  decline it
 //   POST /api/issues/:id/interactions/:iid/respond {answers:[{questionId, optionIds}]}  answer ask_user_questions
 //   POST /api/issues/:id/recovery-actions/resolve {actionId, outcome, sourceIssueStatus}  a recovery action
+// The other kinds of request (ticks, several questions, verdicts, suggested tasks) are in pcask.go and pcform.go,
+// the company approvals in pcapproval.go.
 
 import (
 	"bytes"
@@ -50,13 +52,14 @@ type PCAsk struct {
 	Prompt  string
 	Details string
 	Options []PCOption // numbered answers; none: kaching can't answer this kind, the browser can
+	Spec    *PCSpec    // a request with a form (ticks, several questions, verdicts, tasks): pcform.go
 }
 
 // PCOption is one numbered answer and what it posts.
 type PCOption struct {
 	Label  string
-	Action string // accept, reject, reason (decline, with a reason written first), answer, recover
-	Arg    string // answer: questionId/optionId; recover: outcome/sourceIssueStatus
+	Action string // accept, reject, reason (a note written first), answer, recover; approvals: apr
+	Arg    string // answer: questionId/optionId; recover: outcome/sourceIssueStatus; approvals: approve, reject, request-revision
 }
 
 type pcIssueFull struct {
@@ -89,20 +92,8 @@ type pcInteraction struct {
 	Status    string    `json:"status"`
 	Title     string    `json:"title"`
 	CreatedAt time.Time `json:"createdAt"`
-	Payload   struct {
-		Prompt          string `json:"prompt"`
-		DetailsMarkdown string `json:"detailsMarkdown"`
-		Title           string `json:"title"`
-		Questions       []struct {
-			ID            string `json:"id"`
-			Prompt        string `json:"prompt"`
-			SelectionMode string `json:"selectionMode"`
-			Options       []struct {
-				ID    string `json:"id"`
-				Label string `json:"label"`
-			} `json:"options"`
-		} `json:"questions"`
-	} `json:"payload"`
+	Payload   pcPayload `json:"payload"`
+	Result    pcResult  `json:"result"`
 }
 
 // pcMaxComments: how much of the thread the panel keeps (the newest).
@@ -110,6 +101,9 @@ const pcMaxComments = 40
 
 // loadPCDetail reads one issue's panel. names maps agent ids to names.
 func loadPCDetail(id string, names map[string]string) PCDetail {
+	if aid, ok := pcApprovalID(id); ok {
+		return loadPCApproval(aid, id, names)
+	}
 	d := PCDetail{ID: id, At: time.Now()}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -172,13 +166,25 @@ func pcAskOf(is pcIssueFull, inter []pcInteraction) *PCAsk {
 		case "request_confirmation":
 			a.Options = []PCOption{{"approve", "accept", ""}, {"decline", "reject", ""}, {"decline with a reason", "reason", ""}}
 		case "ask_user_questions":
-			// one single-choice question: a number answers it; more questions are for the browser
-			if qs := open.Payload.Questions; len(qs) == 1 && qs[0].SelectionMode == "single" {
-				a.Prompt = qs[0].Prompt
-				for _, o := range qs[0].Options {
-					a.Options = append(a.Options, PCOption{o.Label, "answer", qs[0].ID + "/" + o.ID})
+			a.Spec = pcSpecOf(*open)
+			// one single-choice question with nothing to write: a number answers it at once
+			if a.Spec != nil && pcPlainQuestion(a.Spec.Questions) {
+				q := a.Spec.Questions[0]
+				a.Prompt = q.Prompt
+				for _, o := range q.Options {
+					label := o.Label
+					if o.Rec {
+						label += " ★"
+					}
+					a.Options = append(a.Options, PCOption{label, "answer", q.ID + "/" + o.ID})
 				}
 			}
+		case "connection_intent":
+			if a.Prompt == "" && open.Payload.ServiceName != "" {
+				a.Prompt = "Connect " + open.Payload.ServiceName + " for " + open.Payload.RequestingAgentName + "."
+			}
+		default:
+			a.Spec = pcSpecOf(*open)
 		}
 		return a
 	}
@@ -193,12 +199,16 @@ func pcAskOf(is pcIssueFull, inter []pcInteraction) *PCAsk {
 	return nil
 }
 
-// pcAct posts the owner's answer n (1-based) to the issue's open request; reason goes with a decline.
+// pcAct posts the owner's answer n (1-based) to the issue's open request (or the approval's); reason goes with a
+// decline, or is the note of an approval.
 func pcAct(issueID string, a *PCAsk, n int, reason string) error {
 	if a == nil || n < 1 || n > len(a.Options) {
 		return errors.New("no such answer")
 	}
 	o := a.Options[n-1]
+	if aid, ok := pcApprovalID(issueID); ok {
+		return pcActApproval(aid, o, reason)
+	}
 	base := "/api/issues/" + url.PathEscape(issueID)
 	switch o.Action {
 	case "accept":

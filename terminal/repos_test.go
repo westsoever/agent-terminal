@@ -92,7 +92,7 @@ func stubOpen(t *testing.T) *[]opened {
 	return &got
 }
 
-func press(t *testing.T, m model, keys ...string) model {
+func pressRP(t *testing.T, m model, keys ...string) model {
 	t.Helper()
 	for _, k := range keys {
 		var msg tea.KeyMsg
@@ -138,30 +138,30 @@ func TestRepoEnterAndGitHub(t *testing.T) {
 	local := Repo{Name: "miso", Remote: "technobbq/miso", Dir: "/x/miso"}
 	only := Repo{Name: "web", Remote: "westsoever/web"}
 	m := repoModel(t, local, only)
-	m = press(t, m, "enter")
+	m = pressRP(t, m, "enter")
 	if len(*got) != 1 || (*got)[0] != (opened{"open", "/x/miso"}) {
 		t.Fatalf("enter on a clone: %+v", *got)
 	}
-	m = press(t, m, "l", "enter")
+	m = pressRP(t, m, "l", "enter")
 	if m.mode != mConfirm || len(*got) != 1 {
 		t.Fatalf("enter on github only: mode %d, opened %+v", m.mode, *got)
 	}
 	if line := escRe.ReplaceAllString(m.commandLine(), ""); !strings.Contains(line, "No local folder. Open it on GitHub?") {
 		t.Fatalf("command line: %q", line)
 	}
-	m = press(t, m, "esc")
+	m = pressRP(t, m, "esc")
 	if m.mode != mKeys || m.view != vRepos || len(*got) != 1 {
 		t.Fatalf("esc must only cancel: mode %d view %d %+v", m.mode, m.view, *got)
 	}
-	m = press(t, m, "enter", "y")
+	m = pressRP(t, m, "enter", "y")
 	if len(*got) != 2 || (*got)[1].path != "https://github.com/westsoever/web" {
 		t.Fatalf("y: %+v", *got)
 	}
-	m = press(t, m, "enter", "enter")
+	m = pressRP(t, m, "enter", "enter")
 	if len(*got) != 3 {
 		t.Fatalf("enter, enter: %+v", *got)
 	}
-	m = press(t, m, "j", "b", "alt+enter")
+	m = pressRP(t, m, "j", "b", "alt+enter")
 	if len(*got) != 5 || (*got)[3].path != "https://github.com/technobbq/miso" || (*got)[4] != (*got)[3] {
 		t.Fatalf("b, option+enter: %+v", *got)
 	}
@@ -170,7 +170,7 @@ func TestRepoEnterAndGitHub(t *testing.T) {
 		t.Fatalf("shift+enter (CSI u): %+v", *got)
 	}
 	// no key in RP reaches the agent behind it: k is the folder panel, not a reply
-	if m = press(t, m, "o", "g", "3"); m.mode != mKeys {
+	if m = pressRP(t, m, "o", "g", "3"); m.mode != mKeys {
 		t.Fatalf("mode %d", m.mode)
 	}
 }
@@ -192,7 +192,7 @@ func TestRepoTree(t *testing.T) {
 	}
 	m := repoModel(t, Repo{Name: "r", Dir: root, Remote: "o/r"})
 	m.cfg.OpenCmd = "myopen"
-	m = press(t, m, "k")
+	m = pressRP(t, m, "k")
 	names := func() string {
 		var n []string
 		for _, e := range m.tree.items {
@@ -203,35 +203,35 @@ func TestRepoTree(t *testing.T) {
 	if m.tree == nil || names() != "docs src .gitignore README.md" {
 		t.Fatalf("root: %v", m.tree)
 	}
-	m = press(t, m, "l", "k")
+	m = pressRP(t, m, "l", "k")
 	if m.tree.rel != "src" || names() != ".. inner main.go" {
 		t.Fatalf("src: %q %s", m.tree.rel, names())
 	}
-	m = press(t, m, "l", "l", "k")
+	m = pressRP(t, m, "l", "l", "k")
 	if len(*got) != 1 || (*got)[0] != (opened{"myopen", filepath.Join(root, "src", "main.go")}) {
 		t.Fatalf("k on a file: %+v", *got)
 	}
-	m = press(t, m, "j", "enter")
+	m = pressRP(t, m, "j", "enter")
 	if (*got)[1] != (opened{"open", filepath.Join(root, "src", "inner")}) {
 		t.Fatalf("enter on a folder: %+v", *got)
 	}
-	m = press(t, m, "b")
+	m = pressRP(t, m, "b")
 	if (*got)[2].path != "https://github.com/o/r/tree/HEAD/src" {
 		t.Fatalf("b in the panel: %+v", *got)
 	}
-	m = press(t, m, "j", "j", "k") // .. goes up, back on src
+	m = pressRP(t, m, "j", "j", "k") // .. goes up, back on src
 	if m.tree.rel != "" || m.tree.items[m.tree.sel].Name != "src" {
 		t.Fatalf("up: %q sel %d", m.tree.rel, m.tree.sel)
 	}
-	m = press(t, m, "k", "h")
+	m = pressRP(t, m, "k", "h")
 	if m.tree.rel != "" || m.tree.items[m.tree.sel].Name != "src" {
 		t.Fatalf("h: %q sel %d", m.tree.rel, m.tree.sel)
 	}
-	m = press(t, m, "esc")
+	m = pressRP(t, m, "esc")
 	if m.tree != nil || m.view != vRepos {
 		t.Fatalf("esc: tree %v view %d", m.tree, m.view)
 	}
-	if m = press(t, m, "esc"); m.view != vDesk {
+	if m = pressRP(t, m, "esc"); m.view != vDesk {
 		t.Fatalf("second esc: view %d", m.view)
 	}
 }
@@ -251,11 +251,11 @@ func TestRepoTreeGitHub(t *testing.T) {
 		return []byte(`[{"name":"main.go","type":"file","html_url":"https://github.com/o/w/blob/main/cmd/main.go"}]`), nil
 	}
 	m := repoModel(t, Repo{Name: "w", Remote: "o/w"})
-	m = press(t, m, "k")
+	m = pressRP(t, m, "k")
 	if len(m.tree.items) != 2 || m.tree.items[0].Name != "cmd" || m.tree.loading {
 		t.Fatalf("root: %+v", m.tree)
 	}
-	m = press(t, m, "k", "l", "k")
+	m = pressRP(t, m, "k", "l", "k")
 	if strings.Join(asked, " ") != "o/w: o/w:cmd" || len(*got) != 1 || (*got)[0].path != "https://github.com/o/w/blob/main/cmd/main.go" {
 		t.Fatalf("asked %v opened %+v", asked, *got)
 	}
