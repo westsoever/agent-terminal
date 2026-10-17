@@ -15,7 +15,7 @@ A gate (`tool-gate.sh`) checks every tool call. When a call is denied, say in on
 `dash.sh --route` prints a header, then one tab-separated row per live session:
 `name  message_to  status  state  state_dir  notes  focus  branch`
 - name: the folder or repo name ("home" is the home folder). Say this aloud.
-- message_to: the exact `to` for SendMessage. Copy it character for character. Never say it aloud.
+- message_to: the exact `to` for SendMessage. Copy it character for character. Never say it aloud. When two sessions share a name it is an address starting with `uds:`; tell them apart by name, branch or focus, and if the owner's words fit both, ask which one.
 - status idle|busy. state: what the session is doing (working, input, blocked, done ...).
 - state_dir: the folder with that session's STATE.md. notes: yes if STATE.md exists, no if not.
 - focus: `focused` on the Terminal tab the owner was looking at when they pressed the voice shortcut, else `-`.
