@@ -122,6 +122,18 @@ Hand a task to an agent, put its Terminal window on your second display, and for
 - **Status:** `bin/queue.sh status` lists the waiting tabs. State is in `~/.agent/queue/`.
 - **Settings** in `~/.agent/config`: `queue=off` turns it off; `queue_tile=off` keeps the queue but not the tiling; `queue_main_display=DELL` picks the main display by part of its name instead of the menu bar display.
 
+## Agent terminal: every agent from the keyboard
+
+`kaching` is one screen for all your agents, run entirely from the keyboard (design: `docs/superpowers/specs/2026-10-17-agent-terminal-design.md`, D33). It has no AI of its own: it reads the session records and types into the agent's own Terminal tab what you chose, so the agent does the work.
+
+- **Install:** `terminal/build.sh` builds it into `~/.local/bin/kaching` (needs Go: `brew install go`). Then add **Open Agent Terminal** (`ui/raycast/kaching-open.sh`, same Raycast folder as above) and give it a hotkey: it brings kaching forward, or opens it filling the main display.
+- **The desk:** left, every live agent by name: WAITING (oldest first), WORKING, IDLE. Right, the selected agent: its last message, its numbered options, the files it mentioned (lettered), the reply line. An orange frame means it waits for you.
+- **Keys:** `j`/`k` move, `space` jumps to the next waiting agent, `1`-`9` answer its option (a menu gets the key, a list in its message gets the number and Enter), `r` types a free reply (Enter sends, Esc cancels), `o` then a letter opens a file it mentioned, `g` brings up its own Terminal window, `W` shows the wall (`z` zooms one tile), `/` opens the command line, `?` shows every key.
+- **Pre-written replies:** `f` fix it, `d` review the code, `s` check in on the other agents, and behind the space bar `space m` `/merge`, `space c` commit, `space w` new worktree. All keys and texts live in `~/.agent/terminal/keys.toml` (written on first run); edit and save, the terminal reloads it.
+- **Command line codes:** `IN` the desk, `AG` the wall, `FL` every file agents mentioned (Enter opens), `RP` the sync check, `PR` the learner's proposals (Enter shows, `a` approve with its typed code, `x` reject, `z` snooze 7 days), `PC` Paperclip issues that need you and running ones with their cost (`r` posts a comment, Enter opens the issue), `A3` the third agent, or the start of an agent's name. `QUIT` or ctrl+c leaves.
+- **Delivery:** text goes in through Terminal scripting without taking focus; Enter and menu answers are key presses, so the agent's window flashes to the front for a tenth of a second. The status line says "✓ <agent> is on it" once the session reacts. Sessions outside Terminal.app (Desktop, VS Code) are listed but can't be typed into.
+- **While it runs:** `~/.agent/terminal/open` says it's open and which agent is selected, for the monitor queue.
+
 ## The guard
 
 `bin/guard.sh` runs before Bash, file and selected MCP tool calls in every session, including `bypassPermissions` sessions. A denial tells the session what to do instead.
