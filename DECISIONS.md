@@ -2,13 +2,17 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
-## D39 (2026-10-17): kaching splits waiting agents into INPUT and WAITING, and shows what each one asks
+## D40 (2026-10-17): kaching splits waiting agents into INPUT and WAITING, and shows what each one asks
 
 **Decision (user):** waiting, working and idle are sorted right, but inside waiting the owner can't tell who needs an answer from who just finished. The queue now has four sections: INPUT (asked you something, or blocked), WAITING (done), WORKING, IDLE. Each INPUT agent shows what it asks on a line under its name.
 
 **Why:** a turn counted as "needs input" only when its last line ended in "?". Agents that asked in an earlier line, or asked without a question mark ("tell me and I'll check", "I left the live check to you", "let me know if you want X"), showed as done and sat among the finished reports.
 
 **Built:** `bin/ask-check.sh` reads the last 6 lines of the turn, leaving out code blocks and headings. A real question there (not a "?" inside code or a link), or a request for the owner to do or decide something, makes the turn input. The matching sentence is the ask. `stop-check.sh` uses it for the state, the notification text and the new meta `ask=`. A heuristic, so some misses remain; a Haiku pass was left out because it would use the learner's daily token cap on every stop. Agents whose screen shows a menu (the `Asking` flag, being built in kaching-prompt) belong in INPUT too.
+
+## D39 (2026-10-17): Global hotkeys from the menu bar dot instead of Raycast
+
+**Decision (user):** "make it work". The Raycast 2.8 script folder could not be added by the owner, and it cannot be added from outside either: Raycast keeps its settings in an encrypted database, and driving its settings window by synthetic clicks would type into whatever the owner is writing. So KachingBar registers the hotkeys itself, with Carbon's RegisterEventHotKey, which needs no Accessibility or Input Monitoring permission. Defaults: Ctrl+Option+N next waiting agent, Ctrl+Option+T tile, Ctrl+Option+K kaching. Each runs the same ui/raycast script, and the bindings live in one file, `~/.agent/hotkeys`. The scripts still work from Raycast. This amends agent.terminal's "Raycast stays the global hotkey layer"; kaching's in-terminal keys.toml is unchanged. build.sh now compiles every ui/menubar/*.swift and links Carbon. Info.plist carries NSAppleEventsUsageDescription for the one-time "control Terminal" prompt.
 
 ## D38 (2026-10-17): Windows move on their own only when kaching is closed, and you can drag them (closes D37's open part)
 

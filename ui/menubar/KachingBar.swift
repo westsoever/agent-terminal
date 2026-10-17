@@ -347,6 +347,24 @@ final class StatusBarController: NSObject {
         timer?.tolerance = 2
     }
 
+    /// Shows a short text next to the dot for 3 seconds (a hotkey's result, Hotkeys.swift).
+    private var flashToken = 0
+    func flash(_ text: String) {
+        guard let item = statusItem, let button = item.button else { return }
+        flashToken += 1
+        let token = flashToken
+        item.length = NSStatusItem.variableLength
+        button.imagePosition = .imageLeft
+        button.title = " " + String(text.prefix(60))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.flashToken == token, let item = self.statusItem else { return }
+                item.button?.title = ""
+                item.length = NSStatusItem.squareLength
+            }
+        }
+    }
+
     func refresh() {
         guard !inFlight else { return }
         inFlight = true
@@ -430,8 +448,11 @@ final class StatusBarController: NSObject {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let controller: StatusBarController
     private let drags: DragWatcher?
+    private let hotkeys: Hotkeys?
 
-    init(controller: StatusBarController, drags: DragWatcher?) { self.controller = controller; self.drags = drags }
+    init(controller: StatusBarController, drags: DragWatcher?, hotkeys: Hotkeys?) {
+        self.controller = controller; self.drags = drags; self.hotkeys = hotkeys
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // One dot per login: launchd and a manual open must not give two.
@@ -442,6 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.start()
         drags?.start()
+        hotkeys?.start()
     }
 }
 
@@ -468,16 +490,21 @@ struct KachingBarMain {
             print(provider.snapshot().report)
             exit(0)
         }
+        if args.contains("--hotkeys-check") {   // how $AGENT_HOME/hotkeys (or the defaults) parse: one line per binding
+            print(HotkeyBinding.check(agentHome: KachingPaths.fromEnvironment(env).agentHome))
+            exit(0)
+        }
         if let bad = args.first(where: { !$0.hasPrefix("-psn_") }) {
-            FileHandle.standardError.write(Data("KachingBar: unknown argument \(bad) (only --status-once)\n".utf8))
+            FileHandle.standardError.write(Data("KachingBar: unknown argument \(bad) (only --status-once, --hotkeys-check)\n".utf8))
             exit(64)
         }
         MainActor.assumeIsolated {
             let app = NSApplication.shared
             let drags = (env["KACHING_BAR_DRAGS"] ?? "").lowercased() == "off" ? nil : DragWatcher(paths: .fromEnvironment(env))
-            let delegate = AppDelegate(controller: StatusBarController(provider: provider,
-                                                                       pollSecs: TimeInterval(num("KACHING_BAR_POLL_SECS", 12))),
-                                       drags: drags)
+            let controller = StatusBarController(provider: provider, pollSecs: TimeInterval(num("KACHING_BAR_POLL_SECS", 12)))
+            let hotkeys = (env["KACHING_BAR_HOTKEYS"] ?? "").lowercased() == "off" ? nil
+                : Hotkeys(paths: .fromEnvironment(env), flash: { [weak controller] in controller?.flash($0) })
+            let delegate = AppDelegate(controller: controller, drags: drags, hotkeys: hotkeys)
             app.delegate = delegate
             app.setActivationPolicy(.accessory)
             app.run()
