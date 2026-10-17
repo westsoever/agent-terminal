@@ -31,7 +31,12 @@ type Agent struct {
 	Lead                   string // the session id of the lead agent when this one is a sub-session, else ''
 	Subs                   int    // how many sub-sessions this lead has
 	Ask                    string // what a "needs input" turn asks the owner (meta ask=), '' when none
+	Bg                     bool   // a background session (claude --bg): no window, kaching types into it by attaching
+	Job                    string // a background session's short id (claude attach <job>)
 }
+
+// canSend: kaching can type into it: a Terminal tab, or a background session.
+func (a Agent) canSend() bool { return a.InTerminal || a.Bg }
 
 // Group is where an agent sits in the queue.
 func (a Agent) Group() int {
@@ -96,6 +101,7 @@ type claudeSession struct {
 	Kind      string `json:"kind"`
 	Status    string `json:"status"`
 	UpdatedAt int64  `json:"statusUpdatedAt"`
+	JobID     string `json:"jobId"`
 }
 
 // hidden sessions are machinery, not agents the owner manages.
@@ -116,13 +122,20 @@ func loadAgents(tabs map[string]tabPos, groups [][]string) []Agent {
 			continue
 		}
 		var cs claudeSession
-		if json.Unmarshal(b, &cs) != nil || cs.PID == 0 || cs.Kind != "interactive" || hidden(cs) {
+		if json.Unmarshal(b, &cs) != nil || cs.PID == 0 || hidden(cs) {
+			continue
+		}
+		bg := cs.Kind == "bg" && cs.SessionID != "" // a background session; an unclaimed spare has no session yet
+		if cs.Kind != "interactive" && !bg {
 			continue
 		}
 		if syscall.Kill(cs.PID, 0) != nil { // stale file: the process is gone
 			continue
 		}
-		a := Agent{SID: cs.SessionID, Name: cs.Name, Cwd: cs.Cwd, PID: cs.PID, Busy: cs.Status == "busy"}
+		a := Agent{SID: cs.SessionID, Name: cs.Name, Cwd: cs.Cwd, PID: cs.PID, Busy: cs.Status == "busy", Bg: bg, Job: cs.JobID}
+		if bg && a.Job == "" {
+			a.Job = short(cs.SessionID)
+		}
 		if cs.UpdatedAt > 0 {
 			a.Since = time.UnixMilli(cs.UpdatedAt)
 		}
@@ -148,7 +161,7 @@ func loadAgents(tabs map[string]tabPos, groups [][]string) []Agent {
 	for i := range out {
 		out[i].TTY = ttys[out[i].PID]
 		pos, ok := tabs[out[i].TTY]
-		out[i].InTerminal = out[i].TTY != "" && (tabs == nil || ok)
+		out[i].InTerminal = !out[i].Bg && out[i].TTY != "" && (tabs == nil || ok) // a background session's pty is the daemon's
 		out[i].Win, out[i].Tab = pos.win, pos.tab
 	}
 	linkFamilies(out, groups)

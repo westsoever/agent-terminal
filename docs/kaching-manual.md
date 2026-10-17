@@ -12,11 +12,13 @@ Push `/`, write the code, then push `Enter`.
 |---|---|---|
 | `IN` | Inbox (the desk) | All agents and the selected agent. This is the start view. |
 | `AG` | Agents (the wall) | All agents as tiles. You can also push `W`. |
-| `FL` | Files | All files that the agents wrote about. |
+| `FL` | Files | The last 30 files that the agents wrote about, newest first. Files of agents that stopped stay in the list. |
 | `RP` | Repos | The git sync check: repos with work that you can lose. |
 | `RC` | Recaps | The last recap of each agent. Claude Code writes a recap when you come back to a session after some time. The desk also shows the recap of the selected agent above its last message. |
-| `PR` | Proposals | The changes that the learner proposes. |
-| `PC` | Paperclip | Paperclip issues that need you, and issues in progress. |
+| `PR` | Proposals | The changes that the learner proposes. The tab is orange when proposals are open. |
+| `PC` | Paperclip | Paperclip issues that need you, and issues in progress. The tab is orange when an issue needs you. |
+| `NW` | New agent | Start a background agent. Refer to section 6.15. |
+| `STOP` | – | Stop the selected background agent. Its conversation stays. |
 | `A3` | Agent 3 | The desk, with agent 3 selected. Use a number from 1 to 9. |
 | `ching` | An agent by name | The desk, with the first agent whose name starts with these letters. |
 | `HELP` | Help | The key list. You can also push `?`. |
@@ -37,7 +39,7 @@ The right hand does the most frequent work: `j` goes up, `l` goes down, `k` open
 | `1` to `9` | Send the answer with that number to the selected agent. |
 | `k` | Write a message to the selected agent. `Enter` sends it. `Esc` keeps it as a draft. Refer to section 1.4. |
 | `o`, then `a` to `i` | Open the file with that letter. |
-| `g` | Show the Terminal window of the selected agent, where it is. |
+| `g` | Show the Terminal window of the selected agent, where it is. For a background agent, open a new Terminal window that is attached to it. |
 | `h` | Bring the window of the selected agent to monitor 1 and into focus, so that you can write in it. Drag it back to monitor 2 to put it back in its position. |
 | `x` | Remove the selected agent from the waiting list. You do not send an answer. |
 | `Enter`, `←`, `→` | When the agent asks a question: confirm, or go to the previous or next question. |
@@ -116,7 +118,7 @@ Kaching is one screen for all the Claude Code agents on this Mac. You operate it
 
 Kaching does not have its own AI. It does not decide for you. It reads the session records of the agents. It writes the text that you select into the Terminal window of the agent. The agent then does the work.
 
-Kaching can only send text to agents in Terminal.app. It shows agents in Claude Desktop, VS Code or Cursor, but you cannot send text to them.
+Kaching can only send text to agents in Terminal.app and to background agents. It shows agents in Claude Desktop, VS Code or Cursor, but you cannot send text to them.
 
 ## 3. Install and start
 
@@ -158,7 +160,7 @@ You can also push `Ctrl+C`.
 
 The screen has five parts, from the top to the bottom:
 
-1. The tab bar. It shows the views and their codes. The current view is white.
+1. The tab bar. It shows the views and their codes. The current view is white. The `PR` tab is orange when proposals are open. The `PC` tab is orange when a Paperclip issue needs you. The number in the tab is how many.
 2. The command line. It shows the current code, the time, the number of agents and the number of agents that wait for you. It also shows short messages from Kaching.
 3. The agent list (left). It shows all agents in three groups.
 4. The agent panel (right). It shows the selected agent.
@@ -182,12 +184,14 @@ Agents in the same Terminal window (its tabs, or macOS window tabs) are one fami
 
 A dark name shows an agent that is not in Terminal.app. You can read its messages, but you cannot send text to it.
 
+A `◦` before the name shows a background agent: a session that runs without a window (`claude --bg`). You can send text to it as to the other agents.
+
 ### 4.3 The agent panel
 
 The agent panel shows the selected agent:
 
 - The top line shows its name, its folder and its git branch. On the right it shows the model and effort of its last reply, for example `[Opus 5.5] high`. The wall tiles show it too; a narrow tile shows only the model.
-- The text is the end of its last message. Tables in it show as tables (see 7.5).
+- The text is the conversation: your prompts and its messages, the newest at the bottom. Your prompts start with `›` and have a lighter background, so you can find them easily. Tables show as tables (see 7.5).
 - The numbered lines are the answers that it asks you to select from.
 - `FILES IT MENTIONED` shows the files that its last message names. Each file has a letter.
 - The `reply` line shows the text that you write.
@@ -354,6 +358,22 @@ Only a person can approve a proposal. An agent cannot approve it.
 
 Orange issues need you. If Paperclip does not operate, the view shows `Paperclip isn't running (localhost:3100)`.
 
+### 6.15 Start a background agent
+
+A background agent is a Claude Code session without a window. It does the work while you do other work.
+
+1. Select an agent that works in the folder that you want, or know the folder.
+2. Push `/`, write `NW`, push `Enter`. To use another folder, write it after `NW`: a path (`NW ~/bbq/soii`), a folder in `~/bbq` (`NW soii`), or the start of an agent name (`NW miso`).
+3. The message box opens with `new background agent in <folder>`. Write the task.
+4. Push `Enter`. The command line shows `✓ background agent <id> started`. Kaching selects the new agent when it shows in the list.
+5. Answer it as any other agent: push `k`, or a number key.
+
+To see its own screen, push `g`. A new Terminal window opens and shows the agent. Closing that window does not stop the agent.
+
+To stop it, select it, push `/`, write `STOP`, push `Enter`. To open it again later, write `claude --resume <id>` in a terminal.
+
+The folder must be trusted by Claude Code. If the command line shows `Workspace not trusted`, write `claude` in that folder once and accept.
+
 ## 7. Change the keys and the fixed messages
 
 All keys and fixed messages are in the file `~/.agent/terminal/keys.toml`. Kaching writes this file when it starts the first time.
@@ -425,7 +445,7 @@ Kaching only does these things to an agent window:
 - It pushes `Enter` or a number key in the window. For this, the window comes to the front for approximately 0.1 seconds.
 - When you push `g`, it brings the window to the front.
 
-Kaching does not start new agent sessions.
+Kaching starts a new agent session only when you write `NW` (section 6.15). That agent runs in the background, without a window. `g` on a background agent opens one new Terminal window for it.
 
 ## 9. How Kaching sends text
 
@@ -434,6 +454,8 @@ Kaching writes the text into the Terminal window of the agent. This does not cha
 Kaching then pushes `Enter` in the agent window. For this key, the agent window comes to the front for approximately 0.1 seconds. Then Kaching comes back to the front.
 
 Kaching examines the agent window after it pushes `Enter`. If the text did not go, Kaching pushes `Enter` again.
+
+A background agent has no window. Kaching opens `claude attach <id>` out of sight, pastes the text, pushes `Enter` and closes the attach again. The agent continues. This takes approximately 2 seconds.
 
 ## 10. Problems and solutions
 
@@ -457,5 +479,6 @@ Kaching examines the agent window after it pushes `Enter`. If the text did not g
 | `~/.agent/terminal/keys.toml` | Your keys and fixed messages. |
 | `~/.agent/terminal/open` | Tells the monitor queue that Kaching operates and which agent is selected. Kaching removes it when it stops. |
 | `~/.agent/terminal/send.js` | The script that sends text to Terminal windows. Kaching writes it when it starts. |
+| `~/.agent/terminal/files.json` | The last 30 files that the agents wrote about (the `FL` view). |
 | `~/.claude/kaching/terminal/` | The source code. |
 | `~/.claude/kaching/docs/superpowers/specs/2026-10-17-agent-terminal-design.md` | The design. |

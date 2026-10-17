@@ -33,6 +33,7 @@ func main() {
 		m.w, m.h = w, h
 		m.ttys, m.groups = terminalTabs(), tabGroups()
 		m.refresh()
+		m.props, m.pc = readProposals(), loadPaperclip()
 		m.status = ""
 		if *code != "" {
 			mm, _ := m.command(*code)
