@@ -14,6 +14,7 @@ Push `/`, write the code, then push `Enter`.
 | `AG` | Agents (the wall) | All agents as tiles. You can also push `W`. |
 | `FL` | Files | All files that the agents wrote about. |
 | `RP` | Repos | The git sync check: repos with work that you can lose. |
+| `RC` | Recaps | The last recap of each agent. Claude Code writes a recap when you come back to a session after some time. The desk also shows the recap of the selected agent above its last message. |
 | `PR` | Proposals | The changes that the learner proposes. |
 | `PC` | Paperclip | Paperclip issues that need you, and issues in progress. |
 | `A3` | Agent 3 | The desk, with agent 3 selected. Use a number from 1 to 9. |
@@ -36,7 +37,8 @@ The right hand does the most frequent work: `j` goes up, `l` goes down, `k` open
 | `1` to `9` | Send the answer with that number to the selected agent. |
 | `k` | Write a message to the selected agent. `Enter` sends it. `Esc` keeps it as a draft. Refer to section 1.4. |
 | `o`, then `a` to `i` | Open the file with that letter. |
-| `g` | Show the Terminal window of the selected agent. |
+| `g` | Show the Terminal window of the selected agent, where it is. |
+| `h` | Bring the window of the selected agent to monitor 1 and into focus, so that you can write in it. Drag it back to monitor 2 to put it back in its position. |
 | `x` | Remove the selected agent from the waiting list. You do not send an answer. |
 | `Enter`, `←`, `→` | When the agent asks a question: confirm, or go to the previous or next question. |
 | `W` | Go to the wall. |
@@ -90,12 +92,13 @@ The top line does not show your message. It shows only the name of the agent tha
 
 When a tile shows on the full screen, the number keys send answers, as on the desk.
 
-### 1.6 Keys in the lists (FL, PR, PC, RP)
+### 1.6 Keys in the lists (FL, RC, PR, PC, RP)
 
 | View | Key | Result |
 |---|---|---|
 | All lists | `l`, `j` | Select the next or previous line. |
 | `FL` | `Enter` | Open the selected file. |
+| `RC` | `Enter` | Go to the desk, with that agent selected. |
 | `PR` | `Enter` | Show the full proposal. Push `q` to close it. |
 | `PR` | `a` | Approve the proposal. The screen asks you to write a code. |
 | `PR` | `x` | Reject the proposal. |
@@ -172,6 +175,8 @@ The agent list has three groups:
 | `IDLE` | The agent does not do work and does not wait for an answer. |
 
 Each line shows the name of the agent, its state and the time since the last change. The selected agent has an orange line.
+
+Agents in the same Terminal window (its tabs, or macOS window tabs) are one family. The agent in the first tab is the lead. Its sub-sessions show below it with `└`, and the lead shows `+2` for two sub-sessions. A family stays together. It shows in the group of its most urgent agent: when a sub-session waits, the family is in `WAITING`.
 
 A dark name shows an agent that is not in Terminal.app. You can read its messages, but you cannot send text to it.
 

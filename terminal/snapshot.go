@@ -27,6 +27,9 @@ type Agent struct {
 	Transcript             string
 	CtxPct                 string
 	Asking                 bool   // its screen shows a menu now (a question, an approval): it waits for the owner
+	Win, Tab               int    // its Terminal window and tab (1-based), 0 when unknown
+	Lead                   string // the session id of the lead agent when this one is a sub-session, else ''
+	Subs                   int    // how many sub-sessions this lead has
 	Ask                    string // what a "needs input" turn asks the owner (meta ask=), '' when none
 }
 
@@ -100,9 +103,9 @@ func hidden(cs claudeSession) bool {
 	return strings.Contains(cs.Cwd, "/.claude-mem/observer-sessions")
 }
 
-// loadAgents builds the agent list. terminalTTYs is the set of ttys that are Terminal.app tabs (may be nil
-// when not known yet; then every agent with a tty counts as one).
-func loadAgents(terminalTTYs map[string]bool) []Agent {
+// loadAgents builds the agent list. tabs maps the ttys of Terminal.app tabs to their window and tab (nil when
+// not known yet; then every agent with a tty counts as one).
+func loadAgents(tabs map[string]tabPos, groups [][]string) []Agent {
 	dir := filepath.Join(os.Getenv("HOME"), ".claude", "sessions")
 	files, _ := filepath.Glob(filepath.Join(dir, "*.json"))
 	var out []Agent
@@ -144,14 +147,70 @@ func loadAgents(terminalTTYs map[string]bool) []Agent {
 	ttys := pidTTYs(pids)
 	for i := range out {
 		out[i].TTY = ttys[out[i].PID]
-		out[i].InTerminal = out[i].TTY != "" && (terminalTTYs == nil || terminalTTYs[out[i].TTY])
+		pos, ok := tabs[out[i].TTY]
+		out[i].InTerminal = out[i].TTY != "" && (tabs == nil || ok)
+		out[i].Win, out[i].Tab = pos.win, pos.tab
 	}
+	linkFamilies(out, groups)
 	sortAgents(out)
 	return out
 }
 
-// sortAgents: waiting first (the ones that need the owner, then the done ones; oldest first, it has waited
-// longest), then working, then idle (newest first).
+// linkFamilies: the agents that share a Terminal window are one family. The one in the leftmost tab is the
+// lead; the others are its sub-sessions (a lead opens its workers as tabs of its own window).
+func linkFamilies(a []Agent, groups [][]string) {
+	lead := map[int]int{} // window -> index of its lead
+	for i := range a {
+		if a[i].Win == 0 {
+			continue
+		}
+		if j, ok := lead[a[i].Win]; !ok || a[i].Tab < a[j].Tab {
+			lead[a[i].Win] = i
+		}
+	}
+	for i := range a {
+		a[i].Lead, a[i].Subs = "", 0
+	}
+	for i := range a {
+		if j, ok := lead[a[i].Win]; ok && j != i {
+			a[i].Lead = a[j].SID
+			a[j].Subs++
+		}
+	}
+	// macOS window tabs: each tab is its own window, so the tab bars say who belongs together. The first tab
+	// is the lead. A name that two agents share is skipped (it can't say which one).
+	byName := map[string]int{}
+	for i := range a {
+		if _, dup := byName[a[i].Name]; dup {
+			byName[a[i].Name] = -1
+		} else {
+			byName[a[i].Name] = i
+		}
+	}
+	for _, g := range groups {
+		lead := -1
+		for k, n := range g {
+			i, ok := byName[n]
+			if !ok || i < 0 {
+				continue
+			}
+			if lead < 0 {
+				lead = i
+				continue
+			}
+			if a[i].Lead == "" && a[i].SID != a[lead].SID {
+				a[i].Lead = a[lead].SID
+				a[i].Tab = k + 1
+				a[lead].Subs++
+			}
+		}
+	}
+}
+
+// sortAgents: waiting first (the ones that need the owner, then the done ones; oldest first, it has
+// waited longest), then working, then idle (newest first). A family stays together: the lead, then its
+// sub-sessions in tab order. The family sorts by its most urgent member, so a sub-session that waits
+// brings its family up.
 func sortAgents(a []Agent) {
 	sort.SliceStable(a, func(i, j int) bool {
 		gi, gj := a[i].Group(), a[j].Group()
@@ -166,6 +225,43 @@ func sortAgents(a []Agent) {
 		}
 		return a[i].Since.After(a[j].Since)
 	})
+	pos := map[string]int{} // family key -> its first (most urgent) position
+	key := func(x Agent) string {
+		if x.Lead != "" {
+			return x.Lead
+		}
+		return x.SID
+	}
+	for i, x := range a {
+		if _, ok := pos[key(x)]; !ok {
+			pos[key(x)] = i
+		}
+	}
+	sort.SliceStable(a, func(i, j int) bool {
+		ki, kj := key(a[i]), key(a[j])
+		if ki != kj {
+			return pos[ki] < pos[kj]
+		}
+		if (a[i].Lead == "") != (a[j].Lead == "") {
+			return a[i].Lead == "" // the lead first
+		}
+		return a[i].Tab < a[j].Tab
+	})
+}
+
+// FamilyGroup: the group a family is listed under (its most urgent member's), for the lead and its subs alike.
+func FamilyGroup(a []Agent, i int) int {
+	key := a[i].SID
+	if a[i].Lead != "" {
+		key = a[i].Lead
+	}
+	g := a[i].Group()
+	for _, x := range a {
+		if (x.SID == key || x.Lead == key) && x.Group() < g {
+			g = x.Group()
+		}
+	}
+	return g
 }
 
 func short(sid string) string {
