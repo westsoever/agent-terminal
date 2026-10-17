@@ -69,6 +69,7 @@ type model struct {
 	props     []string
 	sync      []string
 	ed        *editor
+	prompts   map[string]Prompt // sid -> the menu its screen shows (selected waiting agents only)
 }
 
 type cachedLast struct {
@@ -84,12 +85,16 @@ type sentMsg struct {
 }
 type leaderTimeout int
 type statusMsg string
+type promptMsg struct {
+	sid string
+	p   Prompt
+}
 type pcMsg PCState
 type execDone struct{ err error }
 
 func newModel() model {
 	cfg, ct, err := loadConfig()
-	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor()}
+	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}}
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
 	}
@@ -115,6 +120,7 @@ func (m *model) setErr(t string)    { m.status, m.statusErr = t, true }
 
 func (m *model) refresh() {
 	m.agents = loadAgents(m.ttys)
+	m.applyPrompts()
 	for sid, at := range m.expect {
 		for _, a := range m.agents {
 			if a.SID == sid && (a.Busy || transcriptAfter(a.Transcript, at)) {
@@ -234,6 +240,27 @@ func (m *model) move(d int) {
 	m.writeState()
 }
 
+// promptKey forwards enter, the arrows left/right and tab to an agent that shows a menu (choose with arrows,
+// switch question tabs, confirm), so every menu can be finished from kaching.
+func (m *model) promptKey(ks string) (bool, tea.Cmd) {
+	a := m.sel()
+	if a == nil {
+		return false, nil
+	}
+	if _, ok := m.prompts[a.SID]; !ok {
+		return false, nil
+	}
+	switch ks {
+	case "enter", "left", "right", "tab", "shift+tab":
+		k := ks
+		if k == "shift+tab" {
+			return true, m.deliver("", []string{"left"})
+		}
+		return true, m.deliver("", []string{k})
+	}
+	return false, nil
+}
+
 func (m *model) nextWaiting() {
 	var w []int
 	for i, a := range m.agents {
@@ -290,6 +317,13 @@ func (m *model) answer(n int) tea.Cmd {
 	if a == nil {
 		return nil
 	}
+	if p, ok := m.prompts[a.SID]; ok && len(p.Options) > 0 {
+		if n > len(p.Options) {
+			m.setErr(fmt.Sprintf("%s has no option %d", a.Name, n))
+			return nil
+		}
+		return m.deliver("", []string{strconv.Itoa(n)})
+	}
 	l := m.last(a)
 	if n > len(l.Options) || len(l.Options) == 0 {
 		m.setErr(fmt.Sprintf("%s has no option %d", a.Name, n))
@@ -312,6 +346,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		m.refresh()
 		cmds := []tea.Cmd{tick()}
+		if c := m.readPrompt(0); c != nil {
+			cmds = append(cmds, c)
+		}
 		if time.Time(msg).Second()%10 < 2 {
 			cmds = append(cmds, loadTTYs)
 		}
@@ -324,6 +361,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ttys = msg
 		m.refresh()
 		return m, nil
+	case promptMsg:
+		if len(msg.p.Options) == 0 {
+			delete(m.prompts, msg.sid)
+		} else {
+			m.prompts[msg.sid] = msg.p
+		}
+		m.applyPrompts()
+		return m, nil
 	case pcMsg:
 		m.pc = PCState(msg)
 		return m, nil
@@ -334,7 +379,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setErr(msg.name + ": " + msg.res)
 		}
-		return m, nil
+		delete(m.prompts, msg.sid)
+		return m, m.readPrompt(500 * time.Millisecond)
 	case statusMsg:
 		m.setStatus(string(msg))
 		m.refresh()
@@ -460,6 +506,10 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if done, cmd := m.listKey(ks); done {
 			return m, cmd
 		}
+	case vDesk, vWall:
+		if done, cmd := m.promptKey(ks); done {
+			return m, cmd
+		}
 	}
 	switch {
 	case ks == K.Next || ks == "down":
@@ -530,6 +580,34 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// readPrompt reads screens for menus: the selected agent's, and every agent Kaching's hooks marked as needing
+// input or blocked, or that showed a menu last time. Busy or not: Claude Code calls a session busy while its
+// question is open, so the screen is the truth.
+func (m *model) readPrompt(delay time.Duration) tea.Cmd {
+	var cmds []tea.Cmd
+	for _, a := range m.agents {
+		_, asked := m.prompts[a.SID]
+		if !a.InTerminal || !(a.SID == m.selSID || a.State == "input" || a.State == "blocked" || asked) {
+			continue
+		}
+		sid, tty := a.SID, a.TTY
+		cmds = append(cmds, func() tea.Msg {
+			time.Sleep(delay)
+			return promptMsg{sid, parsePrompt(screenOf(tty))}
+		})
+	}
+	return tea.Batch(cmds...)
+}
+
+// applyPrompts marks the agents whose screen shows a menu and sorts them into WAITING.
+func (m *model) applyPrompts() {
+	for i := range m.agents {
+		_, ok := m.prompts[m.agents[i].SID]
+		m.agents[i].Asking = ok
+	}
+	sortAgents(m.agents)
+}
+
 // typingKey: every key while writing goes to the editor; enter sends to the agent (or the Paperclip issue).
 func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	w := m.editorWidth()
@@ -581,6 +659,15 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if ag.SID == target {
 					m.selSID = ag.SID
 				}
+			}
+		}
+		if p, ok := m.prompts[target]; ok && p.TypeOpt > 0 && !strings.Contains(text, "\n") {
+			// the agent shows a menu: the reply is its "Type something." answer
+			a := m.sel()
+			if a != nil && a.InTerminal {
+				sid, name, tty, n := a.SID, a.Name, a.TTY, p.TypeOpt
+				m.setStatus("answering " + name + "…")
+				return m, func() tea.Msg { return sentMsg{sid, name, "answer", answerTyped(tty, n, text)} }
 			}
 		}
 		return m, m.deliver(text, nil)
