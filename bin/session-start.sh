@@ -3,9 +3,11 @@
 #   (no arg) SessionStart hook: register the session in $AGENT_HOME/sessions/<id>/meta and inject
 #            GOAL/STATE/NEXT (only the ones that exist) as additionalContext. Works in any folder.
 #            The session is "idle" (nobody has prompted yet) except after compact, which keeps its state.
-#   touch   UserPromptSubmit hook: mark the session "working".
-#   end      SessionEnd hook: mark the session "ended".
+#   touch   UserPromptSubmit hook: mark the session "working"; its window leaves the monitor queue (queue.sh back).
+#   end      SessionEnd hook: mark the session "ended" (queue.sh forget).
 set -euo pipefail
+# A learner model call (learn_model_call sets KACHING_LEARNER=1) is no session: no registry entry, no event, no context.
+[ "${KACHING_LEARNER:-${CHING_LEARNER:-}}" != 1 ] || exit 0
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
@@ -16,8 +18,10 @@ resolve_state
 NOW=$(date +%s)
 
 case "$MODE" in
-  touch) meta_set state working; meta_set updated "$NOW"; meta_set prompted "$NOW"; ev prompt; exit 0 ;;
-  end)   meta_set state ended;   meta_set updated "$NOW"; ev session_end; exit 0 ;;
+  touch) meta_set state working; meta_set updated "$NOW"; meta_set prompted "$NOW"; ev prompt
+         QUEUE_SID=$SID QUEUE_NAME=$NAME "$SELF_DIR/queue.sh" back </dev/null || true; exit 0 ;;
+  end)   meta_set state ended;   meta_set updated "$NOW"; ev session_end
+         QUEUE_SID=$SID QUEUE_NAME=$NAME "$SELF_DIR/queue.sh" forget </dev/null || true; exit 0 ;;
 esac
 
 BRANCH=$(git -C "$CWD" symbolic-ref --short -q HEAD 2>/dev/null || true)
@@ -40,6 +44,9 @@ case "$SRC" in
 esac
 rm -f "$SESS_DIR/retries"
 ev session_start "$(jq -nc --arg s "$SRC" '{source:$s}')"
+# A new Terminal window takes its place in the grid and the session its line in the tabs map (queue.sh retile);
+# a compact changes no window.
+[ "$SRC" = compact ] || QUEUE_SID=$SID QUEUE_NAME=$NAME "$SELF_DIR/queue.sh" retile </dev/null >/dev/null 2>&1 || true
 
 MAX=${SESSION_START_MAX_BYTES:-6000}
 if [ "$REPO_MODE" -eq 1 ]; then WHERE="repo state in $STATE_DIR"; else WHERE="machine-level session state in $STATE_DIR (no repo GOAL.md here)"; fi

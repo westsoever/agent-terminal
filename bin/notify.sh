@@ -12,6 +12,8 @@
 # osascript. Env: NOTIFY_CWD NOTIFY_SESSION NOTIFY_ACTIVATE NOTIFY_DRY_RUN NOTIFY_LOG NOTIFY_NOW (epoch)
 # NOTIFY_TERMINAL_NOTIFIER NOTIFY_OSASCRIPT NOTIFY_IDLE_SUPPRESS (900 s) NOTIFY_PUSH_DONE AGENT_HOME
 set -euo pipefail
+# A learner model call (learn_model_call sets KACHING_LEARNER=1) never notifies: no log line, no popup, no .last stamp.
+[ "${KACHING_LEARNER:-${CHING_LEARNER:-}}" != 1 ] || exit 0
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
@@ -52,6 +54,10 @@ TITLE="$TITLE: $LABEL"
 clean() { printf '%s' "$1" | tr '\n\r\t' '   ' | tr -d '\000-\037' | cut -c1-200; }
 TITLE=$(clean "$TITLE")
 MSG=$(clean "$MSG")
+
+# The monitor queue (queue.sh): a session that now waits for you moves its Terminal window to the main display.
+# Only a call from inside the session has its tty; the watcher's calls find none and do nothing there.
+case "$KIND" in done|input|blocked|ready|idle) QUEUE_SID=$SESSION QUEUE_KIND=$KIND "$SELF_DIR/queue.sh" park "$NAME" </dev/null || true ;; esac
 
 mkdir -p "$AGENT_HOME/notify"
 LAST="$AGENT_HOME/notify/$SESSION.last"
@@ -124,7 +130,7 @@ ev notify "$(jq -nc --arg k "$KIND" --arg o "$OUTCOME" --arg w "$WHY" '{kind:$k,
 
 case "$METHOD" in
   terminal-notifier)
-    "$TN" -title "$TITLE" -message "$MSG" -group "ching-$NAME" -activate "$ACTIVATE" >/dev/null 2>&1 || true ;;
+    "$TN" -title "$TITLE" -message "$MSG" -group "kaching-$NAME" -activate "$ACTIVATE" >/dev/null 2>&1 || true ;;
   osascript)
     # Title and message go in as argv so they are never parsed as AppleScript source.
     "$OSA" -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' -e 'end run' -- "$TITLE" "$MSG" >/dev/null 2>&1 || true ;;

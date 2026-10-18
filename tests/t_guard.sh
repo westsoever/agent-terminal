@@ -2,6 +2,9 @@
 # guard.sh: every guardrail in PLAN 5.1 denies, ordinary commands pass, works in any folder.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# Rule 3 (a release token for a push or merge to main) applies only while the push gate is on, and it is off by
+# default: these tests prove the rule, so they run with push_gate=on (t_pushgate.sh covers the switch itself).
+printf 'push_gate=on\n' >"$AGENT_HOME/config"
 
 R=$(mk_repo grepo)
 RP=$(cd "$R" && pwd -P)
@@ -36,6 +39,16 @@ gdeny "rm -rf . at the repo root" "$R" 'rm -rf .'
 gdeny "rm -rf .git" "$R" 'rm -rf .git'
 gdeny "rm -rf glob on /" "$R" 'rm -rf /*'
 gdeny "rm -rf glob on /tmp itself" "$R" 'rm -rf /tmp/*'
+gallow "rm -rf named glob inside /tmp" "$R" 'rm -rf /tmp/kaching-f1-probe.*'
+gallow "rm -rf named glob inside /private/tmp" "$R" 'rm -rf /private/tmp/verify-run.*'
+gdeny "rm -rf short-prefix glob in /tmp" "$R" 'rm -rf /tmp/a*'
+gdeny "rm -rf glob hitting every session's scratch (/tmp/claude-501)" "$R" 'rm -rf /tmp/cla*'
+gdeny "rm -rf glob on the claude scratch name" "$R" 'rm -rf /tmp/claude-501*'
+gdeny "rm -rf 3-letter glob in /tmp" "$R" 'rm -rf /tmp/chi*'
+gdeny "rm -rf short glob without a separator" "$R" 'rm -rf /tmp/cv2*'
+gdeny "rm -rf glob on other test sandboxes" "$R" 'rm -rf /tmp/kaching-tests.*'
+gdeny "rm -rf named glob with a deeper segment" "$R" 'rm -rf /tmp/run*/../../etc'
+gdeny "rm -rf named glob outside tmp" "$R" 'rm -rf /etc/old*'
 gdeny "rm -rf with a variable" "$R" 'rm -rf $HOME/x'
 gdeny "rm -rf with a command substitution" "$R" 'rm -rf $(pwd)/..'
 gdeny "rm -rf after cd outside" "$R" 'cd /Users && rm -rf clyde'
@@ -112,11 +125,11 @@ gdeny "chmod -x a hook" "$R" 'chmod -x .git/hooks/pre-push'
 gdeny "mv .githooks away" "$R" 'mv .githooks .githooks.off'
 gdeny "edit settings.json via sed" "$R" "sed -i '' 's/guard//' $HOME/.claude/settings.json"
 gdeny "redirect into settings.json" "$R" "echo '{}' > $HOME/.claude/settings.json"
-gdeny "modify the guard itself" "$R" "echo 'exit 0' >> $KIT/bin/guard.sh && : $CLAUDE_DIR/ching/bin/guard.sh"
-gdeny "write through the ching symlink" "$R" "cp /tmp/x $CLAUDE_DIR/ching/bin/guard.sh"
+gdeny "modify the guard itself" "$R" "echo 'exit 0' >> $KIT/bin/guard.sh && : $CLAUDE_DIR/kaching/bin/guard.sh"
+gdeny "write through the kaching symlink" "$R" "cp /tmp/x $CLAUDE_DIR/kaching/bin/guard.sh"
 tdeny "Edit tool on settings.json" Edit "$R" "$(jq -n --arg p "$HOME/.claude/settings.json" '{file_path:$p,old_string:"a",new_string:"b"}')"
 tdeny "Write tool into .git/hooks" Write "$R" "$(jq -n --arg p "$RP/.git/hooks/pre-push" '{file_path:$p,content:"exit 0"}')"
-tdeny "Edit tool on guard.sh via symlink path" Edit "$R" "$(jq -n --arg p "$CLAUDE_DIR/ching/bin/guard.sh" '{file_path:$p,old_string:"a",new_string:"b"}')"
+tdeny "Edit tool on guard.sh via symlink path" Edit "$R" "$(jq -n --arg p "$CLAUDE_DIR/kaching/bin/guard.sh" '{file_path:$p,old_string:"a",new_string:"b"}')"
 tallow "Edit tool on a normal file" Edit "$R" "$(jq -n --arg p "$RP/README.md" '{file_path:$p,old_string:"a",new_string:"b"}')"
 tallow "Write tool on a normal new file" Write "$P" "$(jq -n --arg p "$P/notes.md" '{file_path:$p,content:"x"}')"
 
@@ -216,7 +229,7 @@ gdeny "bun run db:migrate --apply" "$R" 'bun run db:migrate --apply'
 gallow "db-migrate dry run (no --apply)" "$R" 'bun scripts/db-migrate.ts'
 
 # ---------- gate commands reserved for the human ----------
-gdeny "agent runs release-gate --approve" "$R" "$CLAUDE_DIR/ching/bin/release-gate.sh --approve"
+gdeny "agent runs release-gate --approve" "$R" "$CLAUDE_DIR/kaching/bin/release-gate.sh --approve"
 gdeny "agent runs migrate-gate --confirm" "$R" "migrate-gate.sh --confirm db/migrations/0002_x.sql"
 gdeny "agent writes a release token by hand" "$R" 'echo abc > .agent/release-token'
 gdeny "agent reads the signing secret" "$R" "cat $AGENT_HOME/.agent/secret"
@@ -950,6 +963,158 @@ gh release create v1.0.0
 GH_REPO=o/r gh release create v1.0.0
 EOF
 
+# ---------- rule 8: pnpm and yarn (CHECKPOINT-1.5 section 6; read from pnpm 10.34.7, yarn 1.22.22 and yarn 4.18.1) ----------
+# Neither tool prefix-matches its commands (npm does): pnpm has `publish` only, plus the recursive prefixes recursive,
+# multi and m (and -r), and its binaries pn, pnpx, pnx; an unknown word is a script. Yarn has `publish` (classic),
+# `npm publish` (berry), `tag` (classic) and `npm tag add|remove` (berry), the binary yarnpkg; an unknown word is a
+# script. corepack runs any of them. Prefixes of publish are denied anyway (a miss is a publish, a script called
+# `pub` is rare). A script NAMED like a publish is denied for every manager, as it is for npm (npm run publish).
+while IFS= read -r c; do
+  [ -n "$c" ] && gallow "rule 8 pnpm/yarn subcommand: $c" "$QD" "$c"
+done <<'EOF'
+pnpm publish --dry-run
+pnpm -r publish --dry-run
+pnpm --recursive publish --dry-run --no-git-checks
+pnpm m publish --dry-run
+pn publish --dry-run
+yarn npm publish --dry-run
+yarnpkg npm publish --dry-run
+corepack pnpm publish --dry-run
+corepack yarn npm publish --dry-run
+corepack npm publish --dry-run
+pnpm test publish
+pnpm t publish
+pnpm tst publish
+pnpm -r test publish
+pnpm m test publish
+yarn test publish
+yarn info publish
+yarn npm info publish
+pnpm view x publish
+pnpm v x publish
+pnpm info publish versions
+pnpm show publish
+pnpm search publish
+pnpm why publish
+pnpm ls publish
+pnpm pack
+yarn pack
+pnpm run test -- publish
+pnpm run build
+pnpm -r run build
+pnpm --filter web test
+pnpm install
+pnpm i
+pnpm add -D typescript
+pnpm update
+yarn
+yarn install
+yarn add left-pad
+yarn build
+yarn run build
+yarn workspace web test
+yarn npm tag list
+yarn tag ls
+yarn npm whoami
+yarn npm login
+npm stage list
+npm stage view abc
+npm stage reject abc
+corepack enable
+corepack prepare pnpm@latest --activate
+corepack use pnpm@9
+pnpm exec tsc --noEmit
+pnpx cowsay hi
+pnx cowsay hi
+bunx cowsay hi
+npx npm@latest view publish
+EOF
+while IFS= read -r c; do
+  [ -n "$c" ] && gdeny_why "publish: $c" "$QD" "$c" "rule 8"
+done <<'EOF'
+pnpm publish --access public
+pnpm -r publish
+pnpm --recursive publish
+pnpm recursive publish
+pnpm multi publish
+pnpm m publish
+pnpm --filter web publish
+pnpm publish --dry-run false
+pnpm publish --no-dry-run
+pn publish
+pn -r publish
+yarn publish
+yarn npm publish
+yarn npm publish --tag next
+yarn npm publish --dry-run --no-dry-run
+yarn workspace web npm publish
+yarn workspaces foreach -A npm publish
+yarnpkg publish
+yarnpkg npm publish
+corepack pnpm publish
+corepack yarn publish
+corepack yarn npm publish
+corepack npm publish
+corepack pnpm -r publish
+corepack yarnpkg npm publish
+pnpm pu
+pnpm pub
+pnpm publ
+pnpm publi
+pnpm publis --tag next
+pnpm -r pub
+pn pub
+yarn pu
+yarn pub
+yarn publis
+yarnpkg pub
+pnpm run publish-docs
+pnpm run publish
+pnpm run release:publish
+yarn run publish
+yarn run publish:npm
+pn run publish
+pnpm unpublish x@1
+pnpm unp x@1
+pnpm unpub x@1
+pnpm deprecate x "old"
+pnpm dist-tag add x@1 latest
+yarn unpublish x@1
+yarn tag add x@1 latest
+yarn tag remove x latest
+yarn tag rm x latest
+yarn npm tag add x@1 latest
+yarn npm tag remove x latest
+yarnpkg tag add x@1 latest
+npm stage approve abc
+npm stag approve abc
+yarn npm stage approve abc
+corepack yarn npm stage approve abc
+npm stage publish
+npm stage publish --dry-run false
+pnpx npm publish
+pnx npm publish
+pnpx pnpm publish
+pnpx yarn npm publish
+npx npm@latest publish
+npx npm@11 pub
+npx pnpm@9 publish
+npx yarn@1 publish
+bunx npm@latest publish
+bunx pnpm@latest publish
+corepack pnpm@9.1.0 publish
+sudo corepack pnpm publish
+env NODE_ENV=production pn publish
+cd packages/x && pnpm publish
+bash -c "pnpm publish"
+pnpm test && pnpm publish
+EOF
+gdeny_why "pnpx runs vercel: rule 4" "$QD" 'pnpx vercel deploy' "the vercel CLI"
+gdeny_why "pnx runs vercel: rule 4" "$QD" 'pnx vercel --prod' "the vercel CLI"
+gdeny_why "pn dlx vercel: rule 4" "$QD" 'pn dlx vercel deploy' "the vercel CLI"
+gdeny_why "corepack pnpm dlx vercel: rule 4" "$QD" 'corepack pnpm dlx vercel deploy' "the vercel CLI"
+gallow "pnpx vercel whoami" "$QD" 'pnpx vercel whoami'
+
 # ---------- rule 5: a grep/rg pattern names no file (2026-10-06: grep -n "ching.env" bin/*.sh was denied) ----------
 while IFS= read -r c; do
   [ -n "$c" ] && gallow "rule 5 pattern: $c" "$QD" "$c"
@@ -1029,31 +1194,31 @@ env FOO="a;b" echo ok
 NODE_OPTIONS="--max-old-space-size=4096 --enable-source-maps" bun run build
 EOF
 
-# ---------- running a ching script with a redirect is not a write to it (2026-10-06: dash.sh 2>&1 | head was denied) ----------
+# ---------- running a kaching script with a redirect is not a write to it (2026-10-06: dash.sh 2>&1 | head was denied) ----------
 while IFS= read -r c; do
-  [ -n "$c" ] && gallow "redirect while running a ching script: $c" "$QD" "$c"
+  [ -n "$c" ] && gallow "redirect while running a kaching script: $c" "$QD" "$c"
 done <<'EOF'
-~/.claude/ching/bin/dash.sh 2>&1 | head -8
-~/.claude/ching/bin/dash.sh 2>/dev/null
-~/.claude/ching/bin/dash.sh --next >/tmp/dash-out.txt
-~/.claude/ching/bin/dash.sh > /tmp/dash-out.txt 2>&1
-~/.claude/ching/bin/dash.sh >&2
-bash ~/.claude/ching/bin/dash.sh --inbox 2>&1 | tail -3
+~/.claude/kaching/bin/dash.sh 2>&1 | head -8
+~/.claude/kaching/bin/dash.sh 2>/dev/null
+~/.claude/kaching/bin/dash.sh --next >/tmp/dash-out.txt
+~/.claude/kaching/bin/dash.sh > /tmp/dash-out.txt 2>&1
+~/.claude/kaching/bin/dash.sh >&2
+bash ~/.claude/kaching/bin/dash.sh --inbox 2>&1 | tail -3
 cat ~/.claude/settings.json > /tmp/settings-copy.json
 EOF
 while IFS= read -r c; do
   [ -n "$c" ] && gdeny_why "write to a protected path: $c" "$QD" "$c" "editing hooks, settings or the guard"
 done <<'EOF'
-echo x > ~/.claude/ching/bin/dash.sh
+echo x > ~/.claude/kaching/bin/dash.sh
 cat a >> ~/.claude/settings.json
-tee ~/.claude/ching/bin/x
+tee ~/.claude/kaching/bin/x
 echo x >~/.claude/settings.json
-echo x 2>~/.claude/ching/bin/dash.sh
+echo x 2>~/.claude/kaching/bin/dash.sh
 echo x &> ~/.claude/settings.json
 echo x >& ~/.claude/settings.json
 exec 3<>~/.claude/settings.json
-cp /tmp/x ~/.claude/ching/bin/dash.sh 2>/dev/null
-~/.claude/ching/bin/dash.sh > ~/.claude/ching/bin/dash.sh
+cp /tmp/x ~/.claude/kaching/bin/dash.sh 2>/dev/null
+~/.claude/kaching/bin/dash.sh > ~/.claude/kaching/bin/dash.sh
 sed -i '' 's/a/b/' ~/.claude/settings.json 2>&1
 EOF
 
@@ -1067,7 +1232,7 @@ while IFS= read -r c; do
     pass "decided, no internal error: $c"
   else fail "decided, no internal error: $c" "  rc=$rc"$'\n'"  guard said: $out"; fi
 done <<'EOF'
-cd sub && export T_ROOT=$(mktemp -d /tmp/ching-focus.XXXXXX) && TNAME=t_stop bash tests/t_stop.sh >"$T_ROOT/log" 2>&1; echo "rc=$?"; grep -E 'checkpoint|^FAIL' "$T_ROOT"/results.t_stop | head -20; rm -rf "$T_ROOT"
+cd sub && export T_ROOT=$(mktemp -d /tmp/kaching-focus.XXXXXX) && TNAME=t_stop bash tests/t_stop.sh >"$T_ROOT/log" 2>&1; echo "rc=$?"; grep -E 'checkpoint|^FAIL' "$T_ROOT"/results.t_stop | head -20; rm -rf "$T_ROOT"
 W=/tmp/x/t_dash && export HOME=$W/home AGENT_HOME=$W/agent-home && ls $AGENT_HOME && bin/dash.sh --next
 EOF
 while IFS= read -r c; do
@@ -1078,6 +1243,143 @@ sed -n 1,60p node_modules/x/README.md | head -80; grep -n "readSheet\b\|readShee
 cd sub && export SPACES_ROOT=/tmp/x && echo "== typecheck" && (bun run typecheck 2>&1 | tail -15; echo "typecheck exit=${pipestatus[1]}")
 ls db/test | head -20; f=$(ls db/test | grep -iE "foundation|enrich" | head -1); [ -n "$f" ] && sed -n 1,70p db/test/$f | cut -c1-170; grep -nE "usage|--apply|export (async )?function|export const" scripts/db-migrate.ts | head -20
 grep -nE '^(write_goal|mk_repo|hook_json|assert_[a-z_]+)\(\)|NOTIFY_DRY_RUN|export ' tests/lib.sh | head -40; sed -n "$(grep -n '^write_goal()' tests/lib.sh | cut -d: -f1),+12p" tests/lib.sh
-export T_ROOT=$(mktemp -d /tmp/ching-tests.XXXXXX) && TNAME=t_install bash tests/t_install.sh >"$T_ROOT/t_install.log" 2>&1; echo "rc=$?"; grep '^FAIL' "$T_ROOT/results.t_install"
+export T_ROOT=$(mktemp -d /tmp/kaching-tests.XXXXXX) && TNAME=t_install bash tests/t_install.sh >"$T_ROOT/t_install.log" 2>&1; echo "rc=$?"; grep '^FAIL' "$T_ROOT/results.t_install"
 EOF
+
+# ---------- Phase 6: `kaching-proposals approve` is for the human; learner mode (KACHING_LEARNER=1) ----------
+gdeny "kaching-proposals approve from a session" "$R" 'kaching-proposals approve rule-x'
+gdeny "approve through the kit path" "$R" "$HOME/.claude/kaching/bin/kaching-proposals approve rule-x"
+gdeny "approve under a fake pty" "$R" 'script -q /dev/null kaching-proposals approve rule-x'
+gdeny "approve after a cd and &&" "$R" 'cd /tmp && bin/kaching-proposals approve skill-y'
+# D35: the old name is a wrapper around the same CLI, and the old link still leads to the kit
+O=ching-pro""posals
+gdeny "approve under the pre-D35 name" "$R" "$O approve rule-x"
+gdeny "approve through the old kit path" "$R" "$HOME/.claude/ching/bin/$O approve rule-x"
+gallow "the pre-D35 name may still list" "$R" "$O list"
+tdeny "Edit tool on a hook under the old link" Edit "$R" "$(jq -n --arg p "$HOME/.claude/ching/bin/guard.sh" '{file_path:$p,old_string:"a",new_string:"b"}')"
+tdeny "Edit tool on a hook under the new link" Edit "$R" "$(jq -n --arg p "$HOME/.claude/kaching/bin/guard.sh" '{file_path:$p,old_string:"a",new_string:"b"}')"
+gdeny "approve with the word quoted apart" "$R" "kaching-proposals ap'prove' rule-x"
+gdeny "approve inside bash -c" "$R" "bash -c 'kaching-proposals approve rule-x'"
+gdeny_why "approve: the reason names the person at a terminal" "$R" 'kaching-proposals approve rule-x' "approving a learner proposal is for the person at a terminal"
+gallow "kaching-proposals list" "$R" 'kaching-proposals list'
+gallow "kaching-proposals show" "$R" 'kaching-proposals show rule-x'
+gallow "kaching-proposals reject" "$R" 'kaching-proposals reject rule-x not useful'
+gallow "kaching-proposals snooze" "$R" 'kaching-proposals snooze rule-x 7'
+gallow "grep for approve in the CLI" "$R" 'grep -n approve bin/kaching-proposals'
+gallow "a proposal id that contains approve" "$R" 'kaching-proposals show rule-approve-merges'
+# the verifier's bypasses of the old token match (stage 6a): the allowlist denies every one
+gdeny "bypass: echo approve | xargs kaching-proposals" "$R" 'echo approve rule-x | xargs kaching-proposals'
+gdeny "bypass: xargs with options" "$R" 'echo rule-x | xargs -n1 kaching-proposals approve'
+gdeny "bypass: a=approve; kaching-proposals \$a" "$R" 'a=approve; kaching-proposals $a rule-x'
+gdeny "bypass: \$(echo approve)" "$R" 'kaching-proposals $(echo approve) rule-x'
+gdeny "bypass: backticks" "$R" 'kaching-proposals `echo approve` rule-x'
+gdeny "bypass: appr\${x}ove" "$R" 'x=; kaching-proposals appr${x}ove rule-x'
+gdeny "bypass: perl exec" "$R" "perl -e 'exec \"kaching-proposals\", \"approve\", \"rule-x\"'"
+gdeny "bypass: eval" "$R" 'eval kaching-proposals approve rule-x'
+gdeny "bypass: env wrapper" "$R" 'env kaching-proposals approve rule-x'
+gdeny "bypass: the name in capitals (a case-insensitive volume)" "$R" 'KACHING-PROPOSALS approve rule-x'
+gdeny "bypass: a glob that expands to the name" "$R" 'bin/kaching-propos*ls approve rule-x'
+gdeny "bypass: a glob with a short literal part" "$R" 'bin/chi*s approve rule-x'
+gdeny "bypass: a two-letter glob" "$R" 'bin/c*s approve rule-x'
+gdeny "bypass: a one-letter glob" "$R" 'bin/*s approve rule-x'
+gdeny "bypass: question marks only" "$R" 'bin/??????????????? approve rule-x'
+gallow "shell code quoting a case arm is no CLI call" "$R" "python3 - <<'EOF'
+s='''case \"\$rest\" in */*) ;; *) echo x ;; esac'''
+EOF"
+gallow "a bare star segment is no CLI call" "$R" 'echo a; * ; echo b'
+gallow "a case arm with a bracket class is no CLI call" "$R" "python3 - <<'EOF'
+s=\"case \\\"\$lim\\\" in ''|*[!0-9]*) lim=300 ;; esac\"
+EOF"
+gallow "an all-pattern word is no CLI call" "$R" 'x=1; *[!0-9]* ; echo b'
+# the splitter cuts a quoted argument such as "Write(06-Wiki/learned/**)" at its parenthesis and leaves a path glob as
+# a "command word". Matching only its last component (`**`) denied the whole claude -p line (the Librarian's, 2026-10-17).
+# A glob with a directory part is the CLI only when that path can name a copy of it (a bin/ directory holding it).
+gallow "the Librarian claude -p line, quoted tool patterns and a python filter" "$R" "$(cat "$(dirname "${BASH_SOURCE[0]}")/fixtures/guard/librarian-claude-p.txt")"
+gallow "a quoted Write(dir/**) argument is no CLI call" "$R" 'claude -p go --allowedTools "Write(06-Wiki/learned/**)" "Edit(06-Wiki/learned/**)"'
+gallow "a quoted Edit(//abs/dir/**) argument is no CLI call" "$R" 'claude -p go --allowedTools "Edit(//Users/me/vault/learned/**)"'
+gallow "a quoted Read(dir/*) argument is no CLI call" "$R" 'claude -p go --allowedTools "Read(docs/*)"'
+gallow "the same quoted argument from a plain folder" "$P" 'claude -p go --allowedTools "Write(06-Wiki/learned/**)"'
+gdeny "bypass: a glob behind ./" "$R" './bin/c*s approve rule-x'
+gdeny "bypass: a glob behind ../" "$R" '../bin/*s approve rule-x'
+gdeny "bypass: ../ ahead of a bare glob" "$R" '../c*s approve rule-x'
+gdeny "bypass: ./ ahead of a bare glob" "$R" './c*s approve rule-x'
+gdeny "bypass: a glob in the directory part" "$R" 'b*/c*s approve rule-x'
+gdeny "bypass: a glob over the whole path" "$R" '*/*s approve rule-x'
+gdeny "bypass: the path in capitals (a case-insensitive volume)" "$R" 'BIN/C*S approve rule-x'
+gdeny "bypass: a doubled slash" "$R" 'bin//c*s approve rule-x'
+gdeny "bypass: a dot segment" "$R" '/opt/./bin/c*s approve rule-x'
+gdeny "bypass: a dot-dot segment" "$R" '/opt/x/../bin/c*s approve rule-x'
+gdeny "bypass: \$HOME in the path" "$R" '$HOME/.claude/kaching/bin/c*s approve rule-x'
+gdeny "bypass: ~ in the path" "$R" '~/.claude/kaching/bin/c*s approve rule-x'
+gdeny "bypass: the installed link spelled out" "$R" "$HOME/.claude/kaching/bin/c*s approve rule-x"
+gdeny "bypass: the guard's own bin directory, absolute" "$R" "$BIN/k*s approve rule-x"
+gdeny "bypass: find -exec" "$R" 'find bin -name kaching-proposals -exec {} approve rule-x ;'
+gdeny "bypass: python" "$R" "python3 -c 'import os; os.execvp(\"kaching-proposals\", [\"kaching-proposals\", \"approve\", \"rule-x\"])'"
+gdeny "bypass: a copy of the CLI" "$R" 'cp bin/kaching-proposals /tmp/cp2'
+gdeny "bypass: echo into a shell" "$R" 'echo kaching-proposals approve rule-x | sh'
+gdeny "bypass: git -c core.pager" "$R" "git -c core.pager='kaching-proposals approve rule-x' log"
+gdeny "bypass: an option before the subcommand" "$R" 'kaching-proposals --x approve rule-x'
+gdeny "bypass: no subcommand at all" "$R" 'kaching-proposals'
+gdeny_why "bypass: the reason names the allowlist" "$R" 'echo approve rule-x | xargs kaching-proposals' "approving a learner proposal is for the person at a terminal. A session may only call kaching-proposals directly"
+# what a session (and work on kaching itself) still does
+gallow "kaching-proposals diff" "$R" 'kaching-proposals diff rule-x'
+gallow "kaching-proposals help" "$R" 'kaching-proposals --help'
+gallow "kaching-proposals list with NO_COLOR=1" "$R" 'NO_COLOR=1 kaching-proposals list --all'
+gallow "kaching-proposals show by kit path, piped to head" "$R" "$HOME/.claude/kaching/bin/kaching-proposals show rule-x | head -20"
+gallow "list then show" "$R" 'kaching-proposals list && kaching-proposals show rule-x'
+gallow "shellcheck the CLI" "$R" 'cd bin && shellcheck -x -S warning kaching-proposals'
+gallow "bash -n the CLI" "$R" 'bash -n bin/kaching-proposals'
+gallow "sed -n the CLI" "$R" "sed -n '1,40p' bin/kaching-proposals"
+gallow "git add the CLI" "$R" 'git add bin/kaching-proposals tests/t_learn_plumbing.sh'
+gallow "a commit message that mentions approve" "$R" 'git commit -m "kaching-proposals: approve asks for a code"'
+gallow "git log of the CLI" "$R" 'git log --oneline -- bin/kaching-proposals'
+gallow "the README mentions it" "$R" 'grep -n "kaching-proposals approve" README.md'
+# a wrapper script file shows the guard nothing to match; the CLI refuses it (t_learn_plumbing.sh "bypass a wrapper")
+gallow "a wrapper script file: not visible to the guard (the CLI refuses it)" "$R" 'bash /tmp/wrap.sh'
+
+PRL="$AGENT_HOME/proposals"; mkdir -p "$PRL/.work"
+ldeny() { local out; out=$(printf '%s' "$(guard_json "$2" "$3" "$4")" | KACHING_LEARNER=1 "$BIN/guard.sh" 2>&1)
+  if is_deny "$out"; then pass "learner deny: $1"; else fail "learner deny: $1" "  input: $4"$'\n'"  guard said: ${out:-<allowed>}"; fi; }
+lallow() { local out; out=$(printf '%s' "$(guard_json "$2" "$3" "$4")" | KACHING_LEARNER=1 "$BIN/guard.sh" 2>&1)
+  if [ -z "$out" ]; then pass "learner allow: $1"; else fail "learner allow: $1" "  input: $4"$'\n'"  guard said: $out"; fi; }
+fp_json() { jq -nc --arg p "$1" '{file_path: $p, content: "x"}'; }
+lallow "Write under proposals/" Write "$PRL/.work" "$(fp_json "$PRL/rule-x.md")"
+lallow "Write under proposals/.work, relative to the cwd" Write "$PRL/.work" "$(fp_json "prompts.jsonl")"
+lallow "Edit under proposals/" Edit "$PRL/.work" "$(jq -nc --arg p "$PRL/rule-x.md" '{file_path: $p, old_string: "a", new_string: "b"}')"
+lallow "Read anywhere" Read "$PRL/.work" "$(jq -nc --arg p "$R/README.md" '{file_path: $p}')"
+lallow "Grep" Grep "$PRL/.work" '{"pattern":"x","path":"."}'
+ldeny "Write outside proposals/" Write "$PRL/.work" "$(fp_json "$HOME/.agents/CLAUDE.md")"
+ldeny "Write to a skill" Write "$PRL/.work" "$(fp_json "$HOME/.claude/skills/new/SKILL.md")"
+ldeny "Edit outside proposals/" Edit "$PRL/.work" "$(jq -nc --arg p "$R/README.md" '{file_path: $p, old_string: "a", new_string: "b"}')"
+ldeny "Write that climbs out with .." Write "$PRL/.work" "$(fp_json "$PRL/../config")"
+ldeny "MultiEdit outside" MultiEdit "$PRL/.work" "$(jq -nc --arg p "$R/README.md" '{file_path: $p, edits: []}')"
+ldeny "NotebookEdit outside" NotebookEdit "$PRL/.work" "$(jq -nc --arg p "$R/n.ipynb" '{notebook_path: $p}')"
+ldeny "Write without a path" Write "$PRL/.work" '{"content":"x"}'
+ldeny "the proposals folder itself is not a file to write" Write "$PRL/.work" "$(fp_json "$PRL")"
+mkdir -p "$WORK/outside"; ln -s "$WORK/outside" "$PRL/link-out"
+ldeny "Write through a link inside proposals/ that leads out" Write "$PRL/.work" "$(fp_json "$PRL/link-out/x.md")"
+ln -s "$WORK/outside/f.md" "$PRL/file-link.md"
+ldeny "Write to a file link inside proposals/" Write "$PRL/.work" "$(fp_json "$PRL/file-link.md")"
+ldeny "Bash, even harmless" Bash "$PRL/.work" '{"command":"ls"}'
+ldeny "Bash redirect outside proposals/" Bash "$PRL/.work" "$(jq -nc --arg c "echo x > $HOME/.agents/CLAUDE.md" '{command: $c}')"
+ldeny "Bash redirect inside proposals/ (no shell at all)" Bash "$PRL/.work" "$(jq -nc --arg c "echo x > $PRL/.work/x" '{command: $c}')"
+ldeny "Monitor" Monitor "$PRL/.work" '{"command":"ls"}'
+ldeny "Skill" Skill "$PRL/.work" '{"skill":"commit"}'
+ldeny "an MCP send tool" mcp__claude_ai_Gmail__send_message "$PRL/.work" '{}'
+ldeny "any MCP tool" mcp__plugin_claude-mem_mcp-search__search "$PRL/.work" '{}'
+ldeny "WebFetch" WebFetch "$PRL/.work" '{"url":"https://example.com"}'
+ldeny "WebSearch" WebSearch "$PRL/.work" '{"query":"x"}'
+ldeny "Task (a subagent)" Task "$PRL/.work" '{"prompt":"x"}'
+mkdir -p "$WORK/sl-learner"; ln -s "$WORK/outside" "$WORK/sl-learner/proposals"
+out=$(printf '%s' "$(guard_json Write "$WORK" "$(fp_json "$WORK/sl-learner/proposals/x.md")")" | KACHING_LEARNER=1 AGENT_HOME="$WORK/sl-learner" "$BIN/guard.sh" 2>&1)
+if is_deny "$out"; then pass "learner deny: a symlinked proposals root"; else fail "learner deny: a symlinked proposals root" "$out"; fi
+why=$(printf '%s' "$(guard_json Skill "$PRL/.work" '{"skill":"x"}')" | KACHING_LEARNER=1 "$BIN/guard.sh" | jq -r .hookSpecificOutput.permissionDecisionReason)
+assert_contains "learner deny: the reason names learner mode" "$why" "learner mode (KACHING_LEARNER=1)"
+# without KACHING_LEARNER=1 nothing changes (D24 push gate default stays off; tools the guard does not rule stay allowed)
+tallow "normal session: Skill" Skill "$R" '{"skill":"commit"}'
+tallow "normal session: an MCP tool" mcp__plugin_claude-mem_mcp-search__search "$R" '{}'
+tallow "normal session: Write outside proposals/" Write "$R" "$(fp_json "$R/notes.md")"
+gallow "normal session: Bash ls" "$R" 'ls'
+out=$(printf '%s' "$(guard_json Skill "$R" '{"skill":"x"}')" | KACHING_LEARNER=0 "$BIN/guard.sh" 2>&1)
+assert_eq "KACHING_LEARNER=0 is not learner mode" "" "$out"
 exit 0

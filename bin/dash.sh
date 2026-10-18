@@ -1,19 +1,36 @@
 #!/usr/bin/env bash
-# dash.sh [--speak | --inbox | --next] [--hours N] [--all]
+# dash.sh [--speak | --inbox | --next | --counts | --route] [--hours N] [--all]
 # Machine-wide view: one line per Claude session on this computer.
-# Sources: (1) ~/.agent/sessions/*/meta written by the hooks and ching-watch.sh, (2) transcripts in
+# Sources: (1) ~/.agent/sessions/*/meta written by the hooks and kaching-watch.sh, (2) transcripts in
 # ~/.claude/projects/*/*.jsonl modified recently (sessions that predate the hooks), (3) worktrees
 # (`git worktree list`) of every repo found, shown when they hold repo state but have no live session,
 # plus the optional extra list in ~/.agent-repos.
 #   (default)  name, state, age, ctx (● healthy ◐ watch ○ handoff ? unknown), tokens today, folder, note
-#   --speak    short spoken summary that leads with how many need you; warns above 5 active sessions
+#   --speak    short spoken summary that leads with how many need you; warns above 5 active sessions; ends with
+#              "N proposals waiting." when the learner has any (proposals never send a notification)
 #   --inbox    NEEDS YOU (blocked/input), READY (release gate passed for the current HEAD, waiting for --approve),
-#              FINISHED (done since the last --inbox). --inbox marks FINISHED as seen: it writes the time to
+#              FINISHED (done since the last --inbox), PROPOSALS (the learner's open proposals in $AGENT_HOME/proposals,
+#              "kind id: first sentence (sessions/days)", most sessions first; snoozed and decided ones are hidden;
+#              decide them with bin/kaching-proposals). --inbox marks FINISHED as seen: it writes the time to
 #              $AGENT_HOME/inbox.seen, so the next --inbox does not list those again. One entry per session.
 #   --next     top 5 by urgency x importance x recency (blocked and input sessions stay above working ones),
 #              each with its checkpoint next_action
+#   --counts   machine-readable key=value lines for the menu bar dot (ui/menubar): sessions, active, blocked, input,
+#              needs (blocked + input), proposals. Cheap and read-only: the registry only (no transcript scan, no git, so
+#              sessions predating the hooks and worktree-only rows are not counted) and it never writes inbox.seen.
+#   --route    the voice dispatcher's routing list, for a model to read (no ANSI, no speech): a header line, then one TSV
+#              line per LIVE Claude Code session ($CLAUDE_DIR/sessions/*.json, kill -0 pid; the dispatcher and claude-mem
+#              observers left out):  name  message_to  status  state  state_dir  notes  focus  branch
+#              message_to is the json name (what SendMessage takes), or uds:<socket> when two live sessions
+#              share that name; a json whose procStart differs from its pid's start time is left out (reused pid);
+#              name is "home" for ~; a missing value is "-".
+#              Focused first (its tty is in $AGENT_HOME/dispatcher/focus, "<tty> <epoch>", at most DASH_FOCUS_MAX_AGE
+#              seconds old), then busy, idle, then by name. Columns and DASH_PS_TTY_CMD: see route_list in this file.
+# Git sync (bin/sync-check.sh writes $AGENT_HOME/sync-check.md): the default view ends with one `sync:` line when the
+#   snapshot lists repos that need attention, or is older than 24 h; --inbox ends with a SYNC lane, oldest first, that
+#   shows the snapshot age ("stale snapshot" over 24 h, "never run" without one). No snapshot: the default view is unchanged.
 # Notes come from the STATE.md checkpoint `blocker:` (unless none), else the first "## Blocked" bullet.
-# Env: AGENT_HOME CLAUDE_DIR AGENT_REPOS_FILE DASH_NOW (epoch, tests) DASH_ACTIVE_MINS (30)
+# Env: AGENT_HOME CLAUDE_DIR AGENT_REPOS_FILE DASH_NOW (epoch, tests) DASH_ACTIVE_MINS (30) DASH_FOCUS_MAX_AGE (600) DASH_PS_TTY_CMD
 set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
@@ -25,10 +42,12 @@ while [ $# -gt 0 ]; do
     --speak) MODE=speak; shift ;;
     --inbox) MODE=inbox; shift ;;
     --next) MODE=next; shift ;;
+    --counts) MODE=counts; shift ;;
+    --route) MODE=route; shift ;;
     --hours) HOURS=${2:?}; shift 2 ;;
     --all) HOURS=720; shift ;;
-    -h|--help) sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "dash: unknown argument $1" >&2; exit 64 ;;
+    -h|--help) sed -n '2,/^# Env:/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "dash: unknown argument $1 (use --speak, --inbox, --next, --counts, --route, --hours N, --all or --help)" >&2; exit 64 ;;
   esac
 done
 
@@ -38,7 +57,7 @@ ACTIVE_SECS=$(( ${DASH_ACTIVE_MINS:-30} * 60 ))
 REPOS_FILE=${AGENT_REPOS_FILE:-$HOME/.agent-repos}
 TOKDAY="$AGENT_HOME/tokens/$(date -u -r "$NOW" +%Y-%m-%d)"
 
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/ching-dash.XXXXXX")
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/kaching-dash.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 ROWS="$TMP/rows"; : >"$ROWS"
 # fields (0x1f separated): updated sid cwd name branch state note src ctx tok stalled imp next_action
@@ -124,6 +143,143 @@ meta_load() {
   return 0
 }
 
+# ---- --route: the dispatcher's routing list. Reads only the Claude Code session files, the metas of those
+# sessions and the focus file: none of the registry, transcript or worktree scans below.
+#   source     $CLAUDE_DIR/sessions/*.json (one jq over all files; one per file only when a file is unreadable).
+#   skipped    dead pids (kill -0), files without a pid, a kind other than interactive, the dispatcher itself (json
+#              name "dispatcher" or cwd $AGENT_HOME/dispatcher), claude-mem observer sessions (cwd under
+#              /.claude-mem/observer-sessions, as terminal/snapshot.go hidden()).
+#   name       the display name used elsewhere (name_for: repo/worktree dir, else the folder), "home" for the home folder
+#   message_to the json name: what ListAgents shows and SendMessage takes; when two live sessions share it,
+#              "uds:<messagingSocketPath>" instead (SendMessage takes that address; the bare name would be ambiguous)
+#   status     json busy|idle;  state: Kaching's meta state= (working/input/blocked/done/...)
+#   state_dir  $AGENT_HOME/sessions/<sid> if it holds STATE.md, else <root>/.agent if that does (root: meta root=,
+#              else the git toplevel of cwd), else $AGENT_HOME/sessions/<sid>;  notes: yes when state_dir has STATE.md
+#   focus      "focused" for the session whose tty is named in $AGENT_HOME/dispatcher/focus ("<tty> <epoch>", written
+#              by KachingBar on the voice shortcut; a /dev/ prefix is fine) while that epoch (else the file's mtime) is
+#              at most DASH_FOCUS_MAX_AGE (600) seconds old
+#   branch     meta branch=, else `git symbolic-ref --short -q HEAD` in cwd
+# A missing value is "-", so no field is ever empty. Sorted focused first, then busy, idle, other, then name and
+# message_to. No live session: the header only. The ttys and start times come from ONE
+# `TZ=UTC0 ps -o pid=,tty=,lstart= -p <pid,pid,...>`;
+# DASH_PS_TTY_CMD (tests) replaces it: it is run with the comma-separated pid list as its one argument and prints
+# "pid tty [lstart]" lines (no lstart: the reused-pid check is skipped for that pid). ----
+route_list() {
+  local sdir="$CLAUDE_DIR/sessions" f files=() raw rc
+  local jqf='def v: if . == null then "-" else tostring | if . == "" then "-" else . end end;
+    select(type == "object" and (.pid | type) == "number" and .pid > 0)
+    | [(.pid | tostring), (.sessionId | v), (.cwd | v), (.name | v), (.status | v), (.kind | v),
+       (.procStart | v), (.messagingSocketPath | v)] | @tsv'
+  printf 'name\tmessage_to\tstatus\tstate\tstate_dir\tnotes\tfocus\tbranch\n'
+  [ -d "$sdir" ] || return 0
+  for f in "$sdir"/*.json; do [ -f "$f" ] && files+=("$f"); done
+  [ "${#files[@]}" -gt 0 ] || return 0
+  # one jq over every file; a file that is not JSON (being rewritten, say) aborts it, so then one jq per file
+  rc=0; raw=$(jq -r "$jqf" "${files[@]}" 2>/dev/null) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    raw=$(for f in "${files[@]}"; do jq -r "$jqf" "$f" 2>/dev/null || true; done)
+  fi
+
+  local home_l=$HOME home_p disp_l="$AGENT_HOME/dispatcher" disp_p
+  home_p=$(cd "$HOME" 2>/dev/null && pwd -P || printf '%s' "$HOME")
+  disp_p=$(cd "$disp_l" 2>/dev/null && pwd -P || printf '%s' "$disp_l")
+  local pid sid cwd jname jstatus kind pstart sock live="$TMP/route.live" pids=""
+  : >"$live"
+  while IFS=$'\t' read -r pid sid cwd jname jstatus kind pstart sock; do
+    [ -n "$pid" ] || continue
+    case "$kind" in -|interactive) ;; *) continue ;; esac
+    [ "$jname" != dispatcher ] || continue
+    if [ "$cwd" = "$disp_l" ] || [ "$cwd" = "$disp_p" ]; then continue; fi
+    case "$cwd" in */.claude-mem/observer-sessions|*/.claude-mem/observer-sessions/*) continue ;; esac
+    kill -0 "$pid" 2>/dev/null || continue
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$sid" "$cwd" "$jname" "$jstatus" "$pstart" "$sock" >>"$live"
+    pids="${pids:+$pids,}$pid"
+  done <<<"$raw"
+  [ -n "$pids" ] || return 0
+
+  # ttys and start times: one ps call for every pid. TTYS holds " pid=tty " pairs; "??" (no terminal) never
+  # matches a focus. STARTS holds " pid=Dow_Mon_D_HH:MM:SS_YYYY " in UTC, the form of the json's procStart.
+  local TTYS=" " STARTS=" " p t w1 w2 w3 w4 w5
+  while read -r p t w1 w2 w3 w4 w5; do
+    case "$p" in ''|*[!0-9]*) continue ;; esac
+    TTYS="$TTYS$p=${t#/dev/} "
+    case "$w3" in ''|*[!0-9]*) ;; *) [ -z "$w5" ] || STARTS="$STARTS$p=${w1}_${w2}_$((10#$w3))_${w4}_$w5 " ;; esac
+  done < <(if [ -n "${DASH_PS_TTY_CMD:-}" ]; then "$DASH_PS_TTY_CMD" "$pids"; else TZ=UTC0 ps -o pid=,tty=,lstart= -p "$pids"; fi 2>/dev/null || true)
+
+  # A crashed session leaves its json behind, and its pid can be reused by another process: when both start
+  # times are known and differ, the row is not that session. Then count names: SendMessage cannot pick between
+  # two sessions with the same bare name, so those get their socket address (uds:<path>) as message_to.
+  local live2="$TMP/route.live2" js ps_s
+  : >"$live2"
+  while IFS=$'\t' read -r pid sid cwd jname jstatus pstart sock; do
+    if [ "$pstart" != "-" ]; then
+      ps_s=""
+      case "$STARTS" in *" $pid="*) ps_s=${STARTS#*" $pid="}; ps_s=${ps_s%% *} ;; esac
+      read -r w1 w2 w3 w4 w5 <<<"$pstart"
+      js=""; case "$w3" in ''|*[!0-9]*) ;; *) js="${w1}_${w2}_$((10#$w3))_${w4}_$w5" ;; esac
+      if [ -n "$ps_s" ] && [ -n "$js" ] && [ "$ps_s" != "$js" ]; then continue; fi
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$sid" "$cwd" "$jname" "$jstatus" "$sock" >>"$live2"
+  done <"$live"
+  local dupes
+  dupes=$(cut -f4 "$live2" | LC_ALL=C sort | uniq -d)
+
+
+  # the focus file: "<tty> <epoch>"; fresh when the epoch (else the mtime) is at most DASH_FOCUS_MAX_AGE old and at most 60 s ahead
+  local ffile="$AGENT_HOME/dispatcher/focus" ftty="" fep="" fage max=${DASH_FOCUS_MAX_AGE:-600} focus_tty=""
+  case "$max" in ''|*[!0-9]*) max=600 ;; esac
+  if [ -f "$ffile" ]; then
+    read -r ftty fep _ <"$ffile" || true
+    ftty=${ftty#/dev/}
+    case "$fep" in ''|*[!0-9]*) fep=$(file_mtime "$ffile") ;; esac
+    fage=$((NOW - fep))
+    if [ "$fage" -le "$max" ] && [ "$fage" -ge -60 ] && [ -n "$ftty" ] && [ "$ftty" != "??" ]; then focus_tty=$ftty; fi
+  fi
+
+  # git lookups (only for what the meta lacks), cached per cwd: many sessions share a folder
+  local nl=$'\n' us=$'\037' gcache=$'\n' rest g_root g_branch
+  local root branch state sd notes focus name tty srank frank
+  local msg
+  while IFS=$'\t' read -r pid sid cwd jname jstatus sock; do
+    msg=$jname
+    if [ "$sock" != "-" ] && [ -n "$dupes" ] && printf '%s\n' "$dupes" | grep -qxF -- "$jname"; then msg="uds:$sock"; fi
+    # the registry dir name, as hook_init derives it from the session id
+    case "$sid" in .*|*..*|*[!A-Za-z0-9._-]*) sid="sid-$(printf '%s' "$sid" | shasum | cut -c1-16)" ;; esac
+    [ "${#sid}" -le 128 ] || sid="sid-$(printf '%s' "$sid" | shasum | cut -c1-16)"
+    sd="$AGENT_HOME/sessions/$sid"
+    meta_load "$sd/meta"
+    root=$M_root; branch=$M_branch
+    if { [ -z "$root" ] || [ -z "$branch" ]; } && [ -d "$cwd" ]; then
+      case "$gcache" in
+        *"$nl$cwd$us"*)
+          rest=${gcache#*"$nl$cwd$us"}; g_root=${rest%%"$us"*}; rest=${rest#*"$us"}; g_branch=${rest%%"$nl"*} ;;
+        *)
+          g_root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)
+          g_branch=""; [ -z "$g_root" ] || g_branch=$(git -C "$cwd" symbolic-ref --short -q HEAD 2>/dev/null || true)
+          gcache="$gcache$cwd$us$g_root$us$g_branch$nl" ;;
+      esac
+      [ -n "$root" ] || root=$g_root
+      [ -n "$branch" ] || branch=$g_branch
+    fi
+    if [ "$cwd" = "$home_l" ] || [ "$cwd" = "$home_p" ]; then name=home
+    elif [ "$cwd" = "-" ]; then name="-"
+    else name=$(name_for "$cwd" "$root"); [ "$name" != "~" ] || name=home; fi
+    [ -n "$name" ] || name="-"
+    state=${M_state:--}
+    if [ -f "$sd/STATE.md" ]; then notes=yes
+    elif [ -n "$root" ] && [ -f "$root/.agent/STATE.md" ]; then sd="$root/.agent"; notes=yes
+    else notes=no; fi
+    tty=""
+    case "$TTYS" in *" $pid="*) tty=${TTYS#*" $pid="}; tty=${tty%% *} ;; esac
+    focus="-"; frank=1
+    if [ -n "$focus_tty" ] && [ "$tty" = "$focus_tty" ]; then focus=focused; frank=0; fi
+    case "$jstatus" in busy) srank=0 ;; idle) srank=1 ;; *) srank=2 ;; esac
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$frank" "$srank" "$name" "$msg" "$jstatus" "$state" "$sd" \
+      "$notes" "$focus" "${branch:--}"
+  done <"$live2" | LC_ALL=C sort -t $'\t' -k1,1n -k2,2n -k3,3 -k4,4 | cut -f3-
+}
+if [ "$MODE" = route ]; then route_list; exit 0; fi
+
 # ---- 1. registry ----
 # A machine collects thousands of ended session metas (one runaway loop made 4,655 in a day), so this loop
 # must cost nothing for them: ended sessions are never listed, whatever their age, and are dropped right
@@ -147,6 +303,8 @@ if [ -d "$AGENT_HOME/sessions" ]; then
     if [ -n "$root" ] && [ -f "$root/.agent/GOAL.md" ]; then sdir="$root/.agent"; fi
     note=$(state_note "$sdir/STATE.md")
     [ -z "$note" ] || [ "$state" = blocked ] || [ "$state" = input ] || state=blocked
+    # --counts needs only the time and the state: no forks for the name, tokens, importance or next action
+    if [ "$MODE" = counts ]; then row "$upd" "$sid" "${cwd:-?}" "" "" "$state" "" registry "" "" "" "" ""; continue; fi
     row "$upd" "$sid" "${cwd:-?}" "$(display_name "${cwd:-?}" "$root")" "$M_branch" "$state" "$note" registry \
       "$M_ctx" "$(tok_for "$sid")" "$M_stalled" "$(importance "$root")" \
       "$(next_of "$sdir/STATE.md")"
@@ -157,7 +315,7 @@ fi
 # Ids are matched with case, not `printf ids | grep -q`: grep stops at its first hit, a long list makes printf die
 # of SIGPIPE, and under pipefail that reads as "not found" (a registered session listed again from its transcript).
 nl=$'\n'; seen="$nl$(cut -d$'\037' -f2 "$ROWS")$nl"
-if [ -d "$CLAUDE_DIR/projects" ]; then
+if [ "$MODE" != counts ] && [ -d "$CLAUDE_DIR/projects" ]; then
   for t in "$CLAUDE_DIR"/projects/*/*.jsonl; do
     [ -f "$t" ] || continue
     tm=$(file_mtime "$t")
@@ -178,7 +336,8 @@ if [ -d "$CLAUDE_DIR/projects" ]; then
 fi
 
 # ---- 3. worktrees of every repo found (+ ~/.agent-repos) with repo state but no live session ----
-{
+: >"$TMP/repos"
+[ "$MODE" = counts ] || { {
   cut -d$'\037' -f3 "$ROWS" | while IFS= read -r c; do [ -d "$c" ] && git -C "$c" rev-parse --show-toplevel 2>/dev/null; done || true
   if [ -f "$REPOS_FILE" ]; then
     grep -v '^[[:space:]]*#' "$REPOS_FILE" | sed 's/[[:space:]]*$//' | while IFS= read -r p; do
@@ -188,7 +347,7 @@ fi
       [ -d "$p" ] && git -C "$p" rev-parse --show-toplevel 2>/dev/null
     done || true
   fi
-} | sort -u >"$TMP/repos"
+} | sort -u >"$TMP/repos"; }
 while IFS= read -r repo; do
   [ -n "$repo" ] || continue
   git -C "$repo" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | while IFS= read -r wt; do
@@ -233,9 +392,97 @@ ready_for_head() { # repo root -> 0 when .agent/release-ready names the repo's c
   [ "$got" = "$want" ]
 }
 
+# ---- git sync snapshot (bin/sync-check.sh): read in one awk pass, and only by the default view and --inbox ----
+SYNC_SNAP="$AGENT_HOME/sync-check.md"
+sync_age_fmt() { # hours -> <1h, 5h (up to 47 h), 3d
+  local h=$1
+  if [ "$h" -lt 1 ]; then echo "<1h"; elif [ "$h" -lt 48 ]; then echo "${h}h"; else echo "$((h / 24))d"; fi
+}
+# sync_load: SYNC_STATE (none | fresh | stale: older than 24 h), SYNC_AGE_H (snapshot age), SYNC_N (repos needing
+# attention), SYNC_OLD_H (their oldest finding when the snapshot was made); rows "name US needs US age_h" go to
+# $TMP/sync.rows in the snapshot's own order, which is oldest first.
+sync_load() {
+  local kind a b c gen="" gen_epoch age
+  SYNC_STATE=none; SYNC_N=0; SYNC_OLD_H=0; SYNC_AGE_H=0; : >"$TMP/sync.rows"
+  [ -f "$SYNC_SNAP" ] || return 0
+  awk '
+    /^generated:/ && !g { g = 1; v = $0; sub(/^generated:[ ]*/, "", v); print "G\037" v; next }
+    /^## / { name = $0; sub(/^## /, "", name); sub(/ -- oldest .*$/, "", name); needs = ""; next }
+    /^needs:/ && name != "" { needs = $0; sub(/^needs:[ ]*/, "", needs); next }
+    /^age_h:/ && name != "" { h = $0; sub(/^age_h:[ ]*/, "", h); print "R\037" name "\037" needs "\037" h; name = "" }
+  ' "$SYNC_SNAP" >"$TMP/sync.all" 2>/dev/null || true
+  while IFS=$'\037' read -r kind a b c; do
+    case "$kind" in
+      G) gen=$a ;;
+      R) case "$c" in ''|*[!0-9]*) c=0 ;; esac
+         SYNC_N=$((SYNC_N + 1)); [ "$c" -le "$SYNC_OLD_H" ] || SYNC_OLD_H=$c
+         printf '%s\037%s\037%s\n' "$a" "$b" "$c" >>"$TMP/sync.rows" ;;
+    esac
+  done <"$TMP/sync.all"
+  gen_epoch=""
+  if [ -n "$gen" ]; then gen_epoch=$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$gen" +%s 2>/dev/null || true); fi
+  case "$gen_epoch" in ''|*[!0-9]*) gen_epoch=$(file_mtime "$SYNC_SNAP") ;; esac
+  age=$((NOW - gen_epoch)); [ "$age" -ge 0 ] || age=0
+  SYNC_AGE_H=$((age / 3600))
+  if [ "$age" -gt 86400 ]; then SYNC_STATE=stale; else SYNC_STATE=fresh; fi
+}
+sync_what() { # the findings in a few words
+  if [ "$SYNC_N" -eq 0 ]; then printf 'clean when last run'
+  elif [ "$SYNC_N" -eq 1 ]; then printf '1 repo needs attention (oldest %s)' "$(sync_age_fmt "$SYNC_OLD_H")"
+  else printf '%s repos need attention (oldest %s)' "$SYNC_N" "$(sync_age_fmt "$SYNC_OLD_H")"; fi
+}
+sync_line() { # the default view's last line: nothing without a snapshot, and nothing for a fresh clean one
+  sync_load
+  case "$SYNC_STATE" in
+    none) return 0 ;;
+    stale) printf 'sync: stale snapshot (%s old): %s - bin/dash.sh --inbox\n' "$(sync_age_fmt "$SYNC_AGE_H")" "$(sync_what)" ;;
+    *) [ "$SYNC_N" -eq 0 ] || printf 'sync: %s - bin/dash.sh --inbox\n' "$(sync_what)" ;;
+  esac
+}
+sync_lane() { # --inbox's last lane
+  local name needs h
+  sync_load
+  case "$SYNC_STATE" in
+    none) echo "SYNC"; echo "  never run (bin/sync-check.sh)"; return 0 ;;
+    stale) echo "SYNC (oldest first; stale snapshot, $(sync_age_fmt "$SYNC_AGE_H") old: run bin/sync-check.sh)" ;;
+    *) echo "SYNC (oldest first; snapshot $(sync_age_fmt "$SYNC_AGE_H") old)" ;;
+  esac
+  if [ "$SYNC_N" -eq 0 ]; then echo "  (nothing)"; return 0; fi
+  while IFS=$'\037' read -r name needs h; do
+    printf '  %s: %s (oldest %s)\n' "$name" "$needs" "$(sync_age_fmt "$h")"
+  done <"$TMP/sync.rows"
+}
+
+# ---- learner proposals (Phase 6 spec 6.1): read only, and the proposals folder is never created here ----
+PROP_DIR="$AGENT_HOME/proposals"
+proposal_rows() { # the open proposals, most sessions first: "kind id: first sentence (n sessions/m days)"
+  local f st today
+  [ -d "$PROP_DIR" ] && [ ! -L "$PROP_DIR" ] || return 0
+  today=$(date -r "$NOW" +%Y-%m-%d)
+  for f in "$PROP_DIR"/*.md; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    case "${f##*/}" in report-*) continue ;; esac
+    st=$(proposal_get "$f" status)
+    case "$st" in
+      open) ;;
+      snoozed:*) if [[ "${st#snoozed:}" > "$today" ]]; then continue; fi ;;
+      *) continue ;;
+    esac
+    printf '%s\t%s\t%s %s: %s (%s sessions/%s days)\n' "$(proposal_get "$f" sessions)" "${f##*/}" \
+      "$(proposal_get "$f" kind)" "$(proposal_get "$f" id)" \
+      "$(proposal_section "$f" proposal | tr '\n' ' ' | perl -ne 's/\s+/ /g; s/^ //; s/(.*?[.!?])(\s.*|$)/$1/; print substr($_, 0, 160)')" \
+      "$(proposal_get "$f" sessions)" "$(proposal_get "$f" days)"
+  done | sort -t $'\t' -k1,1rn -k2,2 | cut -f3
+}
+
 case "$MODE" in
+  counts)
+    printf 'sessions=%s\nactive=%s\nblocked=%s\ninput=%s\nneeds=%s\nproposals=%s\n' \
+      "$total" "$active" "$blocked" "$waiting" $((blocked + waiting)) "$(proposal_rows | grep -c . || true)"
+    exit 0 ;;
+
   table)
-    if [ "$total" -eq 0 ]; then echo "no Claude sessions seen in the last ${HOURS}h"; exit 0; fi
+    if [ "$total" -eq 0 ]; then echo "no Claude sessions seen in the last ${HOURS}h"; sync_line; exit 0; fi
     while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do
       label=$(label_of "$name" "$branch")
       [ "$src" = worktree ] || label="$label ${sid:0:7}"
@@ -244,6 +491,7 @@ case "$MODE" in
     done <"$TMP/sorted"
     echo "-- $total session(s), $active active"
     if [ "$active" -gt 5 ]; then echo "WARNING: $active active sessions; the plan caps this at about 5. Park some behind their STATE.md."; fi
+    sync_line
     exit 0 ;;
 
   inbox)
@@ -280,6 +528,10 @@ case "$MODE" in
     lane "NEEDS YOU" "$TMP/needs"
     lane "READY" "$TMP/ready"
     lane "FINISHED (since last look)" "$TMP/fin"
+    echo "PROPOSALS (decide with bin/kaching-proposals)"
+    proposal_rows >"$TMP/props"
+    if [ -s "$TMP/props" ]; then sed 's/^/  /' "$TMP/props"; else echo "  (nothing)"; fi
+    sync_lane
     mkdir -p "$AGENT_HOME"
     printf '%s\n' "$NOW" >"$SEEN_F"
     exit 0 ;;
@@ -312,12 +564,18 @@ case "$MODE" in
 esac
 
 # ---- spoken summary: short sentences, no paths, no ids ----
-if [ "$total" -eq 0 ]; then echo "No Claude sessions in the last $HOURS hours."; exit 0; fi
+props_said() { # " N proposals waiting." or nothing
+  local n
+  n=$(proposal_rows | grep -c . || true)
+  if [ "$n" -eq 1 ]; then printf ' 1 proposal waiting.'; elif [ "$n" -gt 1 ]; then printf ' %s proposals waiting.' "$n"; fi
+}
+if [ "$total" -eq 0 ]; then echo "No Claude sessions in the last $HOURS hours.$(props_said)"; exit 0; fi
 need=$((blocked + waiting)); out=""
 if [ "$need" -eq 1 ]; then out="1 needs you. "; elif [ "$need" -gt 1 ]; then out="$need need you. "; fi
 out="$out$active active session"; [ "$active" -eq 1 ] || out="${out}s"; out="$out out of $total."
 n=0
 while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do
+  [ "$name" != "~" ] || name=Home   # text-to-speech says nothing for "~"
   case "$state" in
     blocked) s="$name is blocked${note:+: $note}." ;;
     input) s="$name needs your input." ;;
@@ -330,8 +588,9 @@ done <"$TMP/sorted"
 if [ "$n" -eq 0 ]; then
   newest=$(head -1 "$TMP/sorted")
   nn=$(printf '%s' "$newest" | cut -d$'\037' -f4); nu=$(printf '%s' "$newest" | cut -d$'\037' -f1); ns=$(printf '%s' "$newest" | cut -d$'\037' -f6)
+  [ "$nn" != "~" ] || nn=home
   out="$out Nothing is blocked. Latest: $nn is $ns, $(spoken_age $((NOW - nu)))."
 fi
 [ "$done_n" -eq 0 ] || out="$out $done_n finished."
 if [ "$active" -gt 5 ]; then out="$out Warning: that is more than five active sessions; consider parking some."; fi
-echo "$out"
+echo "$out$(props_said)"

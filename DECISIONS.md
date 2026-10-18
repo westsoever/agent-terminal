@@ -2,6 +2,235 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D55 (2026-10-18): `2` in PR merges at once, with no agent
+
+**Decision (user):** "Currently, if I click K and then 2 to merge it, an agent gets sent off to merge it. I would want this to become just a terminal action where I merge it right away, without an agent merging it."
+
+**Built:** `2` in the PR panel runs `gh pr merge <url> --<method> --match-head-commit <sha>` from kaching itself, outside any local clone. The commit is the head that the panel read (`headRefOid`), so a push after that makes GitHub refuse. The method is a merge commit when the repo allows one, else squash, else rebase (`gh repo view`). The branch is kept. Kaching refuses before it calls gh, with the reason in the status line, when the panel has not loaded, the pull request is a draft, it has conflicts, or checks failed or still run (the same rule the merge agent had). A gh refusal shows in the status line. A merged pull request leaves the list at once. `1` still starts a review agent. No confirm step: the owner wants one key.
+
+## D54 (2026-10-18): HELP scrolls and starts with what is new
+
+**Decision (user):** "Add them to the HELP section in the app so I have an overview of what I can now do with kaching".
+
+**Why:** the help page was 80 to 90 lines and the body shows about 55 on a 62-row terminal, so its last third (Wall, the fixed messages with their space keys, the keys.toml note) could not be seen at all, and anything added would have been cut off too.
+
+**Built:** HELP scrolls (up and down 3 lines, pgup and pgdown a page, home, end; the title says so and "more below") and opens at the top each time. A "New on 2026-10-18" block follows the view codes: the space leader and `space space` (D53), `x` (D50), the `/NW` defaults read from keys.toml (D51), `b` and `t` in PC (D52), `i` in RP (D49), the DONE section (D47). The `x` line now says it does not close the session. Add a block like this for the next batch and drop the old one when it stops being news.
+
+## D53 (2026-10-18): space waits for its second key; `space space` jumps to the longest INPUT
+
+**Decision (user):** the `space m` and `space c` messages "don't wait too long, so I have to input the m too quickly. Since the space overlaps with opening the most recent session, that can become very tricky - maybe we change the hotkey for that but I'd like to have a longer waiting time or just waiting for input until I put the e.g. m or Esc to abort the command".
+
+**Why:** space alone was "the INPUT agent that has waited the longest", so kaching could only tell it from the start of `space m` by a 450 ms timer. Too slow a second key and the selection jumped.
+
+**Built:** space starts the leader and waits with no timer. The status line lists the keys behind it (`space… m merge · c commit · w new worktree · space longest input · esc cancel`). Esc cancels, a key that is bound to nothing ends it with a message and is not passed on (so `space x` can never dismiss), a `space <k>` reply is sent. The jump to the longest INPUT agent is `space space`; `next_waiting = " "` in keys.toml now means that, and any other key there is a direct key with no leader. The leader starts only in the desk and the wall; before, it also started in the other views and moved the selection after the timer.
+
+## D52 (2026-10-18): PC hands an issue to an agent with the owner's permissions (b, t, @Name)
+
+**Decision (user):** the request itself is not in the logs I could search. The owner tried it on 2026-10-18: "pressing b has now moved it to the inbox and is working on it".
+
+**Built (0cd5b50):** in the PC view `b` hands the selected issue to a new background agent, `t` to a new session in a Terminal window, and a box text that starts with `@Name` to a session that already runs. The agent gets a short first message and a briefing file in `~/.agent/terminal/handoff/` (description, thread, the request that waits, the folder from the issue's `repo:` line, and how to report through Paperclip's local API: one comment, status `in_review`, never `done`). It starts with the model, effort and mode of `/NW` (D51).
+
+## D51 (2026-10-18): agents kaching starts run Sonnet 5.5 at high effort
+
+**Decision (user):** "which model are the sessions running when i activate them with agent or background? - for me it shows opus but the standard should be sonnet 5.5 high".
+
+**Why:** `nw_model` and `nw_effort` in keys.toml were empty, so every agent started from kaching (`/NW`, the PR comment, `b` and `t` in PC) took Claude Code's own default, which is `opus[1m]` at `xhigh` from `~/.claude/settings.json`.
+
+**Built:** a new keys.toml has `nw_model = "claude-sonnet-5-5"` and `nw_effort = "high"`; the owner's keys.toml has the same two lines. Words after `/NW` still win, and an empty value still leaves it to Claude Code. `~/.claude/settings.json` is untouched, so sessions the owner starts by hand stay on Opus.
+
+## D50 (2026-10-18): x takes a waiting agent out of the queue, background agents too
+
+**Decision (user):** "this session is still sitting at INPUT, even though it has been completed (pressing x should actually remove it from this view - so please fix that)".
+
+**Why:** `x` only called `queue.sh dismiss`, which forgets the window of a Terminal tab. A background agent has no tab, so it answered `Unknown session` and nothing changed; and for a tab, the row stayed anyway because the sections come from the agent's state, not from the window queue.
+
+**Built:** `x` writes the session and the time to `~/.agent/terminal/dismissed.json` and takes the row out at once. The agent stays out while it is waiting and its last event is not newer than the dismissal; when it works again or finishes another turn it is listed again. A Terminal tab also leaves the window queue as before. Not yet changed: why the agent that prompted this sat in INPUT. Its last turn said nothing was left, but a bullet in it read "It's waiting for you to review it", which `bin/ask-check.sh` took for a request (D41).
+
+## D49 (2026-10-18): `i` in RP copies a path
+
+**Decision (user):** "One hotkey to create is 'i' to copy the file path" (after trying the PR and RP views).
+
+**Built:** in `RP`, `i` copies the full path of the repo's folder; in the folder panel it copies the selected file or folder (`..` gives the folder the panel shows). A repo without a clone, and its folders on GitHub, give the GitHub address instead. The status line says what was copied. Not added to the PR panel: its files are text lines, not paths on this Mac.
+
+## D48 (2026-10-18): the terminal finds a transcript that moved with its session
+
+**Decision (user):** "I don't see any messages of the background agent ... Maybe fix that first to actually have the text of the chat from this background agent show up here as well."
+
+**Why:** meta `transcript=` is written when the session starts. A session that changes folder (EnterWorktree, cd) gets its transcript under the new folder's project dir, so the recorded file was gone and the right panel showed an empty chat. Every background session that works in a worktree was affected.
+
+**Built:** `findTranscript` keeps the recorded path while the file exists, else tries the current cwd's project dir, else any `~/.claude/projects/*/<sid>.jsonl`. The bash hooks still record the start path; only the terminal resolves it.
+
+## D47 (2026-10-18): kaching lists finished agents with nothing left under DONE (amends D41)
+
+**Decision (user):** "There should be another section for the agents on the left, that is DONE - it puts a session there when it has finished its task and is just completed and there's nothing left to wait for."
+
+**Built:** the queue has five sections: INPUT, WAITING, WORKING, IDLE, DONE. A session whose turn ended as `done` is DONE when its checkpoint (`STATE.md`, in the repo's `.agent` with a GOAL.md, else the session folder) has no `next_action` and no `blocker` (empty, `none`, `(none)` and `none.` count as empty) and its `NEXT.md` is empty or missing. That is the test `kaching-watch.sh` already uses to leave a finished session alone. A finished session with something open stays in WAITING. DONE is last and newest first, so what the owner can ignore stays out of the way; a family sits in its most urgent member's section. `Group()` is unchanged, so DONE agents still count as waiting in the tab badge and `x` can dismiss them.
+
+**Also (user):** "even when empty, keep the INPUT and other sections there - just empty but so that I can more easily see if there's nothing that needs input." All five headers are always drawn; the "no live agents" line in the queue is gone (the right panel keeps its own).
+
+## D46 (2026-10-18): RP becomes a repo list you can open and browse
+
+**Decision (user):** "For the RP, the repositories or repos here, I would love to also be able to cycle through them or switch through them. When I hit Enter, I want the local folder to open. If there's no local folder, then there should be a question saying, 'No local folder. Do you want to open it in GitHub?' Then, with a confirmation, I can confirm it again. Also, find another way, maybe Shift+Enter, where I can directly open the repository on the website. When I click K on it, it shouldn't open the repository locally, but it should open it in the side panel and just show the folder structure of it. Then I can cycle through the folder structure, so I can actually go through the folders. Meaning, just naturally navigating with K, I open the folder. For example (and on a file, opens the file)"
+
+**Built:** `RP` lists the git clones one level under `~/bbq` and `~` (not the folders macOS guards, such as `~/Library`), the repos in `~/.agent-repos` and the sync check's repos, then the GitHub repos of `westsoever` and `technobbq` that have no clone here (`gh repo list --no-archived`, read in the background each time the view opens; a failed read keeps the last list and shows its error). Each line: name, `owner/name`, folder or `github only`, and the sync check's `needs:` in orange; repos with findings first, in the sync check's order. `j`/`l` move; Enter opens the folder, and for a GitHub-only repo asks "No local folder. Open it on GitHub?" in the command line (Enter or `y` opens, any other key does not). `b` and Option+Enter open the repo on GitHub. Shift+Enter does too where the terminal sends it apart from Enter (CSI u, or xterm's modifyOtherKeys); Terminal.app sends a plain Return for it, and Bubble Tea v1 has no shift+enter key, so there it acts as Enter. `k` opens a side panel with the repo's folders (folders first, `.git` hidden): `k` goes into a folder or opens a file with `open_cmd`, `..`/`h`/Backspace go up, Enter shows it in Finder, `b` opens that folder on GitHub, Esc closes the panel (a second Esc goes to the desk). A GitHub-only repo's panel reads its folders with `gh api repos/o/n/contents`, and a file opens on GitHub. No key in RP acts on the agent selected behind it.
+
+## D45 (2026-10-18): A pull request opens on the right in kaching, and a comment on it starts an agent (amends D44)
+
+**Decision (user):** "When I press K, I would want the side panel to open that holds the content of the pull request … I can press again on the side panel, and then I can comment on this … once I hit Enter, it gets sent off to a new session that works through this pull request."
+
+**Built:** in `PR`, `k` opens the selected pull request on the right (`gh pr view`: branches, size, conflicts, checks, review state, description, files, comments and reviews), starting at the top; `j`/`l` keep moving and the panel follows; `↑`/`↓` scroll. `k` again opens the comment box: Enter starts a background agent (`claude --bg`, as `/NW`) in the repo's local clone (found by its origin under `~/bbq` and `~`; home when there is none) with the pull request, its branch and the comment as the task. The agent works in its own worktree and reports back; it comments on GitHub only when asked. `1` review it and `2` merge it are ready-made comments. Approving is left to the agent's report and the owner: GitHub does not let the owner approve their own pull requests, which most of these are. Number keys in `PR` never answer an agent's menu. `esc` closes the box, then the panel, then goes to the desk.
+
+## D44 (2026-10-18): kaching gets a PR view for pull requests; proposals move to PO; the AG tab goes (amends D33)
+
+**Decision (user):** "Create the PR section here for pull requests. Make me access it with /pr, call it Pull Requests, and rename the Proposals one. Maybe make it PO instead. For now, you can remove or hide the AG Agents section. I'm not using it, and it's not really helpful because it does exactly the same as the inbox."
+
+**Built:** `PR` (pull requests) lists the open GitHub pull requests that involve the owner, from `gh search prs --state open --involves @me --sort updated`, the last updated first; Enter opens one in the browser. It is read every 30 s while the view is open and every 2 min for the tab's count (GitHub's search quota is 30 a minute); a failed read keeps the last list and shows its error above it, and the selection stays on its pull request when the order changes. Proposals keep their keys under `PO`. The `AG` tab and code are gone; the wall is still there behind `W` (and `/W`), so it can come back. A tab too narrow for its label now keeps its count (`PR  10`) instead of dropping to the code alone.
+
+## D43 (2026-10-17): A prompt sends a window back, wherever it was prompted (amends D38, D42)
+
+**Decision (user):** "If I drag it over or bring it over manually with H, it should stay here for sure, but once I have prompted it either within its own session or through kaching, it should be moved back."
+
+**Built:** `queue.sh back` (the UserPromptSubmit hook) now sends the window home too when it was brought over by hand (a drag, `show` / `h`), and it does so while kaching is open. Before, only a window the queue had parked itself went back, and with kaching open nothing moved. Other sessions' prompts and events still leave it alone, and it stays while another tab of the same window waits. kaching's `queue.sh return` after an answer (D42) stays, for menu answers, which fire no prompt hook. Shared code: `send_back` in queue.sh.
+
+## D42 (2026-10-17): Answering an agent from kaching sends its window back to monitor 2 (amends D38)
+
+**Decision (user):** "once I kick off the session here within kaching, even though it's on monitor 1, it doesn't get moved back to monitor 2 after I hit confirm. Please fix that." D38 kept a window that was dragged (or brought with `h`) on monitor 1 until it was dragged back, and with kaching open nothing moves at all (D37).
+
+**Built:** after kaching delivers an answer (a reply, a numbered answer, Enter in a menu, a typed menu answer), it runs `queue.sh return SESSION_ID`. A window the queue moved to the main display (its own event, `show`/`h`, or a drag) goes back to exactly its cell, also while kaching is open, because it is the owner's own action. It stays when another tab of the same window still waits. Moving inside a menu (←/→/Tab) is no answer. Typing in the window itself still leaves it on monitor 1 (D38), since bringing it there to type in it is what `h` is for.
+
+## D41 (2026-10-17): kaching splits waiting agents into INPUT and WAITING, and shows what each one asks
+
+**Decision (user):** waiting, working and idle are sorted right, but inside waiting the owner can't tell who needs an answer from who just finished. The queue now has four sections: INPUT (asked you something, or blocked), WAITING (done), WORKING, IDLE. Each INPUT agent shows what it asks on a line under its name.
+
+**Why:** a turn counted as "needs input" only when its last line ended in "?". Agents that asked in an earlier line, or asked without a question mark ("tell me and I'll check", "I left the live check to you", "let me know if you want X"), showed as done and sat among the finished reports.
+
+**Built:** `bin/ask-check.sh` reads the last 6 lines of the turn, leaving out code blocks and headings. A real question there (not a "?" inside code or a link), or a request for the owner to do or decide something, makes the turn input. The matching sentence is the ask. `stop-check.sh` uses it for the state, the notification text and the new meta `ask=`. A heuristic, so some misses remain; a Haiku pass was left out because it would use the learner's daily token cap on every stop. INPUT also holds agents whose screen shows a menu right now (agent.terminal's `Asking` flag: a permission prompt, an AskUserQuestion, a plan approval), even while Claude Code calls them busy. The two complement each other: the screen catches menus, ask-check catches questions written as text. Group() is unchanged; INPUT is a display and sort split of the waiting group.
+
+## D40 (2026-10-17): Dispatcher v2: always listening, a voice shortcut, one routing list
+
+**Decision (user):** after the first spoken run of 4.3 failed on setup (the dispatcher could not match folder names to message names, guessed STATE.md paths, used `--inbox` for a one-session question, and ended its turn after each answer), the owner asked for: (1) an always-listening dispatcher that is woken by a shortcut in KachingBar, Right Control + Left Option, and hands what was said to the session named or to the open one; (2) the joined session list in Kaching; (3) clear rules; (4) a Haiku vs Sonnet comparison. Built as: `dash.sh --route` (one TSV line per live session: name, message_to, status, state, state_dir, notes, focus, branch; the gate allows it alone). VoiceShortcut.swift: a tap of both keys with no other key in between, so D39's Ctrl+Option+N/T/K never trigger it (Hotkeys.swift cancels the chord). It records the front Terminal tab in `~/.agent/dispatcher/focus`, then starts the dispatcher, types `[shortcut] listen` into it, or only cues when it is busy. It needs Accessibility, which must be re-granted after each rebuild (ad-hoc signature). dispatcher/AGENTS.md: numbered rules; every turn ends with a listen; silent re-listens; stops after 5 empty listens (about 10 min) or "stop"; an unnamed instruction goes to the focused tab. launch.sh turns off MCP auto-backgrounding (the first run lost a 120 s listen to it). dispatcher/eval.sh runs offline cases against fixtures on either model (both 6/6 on 2026-10-17: Haiku 4.6 to 9.1 s per turn, Sonnet 5.0 to 7.4 s). The spoken run on both models is still open (MANUAL-STEPS 4.3).
+
+## D39 (2026-10-17): Global hotkeys from the menu bar dot instead of Raycast
+
+**Decision (user):** "make it work". The Raycast 2.8 script folder could not be added by the owner, and it cannot be added from outside either: Raycast keeps its settings in an encrypted database, and driving its settings window by synthetic clicks would type into whatever the owner is writing. So KachingBar registers the hotkeys itself, with Carbon's RegisterEventHotKey, which needs no Accessibility or Input Monitoring permission. Defaults: Ctrl+Option+N next waiting agent, Ctrl+Option+T tile, Ctrl+Option+K kaching. Each runs the same ui/raycast script, and the bindings live in one file, `~/.agent/hotkeys`. The scripts still work from Raycast. This amends agent.terminal's "Raycast stays the global hotkey layer"; kaching's in-terminal keys.toml is unchanged. build.sh now compiles every ui/menubar/*.swift and links Carbon. Info.plist carries NSAppleEventsUsageDescription for the one-time "control Terminal" prompt.
+
+## D38 (2026-10-17): Windows move on their own only when kaching is closed, and you can drag them (closes D37's open part)
+
+**Decisions (user):**
+- **kaching open:** no automatic moves at all. The waiting and tabs records are still kept for kaching.
+- **kaching closed:** a waiting window still comes to the main display, but only on its own session's event (done, input, blocked, ready). The idle reminder never moves a window, and windows that started waiting while kaching was open never come over as a batch. That batch is what emptied monitor 2 under D34.
+- **Drags:** dragging a window from monitor 2 to monitor 1 gives it the park frame and keeps its grid cell reserved. Dragging it back puts it exactly in that cell. Any window dragged onto monitor 2 joins the grid. A window you dragged over stays until you drag it back; answering it doesn't send it back.
+
+**Built:** the menu bar app (KachingBar) polls the window server for Terminal frames twice a second, which needs no Accessibility or Screen Recording permission. Once a window has landed on another display, with the mouse up and the frame still, it calls `queue.sh dragged ID X Y W H`. `queue.sh` decides what to do. Moves the queue made itself are reported too, and ignored. `next` now raises the oldest waiting tab wherever its window is, and `show SESSION_ID` acts like a drag onto monitor 1.
+
+## D37 (2026-10-17): kaching never moves windows; the queue stops moving them while kaching runs (amends D34)
+
+**Decision (user):** while kaching is open, Terminal windows don't move: kaching's waiting list is the inbox, so the "one window comes over to say it needs input" idea (D29, D34) is redundant there. Windows should only resize when the owner moves one between displays by hand (snap into the grid on monitor 2, the park frame on monitor 1); that part belongs to the monitor queue (chingSorter) and isn't built yet. Opening, quitting or reloading kaching must never touch a Terminal window or a session. kaching never starts or closes sessions.
+
+**Why now:** quitting kaching called `queue.sh show`, which put the queue back in normal mode; every idle session counts as waiting, so five agent windows jumped onto monitor 1 into the same park frame at once and monitor 2 emptied, which looked like the sessions had closed (they hadn't; no session ended). Separately, in single mode the agent selected in kaching stayed on monitor 1 after the owner answered it, because the rule kept "selected" windows regardless of waiting.
+
+**Done:** kaching no longer calls `queue.sh show` on selection or quit. While kaching is open, `queue.sh` reconcile wants no window on the main display: nothing comes over, the selection moves nothing, and a window parked before kaching opened goes back to its cell (tests/t_queue.sh). Still open: resizing a window the owner drags between displays (chingSorter), and whether the queue should move windows at all while kaching is closed.
+
+## D36 (2026-10-17): A larger park frame (amends D32)
+
+**Decision (user):** the frame for a waiting window on the main display is about 50% wider and 20% taller: 690 x 948, top-left still at 320,70 (`queue_park_frame` default 320,70,690,948). It ends at y 1018, inside the main display's usable area above the Dock.
+
+## D35 (2026-10-17): Ching is renamed Kaching
+
+**Decision (user):** the kit is called Kaching, like an old cash register closing. The agent terminal (D33) already carried the name; now the whole kit does.
+
+**What changed:** the link is `~/.claude/kaching` and install.sh writes the hooks under it; the jobs are `org.kaching.watch`, `org.kaching.learn` and `org.kaching.menubar`; the dot is `KachingBar.app`; the CLI is `kaching-proposals` and the watcher `kaching-watch.sh`; the Raycast scripts are `kaching-next.sh`, `kaching-tile.sh` and `kaching-open.sh`; environment variables are `KACHING_*`; the repo folder becomes `~/bbq/kaching`. Text that describes the past (this log, the checkpoints, dated specs and plans) keeps the old name.
+
+**Kept working through the switch:** `~/.claude/ching` stays a second link to the kit (install.sh creates it, or points it here again), so hook entries, launchd jobs and running sessions that still use the old path keep running the same code. `bin/ching-proposals` and `bin/ching-watch.sh` are wrappers around the new names, and the guard treats `ching-proposals approve` exactly like `kaching-proposals approve`. A `CHING_*` variable still counts when its `KACHING_*` name is unset (lib.sh, the early learner checks, KachingBar). install.sh replaces the hook entries under the old link with the same entries under the new one (no hook runs twice), and replaces the `org.ching.*` jobs after their successors have loaded; `--install-menubar` replaces ChingBar.
+
+**Not renamed, on purpose (stored data):** the `<!-- ching:checkpoint -->` and `<!-- ching:snapshot -->` blocks in STATE.md files, the `ching-learn-task:` marker the learner writes into its prompts and filters transcripts by, the `ching-learn` name on learner events, `~/.agent/defaults/ching.env`, `ching-prepush-marker` in installed pre-push hooks, and everything under `~/.agent/`. The GitHub repository keeps its name. Session names such as chingSorter or Ching01 are the owner's.
+
+## D34 (2026-10-17): The monitor queue serves kaching: one agent at a time while it is open
+
+**Decision (owner, through the agent terminal design, D33):** while kaching runs, the main display shows kaching plus at most one agent window: the one kaching has selected, else the head of the queue. The others keep their waiting records but stay in their cells; answering one brings the next, in the background, never taking focus. With kaching closed, the D29-D32 behaviour applies. Built as one reconcile step that every queue change runs: it works out which windows belong on the main display and moves only the difference. Also for kaching: a tabs map per session, the session id and kind in each waiting record, `queue.sh show` and `queue.sh dismiss`. Not built here: sending text into a tab (kaching's terminal/send.js) and any key layer (Raycast stays the global hotkey layer).
+
+## D33 (2026-10-17): The agent terminal (kaching)
+
+**Decision (user):** one keyboard-only screen for every agent, in the spirit of the Bloomberg Terminal and in the look of `ssh terminal.shop`: near-black, grey text, white for what's selected, one orange accent. Desk (queue + selected agent) and a command line of codes (IN AG FL RP PR PC) are the home screen; the wall shows every agent as tiles sized to the window; the PC view reads Paperclip, which is a source and not the backend. Replies are typed in the terminal and delivered into the agent's own Terminal.app tab; only Terminal.app sessions take replies. Numbers answer an agent's options; pre-written replies (fix it, review the code, check in on the other agents, `/merge`, commit, new worktree) sit near the home row and live in `~/.agent/terminal/keys.toml`, which the owner edits. Each session merges itself with the global `merge` skill (`~/.agents/skills/merge`); a dedicated merge agent only if parallel merges become a problem. While the terminal is open, monitor 1 holds it plus one agent window at a time (chingSorter's queue, D34+). The terminal has no AI of its own: it reads files and types what the owner chose. Design: `docs/superpowers/specs/2026-10-17-agent-terminal-design.md`.
+
+**Found while building it:** Terminal's `do script` types into a background tab without focus, but Claude Code treats a long burst as a paste and swallows its newline, so Enter is pressed separately (a key event posted to Terminal's process, ~0.1 s window flicker, the fallback the owner accepted) and `send.js` checks that the text left the input box, retrying Enter. A menu (AskUserQuestion) is answered with the number key alone. Session names come from Claude Code's own `~/.claude/sessions/<pid>.json`, joined with Ching's `meta`.
+
+## D32 (2026-10-17): A fixed frame for waiting windows on the main display (amends D31)
+
+**Decision (user):** a window that comes to the main display takes one fixed frame: top-left 320,70 and bottom-right 780,860 on the owner's screen, so 460 x 790 (`queue_park_frame`, default 320,70,460,790). All waiting windows share it as a stack. Going back still restores the exact cell. Found while building it: Terminal sets a window's y from the top of the display the window is on, but reports it from the top of the main display, so `queue-term.js move` corrects for that. A second display also has its own menu bar that macOS does not take off its visible frame, so the helper takes it off.
+
+## D31 (2026-10-17): The grid is a map of where each project lives (amends D30)
+
+**Decision (user):** moving never resizes a window, on either display, and the main display is never laid out. The grid on the second display is sized by all its agent windows, waiting ones included: a waiting window's cell stays empty while it is away, and it comes back to exactly that cell, so the layout is a visual guide to where each project is. When the count changes (a window opened or closed), each window takes the free cell nearest to where it was.
+
+## D30 (2026-10-17): Tiling and no focus stealing for the monitor queue
+
+**Decision (user):** a window that arrives must never take the focus from the session the owner is working in. Each display tiles its Terminal windows by count (2 side by side, 3 in columns, 4 as 2x2), so arrivals sit beside the owner's work instead of on top of it. One window per project, with its subtasks as tabs. Desktops (Spaces) stay out: windows on a hidden desktop are not moved by tiling. A window cannot be sent back to a particular desktop (no public API), so it goes to the desktop shown on its old display.
+
+## D29 (2026-10-17): Monitor queue for waiting agents
+
+**Decision (user):** waiting agents come to the main display, built into Ching. The owner works on the main display and parks agent Terminals on the second one. A session that finishes or needs input moves its window to the main display; prompting it sends the window back. Native macOS Spaces were considered and rejected: macOS has no supported way to move a Space to another display (yabai needs SIP partly off; AeroSpace replaces the window manager). The main display itself is the queue instead, with a "next waiting agent" hotkey (Raycast script command, `ui/raycast`). A lead agent and its workers are grouped as tabs of one window and move together.
+
+## D28 (2026-10-17): Spot-check policy, auto-title removed, menu bar dot, overnight autonomy
+
+**Decisions (user):**
+- **Spot-check:** the owner reviewed items 1-10 of the label spot-check. Items 11-21 and policy questions A-C were left blank and are read as "keep the agent's label".
+  - Merge or push instructions that carry "keep everything / don't delete progress" count as corrections, even when stated up front.
+  - Re-confirming an instruction the assistant should already have acted on ("then let's merge it") is a correction.
+  - Product feedback stays "not".
+  - `templates/learn-prompts/corrections.md` and `~/.agent/proposals/.eval/labels.jsonl` are updated (10 items `owner_reviewed`).
+  - New patterns the owner named: merge right away when asked and report after; notice when the build drifts from what was asked; build in soii-dev and sync to soiisauce on release (cos is only an install); run migrations yourself.
+- **Session auto-title skill:** removed (moved to the Trash on 2026-10-17). Its SessionEnd hook caused the 2026-10-05 registry flood: each titling run was a session that triggered another.
+- **Menu bar dot:** a small dot in the macOS menu bar shows whether Ching is running. Later it will show transcripts and push notifications for sessions that need input. It is a separate macOS app (`ui/menubar`), not a Claude Code mod, so D23 still holds.
+- **Overnight (2026-10-17 ~01:45):** "Keep driving the sessions until everything is done. Take decisions for yourself and the other agents." The orchestrator session (ChingRollOut) made the remaining build and install calls under this.
+
+## D27 (2026-10-16): The learner stays out of claude-mem; claude-mem is to be replaced in the long run
+
+**Decision (user):**
+- Yes to Phase 6 question 8. The learner's runs are kept out of claude-mem in two ways: `CLAUDE_MEM_INTERNAL=1` in the `org.ching.learn` job, and `~/.agent/proposals/.work` in `CLAUDE_MEM_EXCLUDED_PROJECTS` (`~/.claude-mem/settings.json`, which `install.sh` backs up first).
+- Long-run direction: **replace claude-mem.** Ching's own data (events, checkpoints, transcripts, the learner's proposals and, later, lessons) should take over what claude-mem does today.
+
+**Consequences:** nothing in Ching may come to depend on claude-mem. Its data can be read as an input while it is still installed, but never required. Replacing it is a later item, not part of stage 6a.
+
+## D26 (2026-10-16): Build Phase 6 stage 6a now (amends D16)
+
+**Decision (user):** yes to Phase 6 question 9. Stage 6a is built now, before the pilot metrics: the contracts, the extractor and report, the correction detector, the skills miner and the plumbing. The reason to wait (design on real data) no longer holds, because 6a reads transcripts and 221 real sessions already exist. Stage 6b (lessons) stays unbuilt (question 5).
+
+**Defaults for questions 1-6:** the spec's recommendations are used as starting values, and the weekly report can correct them:
+- nightly run at 05:30, weekly run on Monday at 05:30;
+- `LEARN_MODEL_CLASSIFY=haiku`, `LEARN_MODEL_DRAFT=sonnet`, `LEARN_TOKEN_CAP=200000`;
+- the learner assigns `task_type`, and a session's own line wins when present;
+- rule target: a single repo's `AGENTS.md`, or global when the pattern spans 2+ places;
+- `LEARN_SKILL_MAX=3`.
+
+**Question 7:** the labelled set is rebuilt during step 0, and the owner spot-checks about 20 labels. **Question 10:** done the same evening. The 4,615 empty `/private/tmp` registry entries from 2026-10-05 were moved to `~/.agent/archive/registry-private-tmp-2026-10-05/`, with a tarball next to it: 18 MB on disk, 0.9 MB of content. The test that wrote them still has to be found and fixed.
+
+## D25 (2026-10-16): Voice pass line 8 s; no `/voice` fallback
+
+**Decision (user):**
+- The 0.6 speed pass line is **8 seconds** from the end of the sentence to the first spoken word, picked before any dispatcher measurement.
+- Claude Code's `/voice` is **not** used as a fallback. The user dictates with Wispr Flow, their own tool outside Ching.
+
+**Consequences:** `docs/voice.md` keeps the `/voice` notes for reference only, marked unused. D3's "native `/voice` stays as a fallback" no longer holds. Ching does not install, configure or depend on Wispr Flow. Like `/voice`, Wispr Flow transcribes off the machine, so D5 (local audio) covers only Ching's own voice path: VoiceMode, `/dash` and the dispatcher.
+
+## D24 (2026-10-16): Guard on, push rule off
+
+**Decision (user):** The guard is reinstalled with every protection except the push-to-main release token. On 2026-10-10 the user had removed `guard.sh` from `~/.claude/settings.json` entirely, because rule 3 (a push to main needs a release token, plus `--approve` in `confirm` mode) blocked the automatic commits, pushes and merges they want. That removal also switched off every other protection for six days.
+
+**How it works:** `push_gate` in `~/.agent/config` (`push_gate=on|off`), **default off**. Only exactly `on` (case-insensitive) re-enables the token check for plain pushes to main or the default branch, `gh pr merge` and the API merge calls. No `GOAL.md` `release_mode` overrides it. The following stay denied either way:
+- force pushes;
+- deleting protected branches;
+- `v*` tag pushes and `--no-verify`;
+- `rm -rf` outside the repo and `/tmp`;
+- `.env` reads and Supabase writes;
+- publishing;
+- outbound send tools;
+- edits to hooks, settings, tokens, `GOAL.md` gate fields and the config file itself.
+
+`release-gate.sh`, `post-release.sh` and `migrate-gate.sh` stay available for manual use. `templates/pre-push` reads the same switch.
+
+**Consequences:** Phase 5.1/5.2 (the `confirm`-then-`auto` rollout to miso-app and miso-workspace) is dropped. `~/.miso/.agent/GOAL.md` still says `release_mode: confirm`; it no longer blocks anything. Reinstalled 2026-10-16 01:28; backup `~/.claude/settings.json.bak.ching.20261016-012816`. A live probe from a real session showed a plain push to main allowed and a force push denied.
+
 ## D23 (2026-10-06): Ching is not ported to a Claude Code mod
 
 **Decision (user, accepting the orchestrator's recommendation):** Ching stays bash, settings command hooks and launchd. It is not rewritten as a Claude Code mod (a function-hooks plugin, TypeScript, in-session). A mod may come later only as a read-only UI layer on top, after the Phase 2 pilot.

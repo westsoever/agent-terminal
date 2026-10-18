@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# ching-watch.sh: tokens (dedupe, incremental, today only), context levels, stall, budget alerts,
+# kaching-watch.sh: tokens (dedupe, incremental, today only), context levels, stall, budget alerts,
 # rotation, lock, shrinking transcripts.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 # shellcheck source=../bin/lib.sh
 . "$BIN/lib.sh"
-W="$BIN/ching-watch.sh"
+W="$BIN/kaching-watch.sh"
+export SYNC_CHECK_CMD=true   # the watcher starts the git sync check in the background: not the real one in these sections
 DAY=$(date -u +%Y-%m-%d)
 NOW=$(date +%s)
 P="$WORK/proj"; mkdir -p "$P"
@@ -216,4 +217,94 @@ assert_eq "zero usage only: ctx_level stays unset" "" "$(zget z3 ctx_level)"
 assert_eq "zero usage only: no percentage" "" "$(zget z3 ctx_pct)"
 assert_eq "zero usage only: no error output" "" "$(cat "$ZAH/err")"
 assert_eq "zero usage only: the record is still consumed" "$(wc -c <"$TZ3" | tr -d ' ')" "$(zget z3 tok_offset)"
+
+# ---------- git sync check: started in the background, at most every SYNC_CHECK_INTERVAL_H hours ----------
+# A fake command records every invocation. The watcher must start it detached (never wait for it), keep its
+# own stamp, and turn a failure of the check into a line in watch.log, never into a failed watcher run.
+SAH="$WORK/sync-ah"; SREC="$WORK/sync-rec.log"
+cat >"$WORK/sync-fake.sh" <<EOF
+#!/usr/bin/env bash
+printf '%s|%s\n' "\$AGENT_HOME" "\$*" >>"$SREC"
+case "\${FAKE_MODE:-}" in fail) exit 3 ;; hang) sleep 25.31 ;; slow) sleep 4 ;; esac
+exit 0
+EOF
+chmod +x "$WORK/sync-fake.sh"
+export SYNC_CHECK_CMD="$WORK/sync-fake.sh"
+sreset() { rm -rf "$SAH"; mkdir -p "$SAH"; : >"$SREC"; }
+srun() { AGENT_HOME="$SAH" WATCH_NOW="${1:-$NOW}" "$W"; }          # watcher with a fake clock (default: now)
+scalls() { wc -l <"$SREC" | tr -d ' '; }
+swait() { local i=0; while [ "$(scalls)" -lt "$1" ] && [ "$i" -lt 60 ]; do sleep 0.1; i=$((i + 1)); done; }   # up to 6 s for N calls
+wlog_has() { local i=0; while ! grep -q "$1" "$SAH/watch.log" 2>/dev/null && [ "$i" -lt 60 ]; do sleep 0.1; i=$((i + 1)); done; grep -c "$1" "$SAH/watch.log" 2>/dev/null || true; }
+
+sreset; srun; swait 1
+assert_eq "sync: the first tick starts the check once" "1" "$(scalls)"
+assert_eq "sync: ... with --quiet and the watcher's AGENT_HOME" "$SAH|--quiet" "$(cat "$SREC")"
+assert_eq "sync: the stamp holds the tick time" "$NOW" "$(cat "$SAH/sync-check.stamp")"
+srun; sleep 1
+assert_eq "sync: the next tick, seconds later, does not start it again" "1" "$(scalls)"
+srun $((NOW + 5 * 3600 + 3540)); sleep 1
+assert_eq "sync: 5 h 59 min later is still inside the 6 h interval" "1" "$(scalls)"
+srun $((NOW + 6 * 3600)); swait 2
+assert_eq "sync: 6 h later it runs again" "2" "$(scalls)"
+srun $((NOW + 6 * 3600 + 300)); sleep 1
+assert_eq "sync: and the interval restarts from that run" "2" "$(scalls)"
+
+sreset; SYNC_CHECK_INTERVAL_H=1 srun; swait 1
+SYNC_CHECK_INTERVAL_H=1 srun $((NOW + 1800)); sleep 1
+assert_eq "sync: SYNC_CHECK_INTERVAL_H=1: 30 min later nothing" "1" "$(scalls)"
+SYNC_CHECK_INTERVAL_H=1 srun $((NOW + 3700)); swait 2
+assert_eq "sync: SYNC_CHECK_INTERVAL_H=1: after an hour it runs" "2" "$(scalls)"
+sreset; SYNC_CHECK_INTERVAL_H=0 srun; sleep 1
+assert_eq "sync: SYNC_CHECK_INTERVAL_H=0 switches the check off" "0" "$(scalls)"
+assert_no_file "sync: ... and leaves no stamp" "$SAH/sync-check.stamp"
+sreset; SYNC_CHECK_INTERVAL_H=soon srun; swait 1
+assert_eq "sync: a junk interval falls back to the default and still runs" "1" "$(scalls)"
+sreset; : >"$SAH/sync-check.md"; touch -t "$(date -r "$NOW" +%Y%m%d%H%M.%S)" "$SAH/sync-check.md"   # made "now" on the fake clock:
+srun; sleep 1   # under the parallel suite this line runs minutes after NOW was set, past the 60 s future-mtime guard
+assert_eq "sync: a snapshot younger than the interval (an on-demand run) counts as a run" "0" "$(scalls)"
+sreset; : >"$SAH/sync-check.md"; touch -t 202001010000 "$SAH/sync-check.md"; srun; swait 1
+assert_eq "sync: an old snapshot does not hold the check back" "1" "$(scalls)"
+sreset; printf '%s\n' $((NOW + 864000)) >"$SAH/sync-check.stamp"; srun; swait 1
+assert_eq "sync: a stamp from the future (clock set back) does not block it for good" "1" "$(scalls)"
+sreset; printf 'junk\n' >"$SAH/sync-check.stamp"; srun; swait 1
+assert_eq "sync: a junk stamp counts as never run" "1" "$(scalls)"
+
+# the watcher does not wait for a slow check, and a failing one never fails the watcher
+sreset; t0=$(date +%s)
+rc=0; out=$(FAKE_MODE=slow srun 2>&1) || rc=$?
+t1=$(date +%s)
+assert_eq "sync: a 4 s check does not make the tick wait (under 3 s)" "yes" "$([ $((t1 - t0)) -lt 3 ] && echo yes || echo no)"
+assert_eq "sync: the tick exits 0 and prints nothing" "0:" "$rc:$out"
+swait 1
+sreset; rc=0; FAKE_MODE=fail srun || rc=$?
+assert_eq "sync: a failing check: the watcher still exits 0" "0" "$rc"
+assert_eq "sync: ... and watch.log records the failure" "1" "$(wlog_has 'sync-check: exited with status 3')"
+assert_contains "sync: ... with a timestamp and the watcher's name" "$(cat "$SAH/watch.log")" "kaching-watch: sync-check"
+sreset; rc=0; SYNC_CHECK_CMD="$WORK/no-such-sync-check" srun || rc=$?
+assert_eq "sync: a check that cannot start: the watcher exits 0" "0" "$rc"
+assert_eq "sync: ... and watch.log says it" "1" "$(wlog_has 'cannot start')"
+sreset; rc=0; FAKE_MODE=hang SYNC_CHECK_MAX_SECS=1 srun || rc=$?
+assert_eq "sync: a hanging check: the watcher exits 0" "0" "$rc"
+assert_eq "sync: ... it is stopped at the time ceiling and watch.log says so" "1" "$(wlog_has 'stopped after 1s')"
+sleep 1
+assert_eq "sync: ... and nothing of it is left running" "0" "$(pgrep -f "sleep 25.31" | wc -l | tr -d ' ')"
+# the real check under the ceiling: a fetch that hangs inside it goes down with it (its own session included)
+mkdir -p "$WORK/shim"
+cat >"$WORK/shim/git" <<'EOF'
+#!/bin/bash
+for a in "$@"; do if [ "$a" = fetch ]; then sleep "${SHIM_SLEEP:-3}"; break; fi; done
+exec /usr/bin/git "$@"
+EOF
+chmod +x "$WORK/shim/git"
+sreset; HR=$(mk_repo hangrepo); printf '%s\n' "$HR" >"$SAH/repos"
+KACHING_INCLUDE_SANDBOX=1 AGENT_REPOS_FILE="$SAH/repos" PATH="$WORK/shim:$PATH" SHIM_SLEEP=23 SYNC_CHECK_CMD="$BIN/sync-check.sh" SYNC_CHECK_MAX_SECS=2 srun
+assert_eq "sync: the real check is stopped at the ceiling while it fetches" "1" "$(wlog_has 'stopped after 2s')"
+sleep 2
+assert_eq "sync: ... and the hung fetch is not left behind" "0" "$(pgrep -f 'sleep 23' | wc -l | tr -d ' ')"
+# the rest of the tick is unaffected: a tick that launches the check still reads transcripts
+sreset
+T9="$WORK/t9.jsonl"; amsg k1 0 1000 0 33 >"$T9"
+mkdir -p "$SAH/sessions/s9"; printf 'cwd=%s\nname=proj\nstate=idle\ntranscript=%s\nupdated=%s\n' "$P" "$T9" "$NOW" >"$SAH/sessions/s9/meta"
+srun
+assert_eq "sync: a tick that launches the check still counts tokens" "33" "$(awk '$1 == "s9" { print $2 }' "$SAH/tokens/$DAY")"
 exit 0

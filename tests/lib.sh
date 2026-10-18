@@ -21,9 +21,10 @@ export NOTIFY_DRY_RUN=1
 export NOTIFY_TERMINAL_NOTIFIER="$WORK/no-such-terminal-notifier"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
-export CHING_TEST_MODELS=""   # tests never call a real model; t_escalate.sh sets its own fake
-unset TMPDIR CHING_ALLOW_PUSH CHING_STOP_CHECK_RUNNING CHING_ESCALATING   # recursion markers inherited from a live stop-check.sh run
-unset CLAUDE_CODE_ENTRYPOINT CHING_NO_CHECKPOINT   # the session running the tests must not switch the checkpoint gate off
+export KACHING_TEST_MODELS=""   # tests never call a real model; t_escalate.sh sets its own fake
+unset TMPDIR KACHING_ALLOW_PUSH KACHING_STOP_CHECK_RUNNING KACHING_ESCALATING   # recursion markers inherited from a live stop-check.sh run
+unset CLAUDE_CODE_ENTRYPOINT KACHING_NO_CHECKPOINT   # the session running the tests must not switch the checkpoint gate off
+unset KACHING_LEARNER   # learner mode makes the session hooks exit at once and the guard deny; a test sets it where it means it
 mkdir -p "$AGENT_HOME" "$CLAUDE_DIR"
 
 # install.sh calls $LAUNCHCTL: a test must never reach the real launchd
@@ -39,9 +40,12 @@ export LAUNCHCTL="$WORK/fake-launchctl"
 # Safe defaults for the nudge: no test can reach the real voice, the real idle read (ioreg) or the real
 # VoiceMode conch, whatever it forgets to set. A test that needs its own value sets it after sourcing this file.
 export SPEAK_CMD="${SPEAK_CMD:-true}"                        # no audio
+export QUEUE_TERM="${QUEUE_TERM:-true}"                      # the monitor queue never reaches the real Terminal
+export QUEUE_TTY="${QUEUE_TTY:-none}"                        # nor reads the tty of the terminal running the tests
 export HID_IDLE_CMD="${HID_IDLE_CMD:-echo 99999}"            # away from the keyboard
 export VOICEMODE_CONCH="${VOICEMODE_CONCH:-$WORK/no-such-conch}"
 export IOREG_CMD="${IOREG_CMD:-true}"                        # prints nothing: unreadable
+export SYNC_CHECK_CMD="${SYNC_CHECK_CMD:-true}"                  # the watcher starts no real git sync check in a test; t_watch and t_sync set their own
 
 pass() { printf 'PASS\t%s\t%s\n' "$TNAME" "$1" >>"$RESULTS"; }
 fail() { printf 'FAIL\t%s\t%s\n' "$TNAME" "$1" >>"$RESULTS"; printf 'FAIL [%s]: %s\n%s\n' "$TNAME" "$1" "${2:-}" >&2; }
@@ -135,4 +139,4 @@ tallow() {
   if [ -z "$out" ]; then pass "allow: $1"; else fail "allow: $1" "  input: $4"$'\n'"  guard said: $out"; fi
 }
 
-link_kit() { ln -sfn "$KIT" "$CLAUDE_DIR/ching"; }   # hooks and pre-push hooks call $CLAUDE_DIR/ching/bin
+link_kit() { ln -sfn "$KIT" "$CLAUDE_DIR/kaching"; }   # hooks and pre-push hooks call $CLAUDE_DIR/kaching/bin

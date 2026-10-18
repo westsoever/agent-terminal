@@ -1,0 +1,11 @@
+/Users/me/.local/bin/claude -p "Do exactly two things. 1) Use the Write tool to create 06-Wiki/learned/_permtest.md containing the single line: ok. 2) Use Glob with pattern 06-Wiki/learned/*.md. Then reply with one line saying whether each step succeeded or was denied." --model haiku --output-format json --max-turns 6 --no-session-persistence --permission-mode dontAsk --allowedTools Read Glob Grep Skill "Write(06-Wiki/learned/**)" "Edit(06-Wiki/learned/**)" "Bash(/Users/me/.paperclip/bin/librarian-close-issue *)" "Bash(/Users/me/.paperclip/bin/librarian-commit-learned *)" --disallowedTools WebFetch WebSearch Monitor Task Agent Workflow CronCreate CronDelete RemoteTrigger ScheduleWakeup SendMessage PushNotification NotebookEdit --settings /Users/me/.paperclip/bin/librarian-settings.json 2>&1 | python3 -c '
+import json,sys
+raw=sys.stdin.read()
+try:
+    d=json.loads(raw)
+except Exception:
+    print(raw[:2000]); sys.exit()
+print("result:", d.get("result"))
+print("denials:", json.dumps(d.get("permission_denials"),indent=1))
+print("turns:", d.get("num_turns"), "cost:", d.get("total_cost_usd"))
+'; echo "--- file exists? ---"; ls -la 06-Wiki/learned/_permtest.md 2>&1

@@ -1,0 +1,81 @@
+{
+  "labels": [
+    {
+      "id": "a1000000-0000-4000-8000-00000000a001@2026-10-12T12:00:30.000Z",
+      "label": "not"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-00000000a001@2026-10-12T12:03:40.000Z",
+      "label": "correction",
+      "pattern": "do not bump the version number; the owner releases by hand"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-00000000a001@2026-10-12T12:04:40.000Z",
+      "label": "correction",
+      "pattern": "write dates as YYYY-MM-DD"
+    },
+    {
+      "id": "a2000000-0000-4000-8000-00000000a002@2026-10-12T13:00:10.000Z",
+      "label": "not"
+    },
+    {
+      "id": "a2000000-0000-4000-8000-00000000a002@2026-10-12T13:02:20.000Z",
+      "label": "correction",
+      "pattern": "do not bump the version number; the owner releases by hand"
+    },
+    {
+      "id": "a2000000-0000-4000-8000-00000000a002@2026-10-12T13:03:00.000Z",
+      "label": "not"
+    },
+    {
+      "id": "a3000000-0000-4000-8000-00000000a003@2026-10-13T12:00:10.000Z",
+      "label": "not"
+    },
+    {
+      "id": "a3000000-0000-4000-8000-00000000a003@2026-10-13T12:02:20.000Z",
+      "label": "correction",
+      "pattern": "do not bump the version number; the owner releases by hand"
+    },
+    {
+      "id": "a3000000-0000-4000-8000-00000000a003@2026-10-13T12:02:40.000Z",
+      "label": "correction",
+      "pattern": "write dates as YYYY-MM-DD"
+    },
+    {
+      "id": "b1000000-0000-4000-8000-00000000b001@2026-10-14T11:00:10.000Z",
+      "label": "not"
+    },
+    {
+      "id": "b1000000-0000-4000-8000-00000000b001@2026-10-14T11:00:50.000Z",
+      "label": "correction",
+      "pattern": "use pnpm, not npm"
+    },
+    {
+      "id": "b1000000-0000-4000-8000-00000000b001@2026-10-14T11:02:30.000Z",
+      "label": "correction",
+      "pattern": "write dates as YYYY-MM-DD"
+    },
+    {
+      "id": "b2000000-0000-4000-8000-00000000b002@2026-10-14T12:00:10.000Z",
+      "label": "not"
+    },
+    {
+      "id": "b2000000-0000-4000-8000-00000000b002@2026-10-14T12:00:50.000Z",
+      "label": "correction",
+      "pattern": "use pnpm, not npm"
+    },
+    {
+      "id": "b2000000-0000-4000-8000-00000000b002@2026-10-14T12:01:30.000Z",
+      "label": "not"
+    },
+    {
+      "id": "b3000000-0000-4000-8000-00000000b003@2026-10-14T13:00:10.000Z",
+      "label": "not"
+    },
+    {
+      "id": "b3000000-0000-4000-8000-00000000b003@2026-10-14T13:00:50.000Z",
+      "label": "correction",
+      "pattern": "use pnpm, not npm"
+    }
+  ]
+}

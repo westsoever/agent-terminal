@@ -2,12 +2,12 @@
 
 Everything here needs a human (a GUI app, a microphone, or a trust prompt). Tick the boxes as you go. Total about 45 minutes; items are ordered shortest first.
 
-Everything runs in the throwaway sandbox `/tmp/agent-sandbox/repo`. Nothing touches miso, `~/.miso` or your real settings. The kit is backed up in `/Users/clyde/bbq/ching/phase0-manual/` (`setup.sh` rebuilds the sandbox if `/tmp` was cleaned).
+Everything runs in the throwaway sandbox `/tmp/agent-sandbox/repo`. Nothing touches miso, `~/.miso` or your real settings. The kit is backed up in `/Users/clyde/bbq/kaching/phase0-manual/` (`setup.sh` rebuilds the sandbox if `/tmp` was cleaned).
 
 **Before you start (1 min):**
 
 ```
-/Users/clyde/bbq/ching/phase0-manual/setup.sh
+/Users/clyde/bbq/kaching/phase0-manual/setup.sh
 ```
 
 This re-installs the logging hook in the sandbox and empties the log. The log file is `/tmp/agent-sandbox/logs/clients.log`. Your own user hooks (osascript popups) will still fire in these sessions; that is expected.
@@ -140,3 +140,67 @@ Reply with one line per item, for example:
 ```
 
 Cleanup (optional): `rm -rf /tmp/agent-sandbox /tmp/agent-sandbox-remote.git /tmp/agent-sandbox-backup`. Keep the backup until Phase 1 is approved.
+
+---
+
+## 2026-10-16: voice levels A and B, in one sitting (about 45 minutes)
+
+Three steps only you can do (0.6, 0.7, 4.3) and one new two-minute check (V1). They need a microphone, your ears and a stopwatch. Nothing in them was run by the person who built Phase 3 and 4: no audio was played during the build.
+
+**Before you start (5 minutes)**
+
+1. `ching-b` is merged into `~/bbq/kaching` main, `install.sh` has been run on your real settings (it shows the diff and asks), and `install.sh --install-dispatcher` has been run. Check: `ls ~/.claude/commands/dash.md ~/.claude/kaching/dispatcher/tool-gate.sh ~/.agent/dispatcher/.claude/settings.json` lists all three.
+2. `voicemode whisper service status` and `voicemode kokoro status` both say running locally.
+3. The terminal app you will use has macOS microphone access (System Settings > Privacy & Security > Microphone).
+4. Quiet room. Do the steps in this order: pick the pass line, V1, then 4.3 (which measures 0.6), then 0.7.
+
+### - [ ] 0.6 First, pick the speed pass line (1 minute, before you measure anything)
+
+**Picked 2026-10-16: 8 s (D25).** The measurement itself is still open; it happens during 4.3.
+
+The 2026-10-05 measurement was 15 to 40 seconds from the end of your sentence to the first spoken word (`PHASE0-RESULTS.md`, 0.6). The voice pipeline itself was about 5 seconds (Whisper 2.9 s, Kokoro first audio 2.0 s); the rest was the model turn in a big session. The dispatcher is a small Haiku session with no plugins, which should shrink that part. These are estimates, not measurements of the dispatcher:
+
+| Pass line | What it means |
+|---|---|
+| 5 s | About the pipeline floor. Needs a faster Whisper model as well. |
+| 8 s | My suggestion for a first pass: the pipeline plus a short Haiku turn. |
+| 12 s | Fine for "what's blocked?", tiring for a back and forth. |
+
+Your call. Write your number in `docs/dispatcher-acceptance.md`, "Before you start", point 4, before you hear any result: a line picked after the result tests nothing.
+
+### - [ ] V1 Hear `/dash` (2 minutes)
+
+1. In any Claude session, type `/dash`.
+2. You should hear one short paragraph (how many need you, which are blocked, how many are active) and see the same text printed.
+3. Type `/dash --text`: the same text, silent.
+
+**Pass:** you hear it, in one voice, and the words match the printed text. **Fail:** silence (run `voicemode conch status`: another session may hold the voice), a different voice or garbled audio, or the text names paths or ids.
+**Tell Claude:** `V1 pass` or `V1 fail: <what you heard>`.
+
+### - [ ] 4.3 The spoken dispatcher run, which also measures 0.6 (20 minutes)
+
+Follow `docs/dispatcher-acceptance.md` from "Before you start" to "Record the result". Four phrases ("What's blocked?", "What did miso finish?", "Tell miso to run the tests again", "push miso-workspace"), each with its own pass and fail lines, plus an optional throwaway-session test of the "yes" branch.
+
+Use the stopwatch on every phrase. The average of the four, against the line you picked, is the 0.6 result.
+
+- **0.6 passes** when the average is at or under your line and it heard you correctly each time.
+- **0.6 fails:** ask Claude to switch the Whisper model (`voicemode whisper model large-v3-turbo`, which installs it and restarts the local service; undo with `voicemode whisper model large-v2`). That changes your machine's voice service, so it waits for your word. Re-measure after.
+
+**Tell Claude:** `4.3 pass`, or `4.3 fail: phrase 3, relayed to the wrong session`; and `0.6 pass 6.1 s average, line 8`, or `0.6 fail 11 s average, line 8`.
+
+### - [ ] 0.7 Two sessions, one voice (10 minutes)
+
+**Why:** every session has VoiceMode's converse tool (the plugin is enabled for all of them). Only the dispatcher is meant to speak. The voice lock (`~/.voicemode/conch`) is what stops a worker that tries from talking over it. The source says the second caller is refused, not queued, unless it asks to wait. This step confirms that live.
+
+Stop the dispatcher first (`/exit`), so it does not hold the voice. If `/tmp/agent-sandbox` was cleaned, run `/Users/clyde/bbq/kaching/phase0-manual/setup.sh` first.
+
+1. Terminal 3 (watcher): `watch -n1 voicemode conch status` (no `watch`? `while true; do voicemode conch status; sleep 1; clear; done`).
+2. Terminal 1: `cd /tmp/agent-sandbox/repo && claude -n voiceA --permission-mode bypassPermissions`. Terminal 2: the same with `-n voiceB`.
+3. **Test 1, default.** In voiceA: `Use converse to speak, without listening for a reply: count slowly from 1 to 25.` Within 3 seconds, in voiceB: `Use converse to speak, without listening: "B is speaking".` Watch the lock and read voiceB's tool result.
+4. **Test 2, waiting.** Repeat step 3, but tell voiceB: `Use converse with wait_for_conch set to true to speak "B is speaking".`
+
+**Pass:** test 1: you hear only A, and B's result says A "currently holds the voice channel" and B was not spoken. Test 2: B waits and speaks right after A finishes, never both at once. The lock shows A during the count and free afterwards.
+**Fail:** two voices at once in either test; B hangs in test 2; the lock stays held after both finish (`voicemode conch status`).
+**Tell Claude:** `0.7 pass`, or `0.7 fail: overlapped in test 1` / `0.7 fail: B never spoke in test 2`.
+
+**When you are done:** reply with one line per item, for example `V1 pass`, `0.6 pass 6.1 s average, line 8`, `4.3 pass`, `0.7 pass`. Cleanup: `rm -rf /tmp/kaching-accept /tmp/agent-sandbox`.

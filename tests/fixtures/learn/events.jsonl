@@ -1,0 +1,9 @@
+{"ts":"2026-10-12T12:00:30Z","sid":"a1000000-0000-4000-8000-00000000a001","name":"shop","cwd":"/Users/fixture/code/shop","kind":"prompt","data":{}}
+{"ts":"2026-10-12T12:50:10Z","sid":"e3000000-0000-4000-8000-00000000e003","name":"agent-sandbox-repo","cwd":"/private/tmp/agent-sandbox-repo","kind":"prompt","data":{}}
+{"ts":"2026-10-13T12:10:10Z","sid":"e4000000-0000-4000-8000-00000000e004","name":"task9-cont-repo","cwd":"/tmp/task9-cont-repo","kind":"prompt","data":{}}
+{"ts":"2026-10-13T12:20:10Z","sid":"e5000000-0000-4000-8000-00000000e005","name":"T","cwd":"/private/var/folders/zz/fx/T","kind":"session_start","data":{}}
+{"ts":"2026-10-14T05:30:10Z","sid":"e6000000-0000-4000-8000-00000000e006","name":".work","cwd":"/Users/fixture/.agent/proposals/.work","kind":"session_start","data":{}}
+{"ts":"2026-10-14T05:31:00Z","sid":"","name":".work","cwd":"/Users/fixture/.agent/proposals/.work","kind":"learn_run","data":{"component":"corrections","scanned":17,"candidates":9,"proposals":1,"outcome":"ok","covered":1}}
+{"ts":"2026-10-14T11:00:20Z","sid":"b1000000-0000-4000-8000-00000000b001","name":"~","cwd":"/Users/fixture","kind":"stop_ok","data":{}}
+{"ts":"2026-10-14T20:00:00Z","sid":"","name":"~","cwd":"/Users/fixture","kind":"proposal","data":{"id":"rule-no-version-bump","action":"approved"}}
+this line is not json

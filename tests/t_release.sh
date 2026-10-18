@@ -4,6 +4,11 @@
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 link_kit
 GATE="$BIN/release-gate.sh"
+# the token requirement on a push or merge to main applies only while the push gate is on (off by default): this file
+# proves the gate, the guard rule and the pre-push hook, so it runs with push_gate=on; the switch is tested below
+gate_on() { printf 'push_gate=on\n' >"$AGENT_HOME/config"; }
+gate_off() { rm -f "$AGENT_HOME/config"; }
+gate_on
 
 mk_review() { # repo commit blocking findings [not_examined]; the file is named after the repo's HEAD
   local d="$1/.agent/review"; mkdir -p "$d"
@@ -154,7 +159,7 @@ gate "$R" >/dev/null   # re-mint properly
 # ---------- the real git pre-push hook as the second layer ----------
 out=$(CLAUDE_DIR="$CLAUDE_DIR" "$KIT/install.sh" --install-prepush "$R"); assert_contains "pre-push installed" "$out" "write"
 assert_file "pre-push hook file" "$R/.git/hooks/pre-push"
-assert_contains "hook points at the kit via the symlink" "$(cat "$R/.git/hooks/pre-push")" "$CLAUDE_DIR/ching/bin"
+assert_contains "hook points at the kit via the symlink" "$(cat "$R/.git/hooks/pre-push")" "$CLAUDE_DIR/kaching/bin"
 out=$(CLAUDE_DIR="$CLAUDE_DIR" "$KIT/install.sh" --install-prepush "$R"); assert_contains "pre-push install is idempotent" "$out" "already installed"
 out=$(git -C "$R" push origin HEAD:main 2>&1); rc=$?
 assert_eq "hook: push to main with a valid token succeeds" "0" "$rc"
@@ -166,10 +171,47 @@ out=$(git -C "$R" push origin 'HEAD:ma''in' 2>&1); assert_eq "hook sees resolved
 B=main; out=$(git -C "$R" push origin "HEAD:$B" 2>&1); assert_eq "hook: variable-expanded target also blocked" "1" "$?"
 out=$(git -C "$R" push origin HEAD:feat2 2>&1); assert_eq "hook: non-protected branch unaffected" "0" "$?"
 out=$(git -C "$R" push origin :main 2>&1); assert_eq "hook: deleting main blocked" "1" "$?"
+# the same hook with the push gate off (the default): a push to main needs no token, deleting main stays blocked
+gate_off
+commit_file "$R" e.txt five "five"
+out=$(verify "$R"); assert_eq "setup: the token is stale for the new commit" "1" "$?"
+out=$(git -C "$R" push origin HEAD:main 2>&1); rc=$?
+assert_eq "hook, gate off: push to main with a stale token succeeds" "0" "$rc"
+commit_file "$R" f.txt six "six"
+out=$(git -C "$R" push origin main 2>&1); assert_eq "hook, gate off: push main by name succeeds" "0" "$?"
+rm -f "$R/.agent/release-token"
+commit_file "$R" g.txt seven "seven"
+out=$(git -C "$R" push origin HEAD:main 2>&1); assert_eq "hook, gate off: push to main with no token at all succeeds" "0" "$?"
+out=$(git -C "$R" push origin :main 2>&1); rc=$?
+assert_eq "hook, gate off: deleting main is still blocked" "1" "$rc"
+assert_contains "hook, gate off: the deletion message" "$out" "deleting protected branch main is not allowed"
+out=$(git -C "$R" push --delete origin master 2>&1); assert_eq "hook, gate off: deleting a protected branch that does not exist is blocked too" "1" "$?"
+out=$(git -C "$R" push origin HEAD:feat3 2>&1); assert_eq "hook, gate off: non-protected branch unaffected" "0" "$?"
+printf 'push_gate=maybe\n' >"$AGENT_HOME/config"
+commit_file "$R" h.txt eight "eight"
+out=$(git -C "$R" push origin HEAD:main 2>&1); assert_eq "hook, push_gate=maybe means off" "0" "$?"
+printf 'push_gate=on\n' >"$AGENT_HOME/config"; chmod 000 "$AGENT_HOME/config"
+commit_file "$R" i.txt nine "nine"
+out=$(git -C "$R" push origin HEAD:main 2>&1); assert_eq "hook, an unreadable config means off" "0" "$?"
+chmod 600 "$AGENT_HOME/config"
+gate_on
+commit_file "$R" j.txt ten "ten"
+out=$(git -C "$R" push origin HEAD:main 2>&1); rc=$?
+assert_eq "hook, gate on again: the stale token blocks the push" "1" "$rc"
+assert_contains "hook, gate on: same message as before" "$out" "pre-push: push to main blocked"
+# a repo whose GOAL.md says release_mode: confirm is not blocked by the hook while the gate is off
+RG=$(mk_repo hookconf); write_goal "$RG" "true" confirm
+CLAUDE_DIR="$CLAUDE_DIR" "$KIT/install.sh" --install-prepush "$RG" >/dev/null
+commit_file "$RG" a.txt one one
+gate_off
+out=$(git -C "$RG" push origin HEAD:main 2>&1); assert_eq "hook, gate off, release_mode: confirm: the push is not blocked" "0" "$?"
+gate_on
+commit_file "$RG" b.txt two two
+out=$(git -C "$RG" push origin HEAD:main 2>&1); assert_eq "hook, gate on, release_mode: confirm: the push is blocked" "1" "$?"
 # existing foreign pre-push hook is preserved
 R4=$(mk_repo foreign); printf '#!/bin/sh\nexit 0\n' >"$R4/.git/hooks/pre-push"; chmod +x "$R4/.git/hooks/pre-push"
 out=$(CLAUDE_DIR="$CLAUDE_DIR" "$KIT/install.sh" --install-prepush "$R4")
-assert_contains "foreign hook: not overwritten, side file written" "$out" "pre-push.ching"
+assert_contains "foreign hook: not overwritten, side file written" "$out" "pre-push.kaching"
 assert_eq "foreign hook content intact" '#!/bin/sh' "$(head -1 "$R4/.git/hooks/pre-push")"
 # honours core.hooksPath
 R5=$(mk_repo hp); mkdir -p "$R5/.githooks"; git -C "$R5" config core.hooksPath .githooks

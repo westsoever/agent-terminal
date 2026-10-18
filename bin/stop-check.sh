@@ -18,20 +18,31 @@
 #      a run cut by it is a failure, "timed out")
 #      STOP_CHECK_DEADLINE (the whole hook, 780 s: 2 minutes of margin under the 900 s hook timeout)
 #      STOP_CHECK_SKIP_TTL (1800 s: how long an unchanged tree's green run is trusted; 0 = always run)
-#      CHING_NO_CHECKPOINT=1 (scripted runs: never ask for the checkpoint; see checkpoint_gate)
-#      CHING_TEST_MODELS CHING_TEST_CALL_TIMEOUT CHING_TEST_MAX_TURNS (see test-escalate.sh)
+#      KACHING_NO_CHECKPOINT=1 (scripted runs: never ask for the checkpoint; see checkpoint_gate)
+# Checkpoint rule (repo mode, once a prompt is recorded, only when the turn changed the tree): STATE.md must hold
+# a valid <!-- ching:checkpoint --> block, written after the prompt: the six keys, none empty, and none of result,
+# next_action, examined, not_examined still the template's "(none)". A touch of STATE.md is not enough (F7). When it
+# is missing or invalid the stop is blocked once and the block's hash is kept in the session meta
+# (ckpt_hash_at_block); the next stop of the same prompt passes only if the block CHANGED since then and is valid,
+# else it is blocked one more time, and the stop after that is allowed with a checkpoint_unmet event. At most two
+# blocks per prompt, whatever stop_hook_active says, so it can never loop. Opt-outs: KACHING_NO_CHECKPOINT=1,
+# CLAUDE_CODE_ENTRYPOINT=sdk-*. Residual: a valid block left over from an earlier turn, with STATE.md touched this
+# turn, passes on the first stop (nothing says the block was not rewritten).
+#      KACHING_TEST_MODELS KACHING_TEST_CALL_TIMEOUT KACHING_TEST_MAX_TURNS (see test-escalate.sh)
 set -euo pipefail
+# A learner model call (learn_model_call sets KACHING_LEARNER=1) is no session: no check, no gate, no notification.
+[ "${KACHING_LEARNER:-${CHING_LEARNER:-}}" != 1 ] || exit 0
 START=$(date +%s)
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
 
 # A model started by test-escalate.sh inherits this hook: its stop is never gated, counted or notified.
-[ -z "${CHING_ESCALATING:-}" ] || exit 0
+[ -z "${KACHING_ESCALATING:-}" ] || exit 0
 # The same for anything the test_command itself starts (a claude -p smoke test, an Agent-SDK test, a suite
-# with a live test): it inherits CHING_STOP_CHECK_RUNNING from the run below, so its own Stop hook ends here
+# with a live test): it inherits KACHING_STOP_CHECK_RUNNING from the run below, so its own Stop hook ends here
 # instead of running the test_command again under a new session id without end.
-[ -z "${CHING_STOP_CHECK_RUNNING:-}" ] || exit 0
+[ -z "${KACHING_STOP_CHECK_RUNNING:-}" ] || exit 0
 
 # No verdict (exit 3): the hook cannot do its own bookkeeping (jq missing, the session record cannot be
 # written, the session folder is gone, any other unexpected failure). The stop is allowed, stderr says why
@@ -40,7 +51,7 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DONE=""; OUT=""
 no_verdict() { # reason
   DONE=1
-  printf 'ching stop-check: no verdict (%s). The stop is allowed; no check result was recorded.\n' "$1" >&2
+  printf 'kaching stop-check: no verdict (%s). The stop is allowed; no check result was recorded.\n' "$1" >&2
   ev stop_no_verdict "$(jq -nc --arg r "$1" '{reason:$r}' 2>/dev/null || true)" 2>/dev/null || true
   exit 3
 }
@@ -110,13 +121,13 @@ tree_changed_since() {
   ' "$1")
 }
 
-# Repo mode only, and only once a prompt was recorded: block ONCE per prompt when STATE.md has no
-# checkpoint block or it was not updated since that prompt. The meta key makes the next Stop pass.
-# A fresh checkpoint is checked first so the checkpoint event is logged whether the model wrote it
-# unprompted or after the one block. Not asked: when the turn changed nothing in the tree (a question
-# answered), and in scripted runs, where the block would replace the run's answer: CHING_NO_CHECKPOINT=1, or
-# CLAUDE_CODE_ENTRYPOINT=sdk-* (Claude Code sets sdk-cli for claude -p, sdk-ts/sdk-py for the Agent SDK,
-# cli for an interactive session; seen in the 2.1 binary, not documented, hence the explicit switch too).
+# Repo mode only, and only once a prompt was recorded: block when STATE.md has no valid checkpoint block or it was
+# not updated since that prompt (see the header for the full rule: at most two blocks per prompt). A fresh, valid
+# checkpoint is checked first so the checkpoint event is logged whether the model wrote it unprompted or after a
+# block. Not asked: when the turn changed nothing in the tree (a question answered), and in scripted runs, where the
+# block would replace the run's answer: KACHING_NO_CHECKPOINT=1, or CLAUDE_CODE_ENTRYPOINT=sdk-* (Claude Code sets
+# sdk-cli for claude -p, sdk-ts/sdk-py for the Agent SDK, cli for an interactive session; seen in the 2.1 binary, not
+# documented, hence the explicit switch too).
 # prompt_state: set PROMPTED (epoch of the last prompt, '' when none or not in repo mode) and TREE_CHANGED
 # (1/0) once. Called before the test run, so files the check itself writes do not count as the turn's work.
 PROMPTED=""; TREE_CHANGED=""
@@ -130,40 +141,124 @@ prompt_state() {
   if tree_changed_since "$PROMPTED"; then TREE_CHANGED=1; fi
 }
 
+# ckpt_hash FILE: sha256 of the checkpoint block (the lines between the markers, trailing blanks and blank lines
+# dropped), so a touch of the file or an edit outside the block does not change it. Needs the file to exist.
+ckpt_hash() {
+  awk '
+    index($0, "<!-- ching:checkpoint -->") == 1 { c = 1; next }
+    index($0, "<!-- /ching:checkpoint -->") == 1 { exit }
+    c { sub(/[[:space:]]+$/, ""); if ($0 != "") print }
+  ' "$1" | shasum -a 256 | cut -d' ' -f1
+}
+# ckpt_bad_keys FILE: the keys of the six that are missing, empty, or still the template's placeholder "(none)"
+# (result, next_action, examined, not_examined; `none` and `0` are real answers for blocker and files_changed).
+ckpt_bad_keys() {
+  local k v bad=""
+  for k in result blocker next_action files_changed examined not_examined; do
+    v=$(checkpoint_get "$1" "$k")
+    case "$k:$v" in
+      *:) bad="$bad $k" ;;
+      result:*|next_action:*|examined:*|not_examined:*) case "$v" in '('[Nn][Oo][Nn][Ee]')') bad="$bad $k" ;; esac ;;
+    esac
+  done
+  printf '%s' "${bad# }"
+}
+
+# ckpt_task_type FILE: the block's optional task_type when it is one of the fixed types (D26: build, fix, research,
+# merge/sync, ops/config, writing, data; case and blanks ignored, merge or sync -> merge/sync, ops or config ->
+# ops/config), else empty: the template's (none), a missing line and any other word leave the type to the learner.
+ckpt_task_type() {
+  local t
+  t=$(checkpoint_get "$1" task_type | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+  case "$t" in
+    build|fix|research|merge/sync|ops/config|writing|data) printf '%s' "$t" ;;
+    merge|sync) printf 'merge/sync' ;;
+    ops|config) printf 'ops/config' ;;
+  esac
+}
+# ckpt_event FILE: log the checkpoint event (spec 4.3): status, blocker, next_action, not_examined, and task_type
+# when ckpt_task_type gives one. ev cuts strings to 300 characters but drops ALL the data of a line over 1 KB, so
+# the free text is budgeted to fit: blocker and next_action 120 characters each, not_examined (the blind-spot
+# ledger's input) 300, cut after its last whole item (items end at "; " or ", ") when that keeps at least half.
+ckpt_event() {
+  local st=$1 status
+  status=$(sed -n 's/^status:[[:space:]]*//p' "$st" | head -1)
+  # shellcheck disable=SC2016 # jq source
+  ev checkpoint "$(jq -nc --arg s "$status" --arg b "$(checkpoint_get "$st" blocker)" --arg n "$(checkpoint_get "$st" next_action)" \
+    --arg ne "$(checkpoint_get "$st" not_examined)" --arg t "$(ckpt_task_type "$st")" '
+    def cut($m): .[0:$m];
+    def items($m): if length <= $m then .
+      else .[0:$m + 1] | ([capture("^(?<k>.*)(;|, )").k][0] // "" | sub("\\s+$"; "")) as $k
+        | if ($k | length) * 2 >= $m then $k else .[0:$m] end end;
+    {status: $s, blocker: ($b | cut(120)), next_action: ($n | cut(120)), not_examined: ($ne | items(300))}
+    + (if $t == "" then {} else {task_type: $t} end)')"
+}
+
 checkpoint_gate() {
   [ "$REPO_MODE" -eq 1 ] || return 0
-  local prompted st status
+  local prompted st status nblocks=0 at_block cur=missing bad="" why="" reason
   prompt_state
   prompted=$PROMPTED
   [ -n "$prompted" ] || return 0
   st="$STATE_DIR/STATE.md"
-  if [ -f "$st" ] && grep -qF '<!-- ching:checkpoint -->' "$st" && [ "$(file_mtime "$st")" -ge "$prompted" ]; then
-    status=$(sed -n 's/^status:[[:space:]]*//p' "$st" | head -1)
-    ev checkpoint "$(jq -nc --arg s "$status" --arg b "$(checkpoint_get "$st" blocker)" --arg n "$(checkpoint_get "$st" next_action)" \
-      '{status:$s,blocker:$b,next_action:$n}')"
+  # blocks given for THIS prompt so far (a record from an older version has only checkpoint_blocked_for: one)
+  if [ "$(meta_get "$SESS_DIR/meta" checkpoint_blocked_for)" = "$prompted" ]; then
+    nblocks=$(meta_get "$SESS_DIR/meta" ckpt_blocks)
+    case "$nblocks" in ''|*[!0-9]*) nblocks=1 ;; esac
+  fi
+  at_block=$(meta_get "$SESS_DIR/meta" ckpt_hash_at_block)
+  if [ ! -f "$st" ] || ! grep -qF '<!-- ching:checkpoint -->' "$st"; then why=missing
+  elif [ "$(file_mtime "$st")" -lt "$prompted" ]; then why=stale; cur=$(ckpt_hash "$st")
+  else
+    cur=$(ckpt_hash "$st")
+    bad=$(ckpt_bad_keys "$st")
+    if [ -n "$bad" ]; then why=invalid
+    elif [ "$nblocks" -ge 1 ] && [ "$cur" = "$at_block" ]; then why=unchanged   # nothing was written since the block
+    fi
+  fi
+  if [ -z "$why" ]; then
+    ckpt_event "$st"
     return 0
   fi
-  [ "${CHING_NO_CHECKPOINT:-}" != 1 ] || return 0
+  [ "${KACHING_NO_CHECKPOINT:-}" != 1 ] || return 0
   case "${CLAUDE_CODE_ENTRYPOINT:-}" in sdk-*) return 0 ;; esac
-  [ "$(meta_get "$SESS_DIR/meta" checkpoint_blocked_for)" != "$prompted" ] || return 0   # already asked once for this prompt
   [ "$TREE_CHANGED" -eq 1 ] || return 0
+  if [ "$nblocks" -ge 2 ]; then   # asked twice for this prompt: allow, say so, never loop
+    ev checkpoint_unmet "$(jq -nc --arg w "$why" --arg k "$bad" --argjson n "$nblocks" '{reason:$w,keys:$k,blocks:$n}')"
+    return 0
+  fi
+  nblocks=$((nblocks + 1))
   meta_set checkpoint_blocked_for "$prompted"
-  ev stop_blocked '{"retry":1,"reason":"checkpoint"}'
-  jq -n --arg r "Do not stop yet: update the checkpoint block in $st for this turn. Edit only the six lines between <!-- ching:checkpoint --> and <!-- /ching:checkpoint --> (add the block if it is missing): result, blocker, next_action, files_changed, examined, not_examined. Nothing else is needed. This is asked once per prompt." \
-    '{decision:"block", reason:$r}'
+  meta_set ckpt_blocks "$nblocks"
+  meta_set ckpt_hash_at_block "$cur"
+  ev stop_blocked "$(jq -nc --argjson n "$nblocks" --arg w "$why" '{retry:$n,reason:"checkpoint",why:$w}')"
+  if [ "$nblocks" -eq 1 ]; then
+    reason="Do not stop yet: update the checkpoint block in $st for this turn. Edit only the six lines between <!-- ching:checkpoint --> and <!-- /ching:checkpoint --> (add the block if it is missing): result, blocker, next_action, files_changed, examined, not_examined. Nothing else is needed. Fill in real values: the template's (none) does not count for result, next_action, examined and not_examined (write none or nothing when that is the true answer). If the block is still empty or unchanged you are asked one more time, then the stop is allowed."
+  else
+    case "$why" in
+      unchanged) reason="Do not stop yet: the checkpoint block in $st is unchanged since the first request. Rewrite its six lines (result, blocker, next_action, files_changed, examined, not_examined) for this turn. This is the last time it is asked for this prompt." ;;
+      *) reason="Do not stop yet: the checkpoint block in $st is still ${why}${bad:+ ($bad missing, empty or still (none))}. Fill in the six lines between <!-- ching:checkpoint --> and <!-- /ching:checkpoint --> for this turn: result, blocker, next_action, files_changed, examined, not_examined; write none or nothing where that is the true answer. This is the last time it is asked for this prompt." ;;
+    esac
+  fi
+  jq -n --arg r "$reason" '{decision:"block", reason:$r}'
   exit 0
 }
 
-# A turn that ends with a question to the user is "needs input"; anything else is "done".
+# A turn that asks the owner something (ask-check.sh: a question, or a request to do or decide something) is
+# "needs input", and meta ask= holds what it asks for the agent terminal; anything else is "done" (ask= empty).
 finish_ok() {
   checkpoint_gate
-  local last snippet kind="done"
-  last=$(printf '%s' "$LAST_MSG" | awk 'NF { l = $0 } END { print l }')
-  if printf '%s' "$last" | grep -Eq '\?[[:space:]]*[)"*_]*$'; then kind=input; fi
+  local snippet kind="done" ask="" res
+  if res=$(printf '%s' "$LAST_MSG" | "$SELF_DIR/ask-check.sh" 2>/dev/null); then
+    kind=$(printf '%s\n' "$res" | sed -n 1p)
+    ask=$(printf '%s\n' "$res" | sed -n 2p)
+  fi
+  [ "$kind" = input ] || { kind="done"; ask=""; }
   snippet=$(printf '%s' "$LAST_MSG" | tr '\n' ' ' | cut -c1-140)
   ev stop_ok "$(jq -nc --arg k "$kind" '{outcome:$k}')"
+  meta_set ask "$ask"
   set_state "$kind"
-  notify "$kind" "${snippet:-Session finished.}"
+  notify "$kind" "${ask:-${snippet:-Session finished.}}"
   exit 0
 }
 
@@ -205,7 +300,7 @@ if [ -n "$ROOT" ] && [ -f "$PASS_FILE" ]; then
   fi
 fi
 
-OUT=$(mktemp "${TMPDIR:-/tmp}/ching-stop.XXXXXX")   # removed by on_exit
+OUT=$(mktemp "${TMPDIR:-/tmp}/kaching-stop.XXXXXX")   # removed by on_exit
 
 # The retry count so far, read before the run: when it is already at the cap, this is the stop that will
 # be allowed whatever happens, so the paid model ladder must not run for it.
@@ -226,13 +321,13 @@ remember_ladder_failed() { # fingerprint...
 
 rc=0
 # test-escalate.sh runs the check with no model first; only on failure does it call the cheapest model
-# (Haiku), then the next (Sonnet), re-running the check after each. CHING_TEST_MODELS="" turns that off.
-# CHING_STOP_CHECK_RUNNING marks everything the test command starts (see the guard at the top). It is not
-# CHING_ESCALATING: test-escalate.sh would switch the model ladder off for this run too.
-export CHING_STOP_CHECK_RUNNING=1
-if [ "$n" -ge "$MAX" ]; then export CHING_TEST_MODELS=""
+# (Haiku), then the next (Sonnet), re-running the check after each. KACHING_TEST_MODELS="" turns that off.
+# KACHING_STOP_CHECK_RUNNING marks everything the test command starts (see the guard at the top). It is not
+# KACHING_ESCALATING: test-escalate.sh would switch the model ladder off for this run too.
+export KACHING_STOP_CHECK_RUNNING=1
+if [ "$n" -ge "$MAX" ]; then export KACHING_TEST_MODELS=""
 elif [ -n "$ROOT" ] && [ -f "$LADDER_FAILED" ] && grep -qxF "$FP" "$LADDER_FAILED" 2>/dev/null; then
-  export CHING_TEST_MODELS=""
+  export KACHING_TEST_MODELS=""
   ev ladder_skipped '{"reason":"same-tree"}'
 fi
 prompt_state   # before the run: files the check writes are not the turn's work (checkpoint gate)
@@ -256,7 +351,7 @@ trap 'on_signal TERM' TERM; trap 'on_signal INT' INT; trap 'on_signal HUP' HUP
 # --timeout kills the whole process group of a run that takes too long (exit 142), not only its top bash;
 # --deadline makes every run and model call fit in what is left of the hook's budget; --report lists the
 # models really called.
-CHING_TEST_NOTIFY=0 perl -e 'use POSIX (); POSIX::setsid() or setpgrp(0, 0); exec { $ARGV[0] } @ARGV or exit 127' \
+KACHING_TEST_NOTIFY=0 perl -e 'use POSIX (); POSIX::setsid() or setpgrp(0, 0); exec { $ARGV[0] } @ARGV or exit 127' \
   "$SELF_DIR/test-escalate.sh" -C "$WORK_DIR" --timeout "$TIMEOUT" --deadline "$DEADLINE" --report "$OUT.report" -- \
   bash -c "$TEST_CMD" >"$OUT" 2>&1 </dev/null &
 ESC_PID=$!
@@ -264,6 +359,12 @@ wait "$ESC_PID" || rc=$?
 ESC_PID=""
 trap - TERM INT HUP
 TRIED=$(cat "$OUT.report" 2>/dev/null || true)
+END_AT=$(date +%s)
+# The tests event (spec 4.3): the verdict of this run, model fixes included, and its wall time. A run cut off
+# at the hook deadline has no verdict and logs none (stop_deadline below); a run cut by STOP_CHECK_TIMEOUT failed.
+if [ "$rc" -eq 0 ]; then ev tests "$(jq -nc --argjson s $((END_AT - RUN_AT)) '{outcome:"pass",secs:$s}')"
+elif [ "$rc" -ne 142 ] || [ "$END_AT" -lt "$DEADLINE" ]; then ev tests "$(jq -nc --argjson s $((END_AT - RUN_AT)) '{outcome:"fail",secs:$s}')"
+fi
 
 if [ "$rc" -eq 0 ]; then
   # Record the tree as it was before the run, and only when the run (and any model fix) left it unchanged:
@@ -274,7 +375,7 @@ if [ "$rc" -eq 0 ]; then
 fi
 # Cut off at the deadline: the check never finished, so there is no verdict to act on. Blocking would only
 # send the model to "fix" a check that may be fine, three times over 13 minutes each.
-if [ "$rc" -eq 142 ] && [ "$(date +%s)" -ge "$DEADLINE" ]; then
+if [ "$rc" -eq 142 ] && [ "$END_AT" -ge "$DEADLINE" ]; then
   ev stop_deadline "$(jq -nc --argjson b "$BUDGET" --argjson e "$(($(date +%s) - START))" '{budget:$b,elapsed:$e}')"
   set_state blocked
   notify blocked "Done-check out of time after ${BUDGET}s (STOP_CHECK_DEADLINE), no verdict: $TEST_CMD"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# meta_set: the hooks and the watcher (ching-watch.sh) write the same meta file; concurrent writers must not
+# meta_set: the hooks and the watcher (kaching-watch.sh) write the same meta file; concurrent writers must not
 # lose keys, a writer that dies must not leave a lock behind, and nobody waits long.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -69,9 +69,16 @@ mkdir -p "$SESS_DIR/.meta.lock"
 meta_set after_old_lock yes
 assert_eq "old lock directory: ignored" "yes" "$(meta_get "$SESS_DIR/meta" after_old_lock)"
 
-# fast: 50 sequential writes well under 2 s (about 10 ms each)
-s=$(ms); for i in $(seq 1 50); do meta_set "seq$i" "$i"; done; e=$(ms)
-assert_eq "50 writes take under 2 s" "1" "$([ $((e - s)) -lt 2000 ] && echo 1 || echo 0)"
+# fast: 50 sequential writes cost about 2.5 bare perl starts each (idle about 8 ms a write). A fixed limit fails when
+# the parallel suite loads the machine, so the limit is 4 times a bare-perl baseline plus 1 s, taken in 5 rounds of 10
+# that alternate with the writes so both see the same load. Idle that is about 1.6 s against about 0.4 s of writes.
+base=0; writes=0
+for r in 1 2 3 4 5; do
+  s=$(ms); for i in 1 2 3 4 5 6 7 8 9 10; do perl -e 1; done; e=$(ms); base=$((base + e - s))
+  s=$(ms); for i in 1 2 3 4 5 6 7 8 9 10; do meta_set "seq$r$i" "$i"; done; e=$(ms); writes=$((writes + e - s))
+done
+assert_eq "50 writes take under 4 bare perl starts each plus 1 s (writes ${writes} ms, baseline ${base} ms)" "1" \
+  "$([ "$writes" -lt $((4 * base + 1000)) ] && echo 1 || echo 0)"
 
 # an unwritable session dir makes meta_set fail (the caller decides), without hanging
 RO="$AGENT_HOME/sessions/meta-ro"; mkdir -p "$RO"; chmod 500 "$RO"

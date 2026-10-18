@@ -1,0 +1,18 @@
+{
+  "skills": [
+    {
+      "id": "c1",
+      "sequence": ["git fetch", "git rebase", "bun test", "git push"],
+      "keep": true,
+      "slug": "sync-test-push",
+      "name": "sync-test-push",
+      "proposal": "description: Bring the branch up to date with origin/main, run the tests, and push only when they pass. Use when the owner asks to ship or push a small change.",
+      "why_not_covered": "No installed skill covers fetch, rebase, test and push as one step; the closest, commit-commands, does not run tests."
+    },
+    {
+      "sequence": ["npm install", "pnpm add"],
+      "keep": false,
+      "reason": "A one-off correction, not a repeatable workflow."
+    }
+  ]
+}

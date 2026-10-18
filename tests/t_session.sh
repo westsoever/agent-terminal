@@ -128,4 +128,15 @@ assert_eq "events: compact with trigger" "auto" "$(jq -r 'select(.kind=="compact
 printf '%s' "$(hook_json SessionEnd "$ER" s-ev)" | "$BIN/session-start.sh" end
 assert_eq "events: session_end" "1" "$(jq -r 'select(.kind=="session_end" and .sid=="s-ev") | .kind' "$EVF" | wc -l | tr -d ' ')"
 assert_eq "events: name is the repo" "evrepo" "$(jq -r 'select(.sid=="s-ev") | .name' "$EVF" | sort -u)"
+# ---------- the learner's own model calls (KACHING_LEARNER=1) are not sessions: every mode exits at once ----------
+LR=$(mk_repo learnrepo); write_goal "$LR" "true"
+for m in start touch end; do
+  a=$m; [ "$m" != start ] || a=""
+  # a here-string, not a pipe: the hook exits without reading stdin, and a pipe's writer could then die of SIGPIPE
+  out=$(KACHING_LEARNER=1 "$BIN/session-start.sh" ${a:+"$a"} 2>&1 <<<"$(hook_json SessionStart "$LR" s-learner '{"source":"startup"}')"); rc=$?
+  assert_eq "learner ($m): exit 0" "0" "$rc"
+  assert_eq "learner ($m): prints nothing (no context injected)" "" "$out"
+done
+assert_no_file "learner: no registry entry in sessions/" "$AGENT_HOME/sessions/s-learner"
+assert_eq "learner: no events" "0" "$(grep -c '"s-learner"' "$AGENT_HOME/events.jsonl" 2>/dev/null || true)"
 exit 0
