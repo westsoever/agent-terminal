@@ -2,6 +2,22 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D54 (2026-10-18): HELP scrolls and starts with what is new
+
+**Decision (user):** "Add them to the HELP section in the app so I have an overview of what I can now do with kaching".
+
+**Why:** the help page was 80 to 90 lines and the body shows about 55 on a 62-row terminal, so its last third (Wall, the fixed messages with their space keys, the keys.toml note) could not be seen at all, and anything added would have been cut off too.
+
+**Built:** HELP scrolls (up and down 3 lines, pgup and pgdown a page, home, end; the title says so and "more below") and opens at the top each time. A "New on 2026-10-18" block follows the view codes: the space leader and `space space` (D53), `x` (D50), the `/NW` defaults read from keys.toml (D51), `b` and `t` in PC (D52), `i` in RP (D49), the DONE section (D47). The `x` line now says it does not close the session. Add a block like this for the next batch and drop the old one when it stops being news.
+
+## D53 (2026-10-18): space waits for its second key; `space space` jumps to the longest INPUT
+
+**Decision (user):** the `space m` and `space c` messages "don't wait too long, so I have to input the m too quickly. Since the space overlaps with opening the most recent session, that can become very tricky - maybe we change the hotkey for that but I'd like to have a longer waiting time or just waiting for input until I put the e.g. m or Esc to abort the command".
+
+**Why:** space alone was "the INPUT agent that has waited the longest", so kaching could only tell it from the start of `space m` by a 450 ms timer. Too slow a second key and the selection jumped.
+
+**Built:** space starts the leader and waits with no timer. The status line lists the keys behind it (`space… m merge · c commit · w new worktree · space longest input · esc cancel`). Esc cancels, a key that is bound to nothing ends it with a message and is not passed on (so `space x` can never dismiss), a `space <k>` reply is sent. The jump to the longest INPUT agent is `space space`; `next_waiting = " "` in keys.toml now means that, and any other key there is a direct key with no leader. The leader starts only in the desk and the wall; before, it also started in the other views and moved the selection after the timer.
+
 ## D52 (2026-10-18): PC hands an issue to an agent with the owner's permissions (b, t, @Name)
 
 **Decision (user):** the request itself is not in the logs I could search. The owner tried it on 2026-10-18: "pressing b has now moved it to the inbox and is working on it".

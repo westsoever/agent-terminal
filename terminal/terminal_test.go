@@ -520,3 +520,88 @@ func TestSpaceWithMenus(t *testing.T) {
 		t.Fatal("a menu after the grace kept the old wait")
 	}
 }
+
+// Space waits for its second key with no time limit: esc cancels, space again jumps to the longest INPUT, a key bound
+// to nothing ends it with a message, and a "space <k>" reply is sent.
+func TestLeaderWaitsForSecondKey(t *testing.T) {
+	cfg, _, _ := loadConfig()
+	now := time.Now()
+	newModel := func() model {
+		m := model{cfg: cfg, view: vDesk, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, prompts: map[string]Prompt{}}
+		m.agents = []Agent{
+			{SID: "idle", State: "idle", Since: now.Add(-time.Hour)},
+			{SID: "A", State: "input", Since: now.Add(-10 * time.Minute)},
+		}
+		m.selSID = "idle"
+		return m
+	}
+
+	m, cmd := press(newModel(), " ")
+	if !m.leader || cmd != nil {
+		t.Fatalf("space must wait without a timer: leader=%v cmd=%v", m.leader, cmd != nil)
+	}
+	if m.selSID != "idle" {
+		t.Fatalf("space alone moved the selection to %s", m.selSID)
+	}
+
+	if m, _ = press(m, "esc"); m.leader || m.selSID != "idle" {
+		t.Fatalf("esc must cancel without moving: leader=%v sel=%s", m.leader, m.selSID)
+	}
+
+	m, _ = press(newModel(), " ", " ")
+	if m.leader || m.selSID != "A" {
+		t.Fatalf("space space: leader=%v sel=%s, want the INPUT agent A", m.leader, m.selSID)
+	}
+
+	m, _ = press(newModel(), " ", "x")
+	if m.leader || m.selSID != "idle" || !m.statusErr {
+		t.Fatalf("space x is bound to nothing: leader=%v sel=%s err=%v", m.leader, m.selSID, m.statusErr)
+	}
+
+	m, _ = press(newModel(), " ", "m")
+	if m.leader {
+		t.Fatal("space m left the leader open")
+	}
+
+	m = newModel()
+	m.view = vRepos
+	if m, _ = press(m, " "); m.leader {
+		t.Fatal("space outside the desk and the wall must not swallow the next key")
+	}
+}
+
+// The help page is longer than the screen: it lists what is new first and scrolls, so the last line can be reached.
+func TestHelpScrolls(t *testing.T) {
+	cfg, _, _ := loadConfig()
+	m := model{cfg: cfg, w: 120, h: 40, view: vHelp}
+	text := func() string { return escRe.ReplaceAllString(strings.Join(m.helpView(m.h-headerH-footerH), "\n"), "") }
+
+	if v := text(); !strings.Contains(v, "New on 2026-10-18") || !strings.Contains(v, "space space") || !strings.Contains(v, "more below") {
+		t.Fatalf("the top of the help must show what is new and say that it scrolls:\n%s", v)
+	}
+	if strings.Contains(text(), "Full manual") {
+		t.Fatal("the end of the help fits at the top: the test screen is too tall")
+	}
+	m, _ = press(m, "end")
+	if v := text(); !strings.Contains(v, "Full manual") || strings.Contains(v, "more below") {
+		t.Fatalf("end must show the last line:\n%s", v)
+	}
+	m, _ = press(m, "down")
+	end := m.helpOff
+	m, _ = press(m, "up")
+	if m.helpOff != end-3 {
+		t.Fatalf("up from the end: offset %d, want %d", m.helpOff, end-3)
+	}
+	m, _ = press(m, "pgup")
+	if m.helpOff >= end-3 {
+		t.Fatal("pgup did not scroll")
+	}
+	m, _ = press(m, "home")
+	if m.helpOff != 0 {
+		t.Fatalf("home: offset %d", m.helpOff)
+	}
+	m, _ = press(m, "?") // opening the help again starts at the top
+	if m.helpOff != 0 {
+		t.Fatal("help must open at the top")
+	}
+}

@@ -23,7 +23,7 @@ Push `/`, write the code, then push `Enter`.
 | `STOP` | – | Stop the selected background agent. Its conversation stays. |
 | `A3` | Agent 3 | The desk, with agent 3 selected. Use a number from 1 to 9. |
 | `ching` | An agent by name | The desk, with the first agent whose name starts with these letters. |
-| `HELP` | Help | The key list. You can also push `?`. |
+| `HELP` | Help | The key list, with what is new at the top. You can also push `?`. The page is longer than the screen: scroll it with `↑`, `↓`, `PgUp`, `PgDn`, `Home` and `End`. |
 | `QUIT` | – | Kaching stops. You can also push `Ctrl+C`. |
 
 Push `Esc` to go back to the desk from any view.
@@ -37,7 +37,7 @@ The right hand does the most frequent work: `j` goes up, `l` goes down, `k` open
 |---|---|
 | `l` or `↓` | Select the next agent (down the list). |
 | `j` or `↑` | Select the previous agent (up the list). |
-| `Space` | Select the agent in `INPUT` that has waited the longest. |
+| `Space`, `Space` | Select the agent in `INPUT` that has waited the longest. The first `Space` waits for a second key with no time limit; `Esc` cancels it. |
 | `1` to `9` | Send the answer with that number to the selected agent. |
 | `a` | When the agent asks questions: take the recommended answer of each question and send all. Refer to section 6.3. |
 | `k` | Write a message to the selected agent. `Enter` sends it. `Esc` keeps it as a draft. Refer to section 1.4. |
@@ -93,7 +93,7 @@ The top line does not show your message. It shows only the name of the agent tha
 |---|---|
 | `1` to `9` | Select the tile with that number. |
 | `z` | Show the selected tile on the full screen. Push `z` again to go back. |
-| `l`, `j`, `Space` | Select the next or previous agent, or the agent in `INPUT` that has waited the longest. |
+| `l`, `j`, `Space` `Space` | Select the next or previous agent, or the agent in `INPUT` that has waited the longest. |
 | `Esc` | Go back to the desk. |
 
 When a tile shows on the full screen, the number keys send answers, as on the desk.
@@ -273,9 +273,9 @@ In command mode and write mode:
 ### 6.1 Find the agents that wait for you
 
 1. Look at the command line. It shows the number of agents that wait for you.
-2. Push `Space`. Kaching selects the agent in `INPUT` that has waited the longest. Agents that are only done (`WAITING`) are skipped. An agent that shows a question or an approval on its screen waits from the moment that it showed it, not from the start of its turn. Kaching reads the screens of all busy agents, so such an agent is in `INPUT` also when you never selected it.
+2. Push `Space` two times. Kaching selects the agent in `INPUT` that has waited the longest. Agents that are only done (`WAITING`) are skipped. An agent that shows a question or an approval on its screen waits from the moment that it showed it, not from the start of its turn. Kaching reads the screens of all busy agents, so such an agent is in `INPUT` also when you never selected it.
 3. Read the agent panel and answer it.
-4. Push `Space` again. Kaching selects the agent in `INPUT` that now has waited the longest. Pushing `Space` again before you answer keeps the same agent.
+4. Push `Space` two times again. Kaching selects the agent in `INPUT` that now has waited the longest. Pushing `Space` two times again before you answer keeps the same agent.
 
 ### 6.2 Select an answer
 
@@ -312,7 +312,7 @@ Kaching reads the questions of all agents in the same way, also for background a
 
 1. Select the agent.
 2. Push the key of the message, for example `f` for "fix it".
-3. For a message on the space bar, push `Space`, then push the second key in less than half a second.
+3. For a message on the space bar, push `Space`, then push the second key. Kaching waits for it as long as it takes; `Esc` cancels.
 4. Make sure that the command line shows `✓ <name> is on it`.
 
 ### 6.5 Write a message

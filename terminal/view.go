@@ -204,7 +204,7 @@ func (m model) commandLine() string {
 		}
 		left = []seg{s(" > ", cOrange), s(code, cWhite), s(" <GO>", cGrey)}
 		if m.leader {
-			left = append(left, s("   space…", cOrange))
+			left = append(left, s("   space…", cOrange), s("  "+m.leaderHint(), cGrey))
 		}
 		if m.status != "" {
 			st := cGrey
@@ -1125,7 +1125,7 @@ func (m model) pcPanel(w, h int) []string {
 	return boxR(w, h, title, right, border, body)
 }
 
-func (m model) textView(title string, lines []string, h int) []string {
+func (m model) textBody(lines []string) []string {
 	in := m.w - 6
 	var body []string
 	for _, l := range lines {
@@ -1142,10 +1142,40 @@ func (m model) textView(title string, lines []string, h int) []string {
 			body = append(body, " "+row(in, s(wl, st))+" ")
 		}
 	}
-	return indent(box(m.w-2, h, []seg{s(strings.ToUpper(title), cWhite)}, cDark, body))
+	return body
 }
 
+// leaderHint lists what the next key does while space waits for it.
+func (m model) leaderHint() string {
+	var parts []string
+	for _, r := range m.cfg.Replies {
+		if k, ok := strings.CutPrefix(r.Key, "space "); ok {
+			parts = append(parts, k+" "+r.Label)
+		}
+	}
+	if m.cfg.Keys.Waiting == " " {
+		parts = append(parts, "space longest input")
+	}
+	return strings.Join(append(parts, "esc cancel"), " · ")
+}
+
+// helpView draws the help page from line m.helpOff on; the title says how to scroll when it does not all fit.
 func (m model) helpView(h int) []string {
+	body := m.textBody(m.helpLines())
+	rows := max(1, h-2)
+	off := min(max(m.helpOff, 0), max(0, len(body)-rows))
+	title := []seg{s("HELP", cWhite)}
+	if len(body) > rows {
+		more := ""
+		if off+rows < len(body) {
+			more = " · more below"
+		}
+		title = append(title, s("  ↑ ↓ pgup pgdown home end scroll · esc back"+more, cGrey))
+	}
+	return indent(box(m.w-2, h, title, cDark, body[off:]))
+}
+
+func (m model) helpLines() []string {
 	K := m.cfg.Keys
 	k := func(key string) string {
 		if key == " " {
@@ -1154,6 +1184,10 @@ func (m model) helpView(h int) []string {
 		return key
 	}
 	row2 := func(key, what string) string { return fmt.Sprintf("%-14s %s", key, what) }
+	nwDefault := parseNW("", m.cfg).summary()
+	if nwDefault == "" {
+		nwDefault = "Claude Code's own defaults"
+	}
 	lines := []string{
 		"## Go to a view: push " + K.Command + ", write the code, push enter. esc goes back to the desk.",
 		row2("IN", "inbox (the desk): all agents and the selected agent"),
@@ -1168,11 +1202,20 @@ func (m model) helpView(h int) []string {
 		row2("STOP", "stop the selected background agent (its conversation stays)"),
 		row2("ALL group", "one message to a group of agents: waiting (INPUT and WAITING), input, idle or working; agents with a menu on screen are left out"),
 		row2("A3, or a name", "select agent 3, or the first agent whose name starts so"),
-		row2("HELP, QUIT", "this page; stop kaching (ctrl+c also stops it)"),
+		row2("HELP, QUIT", "this page (it scrolls: up/down, pgup/pgdown, home/end); stop kaching (ctrl+c also stops it)"),
+		"",
+		"## New on 2026-10-18",
+		row2("space + key", "space waits for its second key with no time limit: the status line lists the keys, esc cancels, a key bound to nothing ends it. It used to jump after half a second"),
+		row2(strings.Replace(k(K.Waiting), "space", "space space", 1), "the agent in INPUT that has waited the longest (it was space alone)"),
+		row2(K.Dismiss, "takes a waiting agent off the list, a background one too; it keeps running and comes back when it has something new. It does not close the session (STOP stops a background agent)"),
+		row2("NW, "+K.PCAgent+", "+K.PCTerm, "agents that kaching starts run on "+nwDefault+" (nw_model, nw_effort, nw_permission in keys.toml); words after NW win"),
+		row2(K.PCAgent+" / "+K.PCTerm+" in PC", "hand the selected issue to a new background agent / Terminal session with your permissions; a box text that starts with @Name goes to a session that already runs"),
+		row2("i in RP", "copy the path of the repo's folder, or of the selected file or folder"),
+		row2("DONE", "an agent that finished with nothing left sits in its own section at the end of the list, below IDLE"),
 		"",
 		"## Desk",
 		row2(k(K.Next)+" / "+k(K.Prev), "next / previous agent"),
-		row2(k(K.Waiting), "the agent in INPUT that has waited the longest"),
+		row2(strings.Replace(k(K.Waiting), "space", "space space", 1), "the agent in INPUT that has waited the longest (space waits for its second key, esc cancels)"),
 		row2(k(K.Older)+" / "+k(K.Newer), "scroll the agent's conversation 3 lines back / on (also when zoomed, and while writing on the draft's first / last line)"),
 		row2("pgup / pgdown", "a page back / on   ·   home: its start   ·   end: the newest"),
 		row2("1-9", "send that numbered answer"),
@@ -1182,7 +1225,7 @@ func (m model) helpView(h int) []string {
 		row2(K.Open+" then a-i", "open that file"),
 		row2(K.Goto, "show the agent's own Terminal window, where it is; a background agent (◦) gets a new window attached to it"),
 		row2(K.Here, "bring its window to monitor 1 and into focus, to type in it; a prompt sends it back"),
-		row2(K.Dismiss, "remove a waiting agent from the list, no answer; it comes back when it has something new"),
+		row2(K.Dismiss, "remove a waiting agent (a background one too) from the list, no answer; it keeps running and comes back when it has something new"),
 		row2(K.Refresh, "read all data again"),
 		"",
 		"## Writing a message",
@@ -1220,7 +1263,7 @@ func (m model) helpView(h int) []string {
 		row2("1-9", "select that tile"),
 		row2(K.Zoom, "tile on the full screen, again to go back (then 1-9 answer)"),
 		"",
-		"## Fixed messages (desk and wall; space keys: push space, then the key)",
+		"## Fixed messages (desk and wall; space keys: push space, then the key; no time limit, esc cancels)",
 	}
 	for _, r := range m.cfg.Replies {
 		lines = append(lines, row2(r.Key, fmt.Sprintf("%q", r.Text)))
@@ -1228,7 +1271,7 @@ func (m model) helpView(h int) []string {
 	lines = append(lines, "",
 		"Change keys, messages and how tables show (tables = auto, rule, grid or records) in "+tildify(configPath())+". Save: kaching reloads it.",
 		"Full manual: ~/.claude/kaching/docs/kaching-manual.md")
-	return m.textView("help", lines, h)
+	return lines
 }
 
 // ---- footer
@@ -1255,7 +1298,7 @@ func (m model) footer() []string {
 		add(&r1, "1-9", "select")
 		add(&r1, K.Zoom, "zoom")
 		add(&r1, K.Next+" "+K.Prev, "next/prev")
-		add(&r1, key(K.Waiting), "longest input")
+		add(&r1, strings.Replace(key(K.Waiting), "␣", "␣␣", 1), "longest input")
 		add(&r1, "esc", "desk")
 	case vPaperclip:
 		add(&r1, K.Next+" "+K.Prev, "issue")
@@ -1313,7 +1356,7 @@ func (m model) footer() []string {
 		}
 		add(&r1, K.Next+" "+K.Prev, "next/prev")
 		add(&r1, key(K.Older)+key(K.Newer), "scroll")
-		add(&r1, key(K.Waiting), "longest input")
+		add(&r1, strings.Replace(key(K.Waiting), "␣", "␣␣", 1), "longest input")
 		add(&r1, K.Open+" a-i", "open file")
 		add(&r1, K.Goto, "go to window")
 		add(&r1, K.Here, "bring here")

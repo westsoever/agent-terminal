@@ -62,9 +62,9 @@ type model struct {
 	view       view
 	mode       mode
 	buf        string // typing or command buffer
-	leader     bool   // space was pressed, waiting to see if a leader key follows
-	leaderSeq  int
+	leader     bool   // space was pressed: the next key picks a "space <k>" reply, however long that takes (esc cancels)
 	zoom       bool
+	helpOff    int // the HELP page's first line
 	listSel    int // selection inside FL / PR / PO / PC lists
 	status     string
 	statusErr  bool
@@ -129,7 +129,6 @@ type ttysMsg struct {
 type sentMsg struct {
 	sid, name, what, res string
 }
-type leaderTimeout int
 type statusMsg string
 type promptMsg struct {
 	sid string
@@ -309,6 +308,33 @@ func (m *model) last(a *Agent) Last {
 	l := readLast(a.Transcript, a.Cwd)
 	m.lastCache[a.Transcript] = cachedLast{st.Size(), st.ModTime(), l}
 	return l
+}
+
+// helpScroll scrolls the help page for the scroll keys (up and down 3 lines, a page, the start, the end); false for
+// any other key.
+func (m *model) helpScroll(ks string) bool {
+	K := m.cfg.Keys
+	rows := max(1, m.h-headerH-footerH-2)
+	last := max(0, len(m.textBody(m.helpLines()))-rows)
+	off := m.helpOff
+	switch ks {
+	case K.Older, K.Prev:
+		off -= 3
+	case K.Newer, K.Next:
+		off += 3
+	case "pgup":
+		off -= max(1, rows-1)
+	case "pgdown":
+		off += max(1, rows-1)
+	case "home":
+		off = 0
+	case "end":
+		off = last
+	default:
+		return false
+	}
+	m.helpOff = min(max(off, 0), last)
+	return true
 }
 
 // scrollChat scrolls the selected agent's conversation for the scroll keys; false for any other key.
@@ -576,12 +602,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus(string(msg))
 		m.refresh()
 		return m, nil
-	case leaderTimeout:
-		if m.leader && int(msg) == m.leaderSeq {
-			m.leader = false
-			m.nextWaiting()
-		}
-		return m, nil
 	case execDone:
 		m.loadProposals()
 		if msg.err != nil {
@@ -664,14 +684,23 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// key mode
-	if m.leader {
+	K := m.cfg.Keys
+	if m.leader { // space waits for its second key with no time limit; esc, or a key that is bound to nothing, ends it
 		m.leader = false
-		if r, ok := m.cfg.leaderReply(ks); ok && (m.view == vDesk || m.view == vWall) {
+		m.status = ""
+		switch {
+		case ks == "esc":
+			return m, nil
+		case ks == " " && K.Waiting == " ": // space space
+			m.nextWaiting()
+			return m, nil
+		}
+		if r, ok := m.cfg.leaderReply(ks); ok {
 			return m, m.deliver(r.Text, nil)
 		}
-		m.nextWaiting() // space alone, then an ordinary key
+		m.setErr("space " + ks + " is bound to nothing")
+		return m, nil
 	}
-	K := m.cfg.Keys
 	switch {
 	case ks == K.Command:
 		m.mode, m.buf = mCommand, ""
@@ -691,11 +720,12 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.status = ""
 		return m, nil
-	case ks == K.Waiting || (K.Waiting == " " && k.Type == tea.KeySpace):
+	case ks == " " && (m.view == vDesk || m.view == vWall):
 		m.leader = true
-		m.leaderSeq++
-		seq := m.leaderSeq
-		return m, tea.Tick(450*time.Millisecond, func(time.Time) tea.Msg { return leaderTimeout(seq) })
+		return m, nil
+	case ks == K.Waiting && ks != " ":
+		m.nextWaiting()
+		return m, nil
 	case ks == K.Refresh:
 		m.refresh()
 		return m, loadTTYs
@@ -703,7 +733,7 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.view, m.zoom = vWall, false
 		return m, nil
 	case ks == "?":
-		m.view = vHelp
+		m.view, m.helpOff = vHelp, 0
 		return m, nil
 	}
 	switch m.view {
@@ -720,6 +750,7 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	switch {
+	case m.view == vHelp && m.helpScroll(ks):
 	case (m.view == vDesk || m.zoom) && m.scrollChat(ks):
 	case ks == K.Next || ks == "down":
 		m.move(1)
@@ -1301,7 +1332,7 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 	case c == "FIND":
 		return m.findCommand(code)
 	case c == "HELP" || c == "?":
-		m.view = vHelp
+		m.view, m.helpOff = vHelp, 0
 	case c == "QUIT" || c == "Q":
 		removeState()
 		return m, tea.Quit
