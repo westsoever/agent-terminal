@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -304,5 +305,40 @@ func TestRepoViewGeometry(t *testing.T) {
 	if os.Getenv("SHOW") != "" {
 		m.w, m.h = 160, 30
 		t.Log("\n" + ansiRe.ReplaceAllString(m.View(), ""))
+	}
+}
+
+// i copies a path: the repo's folder in the list, the selected file or folder in the panel (.. is the folder shown),
+// the GitHub address for what has no clone.
+func TestRepoCopyPath(t *testing.T) {
+	var copied []string
+	old := copyText
+	t.Cleanup(func() { copyText = old })
+	copyText = func(s string) error { copied = append(copied, s); return nil }
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "src"), 0o755)
+	os.WriteFile(filepath.Join(root, "src", "main.go"), nil, 0o644)
+	m := repoModel(t, Repo{Name: "r", Dir: root, Remote: "o/r"}, Repo{Name: "web", Remote: "westsoever/web"})
+	m = pressRP(t, m, "i")
+	if len(copied) != 1 || copied[0] != root {
+		t.Fatalf("i on a clone: %q", copied)
+	}
+	if line := escRe.ReplaceAllString(m.commandLine(), ""); !strings.Contains(line, "copied ") {
+		t.Fatalf("status: %q", line)
+	}
+	m = pressRP(t, m, "k", "i") // the panel: src is first
+	m = pressRP(t, m, "k", "i") // into src: .. is first
+	m = pressRP(t, m, "l", "i")
+	src := filepath.Join(root, "src")
+	if want := []string{root, src, src, filepath.Join(src, "main.go")}; !reflect.DeepEqual(copied, want) {
+		t.Fatalf("panel: %q, want %q", copied, want)
+	}
+	m = pressRP(t, m, "esc", "l", "i")
+	if got := copied[len(copied)-1]; got != "https://github.com/westsoever/web" {
+		t.Fatalf("i without a clone: %q", got)
+	}
+	m = pressRP(t, m, "esc")
+	if m.view != vDesk {
+		t.Fatalf("view %d", m.view)
 	}
 }

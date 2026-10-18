@@ -2,6 +2,12 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D49 (2026-10-18): `i` in RP copies a path
+
+**Decision (user):** "One hotkey to create is 'i' to copy the file path" (after trying the PR and RP views).
+
+**Built:** in `RP`, `i` copies the full path of the repo's folder; in the folder panel it copies the selected file or folder (`..` gives the folder the panel shows). A repo without a clone, and its folders on GitHub, give the GitHub address instead. The status line says what was copied. Not added to the PR panel: its files are text lines, not paths on this Mac.
+
 ## D48 (2026-10-18): the terminal finds a transcript that moved with its session
 
 **Decision (user):** "I don't see any messages of the background agent ... Maybe fix that first to actually have the text of the chat from this background agent show up here as well."

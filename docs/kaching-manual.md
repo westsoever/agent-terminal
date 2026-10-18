@@ -130,11 +130,13 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | `RP` | `Enter` | Open the folder of the repo. A repo without a local folder asks `No local folder. Open it on GitHub?`: push `Enter` or `y` to open it, any other key to stop. |
 | `RP` | `b`, `Option+Enter` | Open the repo on GitHub in your browser. `Shift+Enter` also does this, but only in a terminal that sends it differently from `Enter` (Terminal.app does not). |
 | `RP` | `k` | Show the folders of the repo in a panel on the right. |
+| `RP` | `i` | Copy the path of the repo's folder. A repo without a local folder gives its GitHub address. |
 | `RP` panel | `l`, `j` | Select the next or previous file or folder. |
 | `RP` panel | `k` | Go into the folder, or open the file. `..` goes up. |
 | `RP` panel | `h`, `Backspace` | Go up one folder. |
 | `RP` panel | `Enter` | Show the folder in Finder, or open the file. |
 | `RP` panel | `b` | Open the folder that the panel shows on GitHub. |
+| `RP` panel | `i` | Copy the full path of the selected file or folder (`..` gives the folder that the panel shows). On a repo without a clone it copies the GitHub address. |
 | `RP` panel | `Esc` | Close the panel. Push `Esc` again to go to the desk. |
 
 ### 1.7 Keys in the FIND view

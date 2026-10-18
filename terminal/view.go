@@ -1198,6 +1198,7 @@ func (m model) helpView(h int) []string {
 		row2("enter", "open its folder; on GitHub only: asks, then enter or y opens it on GitHub"),
 		row2("b, opt+enter", "open it on GitHub (option+enter; shift+enter too, where the terminal tells it from enter)"),
 		row2(K.Reply, "its folders on the right: "+K.Reply+" goes into a folder or opens a file, h (or backspace) up, enter shows it in Finder, esc closes"),
+		row2("i", "copy the path of the repo's folder, or of the selected file or folder in the panel (its GitHub URL without a clone)"),
 		"",
 		"## Paperclip requests (PC)",
 		row2("1-9", "answer; in a list: tick the item; in a question: pick the option; with verdicts: give the current item that verdict"),

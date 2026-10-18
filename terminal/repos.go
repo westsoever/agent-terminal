@@ -2,7 +2,7 @@ package main
 
 // The RP view (D45): the repos on this Mac (git clones one level under ~/bbq and ~, the ones in ~/.agent-repos
 // and the sync check's) and the owner's GitHub repos that have no clone here, each with the sync check's note.
-// Enter opens the folder, b (or option+enter) the repo on GitHub, k its folders in a side panel.
+// Enter opens the folder, b (or option+enter) the repo on GitHub, k its folders in a side panel, i copies a path.
 
 import (
 	"context"
@@ -54,6 +54,13 @@ func escapePath(rel string) string {
 
 // repoOpen opens a folder, file or URL; a variable so tests see what would open.
 var repoOpen = openPath
+
+// copyText puts s on the clipboard; a variable so tests see what would be copied.
+var copyText = func(s string) error {
+	c := exec.Command("pbcopy")
+	c.Stdin = strings.NewReader(s)
+	return c.Run()
+}
 
 // repoOwners: whose GitHub repos the list adds, the owner's and the org's.
 var repoOwners = []string{"westsoever", "technobbq"}
@@ -467,6 +474,18 @@ func (m *model) repoGitHub() {
 	}
 }
 
+// copyOut copies a path or URL for the owner to paste.
+func (m *model) copyOut(s string) {
+	if s == "" {
+		return
+	}
+	if err := copyText(s); err != nil {
+		m.setErr(err.Error())
+		return
+	}
+	m.setStatus("copied " + tildify(s))
+}
+
 // repoKey: the RP keys. Every key ends here, so none acts on the selected agent behind the view.
 func (m *model) repoKey(ks string) (bool, tea.Cmd) {
 	if m.tree != nil {
@@ -497,6 +516,14 @@ func (m *model) repoKey(ks string) (bool, tea.Cmd) {
 		}
 	case "b", "alt+enter":
 		m.repoGitHub()
+	case "i": // copy the folder's path, or its GitHub URL when there is no clone
+		switch {
+		case r == nil:
+		case r.Dir != "":
+			m.copyOut(r.Dir)
+		case r.Remote != "":
+			m.copyOut(r.ghURL(""))
+		}
 	case K.Reply:
 		if r != nil {
 			m.tree = &repoTree{repo: *r}
@@ -532,6 +559,20 @@ func (m *model) treeKey(ks string) tea.Cmd {
 		return t.up()
 	case "b", "alt+enter":
 		m.repoGitHub()
+	case "i": // copy the selected file's or folder's path (its GitHub URL on a repo without a clone)
+		switch {
+		case e == nil:
+		case e.URL != "":
+			m.copyOut(e.URL)
+		case t.repo.Dir == "" && e.Name == "..":
+			m.copyOut(t.repo.ghURL(t.rel))
+		case t.repo.Dir == "":
+			m.copyOut(t.repo.ghURL(filepath.Join(t.rel, e.Name)))
+		case e.Name == "..":
+			m.copyOut(path(""))
+		default:
+			m.copyOut(path(e.Name))
+		}
 	case K.Reply: // into a folder; a file opens
 		switch {
 		case e == nil:
@@ -618,7 +659,7 @@ func (m model) reposView(h int) []string {
 			}
 			details = append(details, strings.Join(d, " · "))
 		}
-		title := "REPOS   enter opens the folder · b on GitHub · " + K.Reply + " its folders" + gh
+		title := "REPOS   enter opens the folder · b on GitHub · i copy path · " + K.Reply + " its folders" + gh
 		empty := "no repos found in ~/bbq or ~"
 		return m.listBox(title, items, h, empty, details...)
 	}
@@ -694,7 +735,7 @@ func (m model) repoPanel(w, h int) []string {
 	case len(t.items) == 0:
 		rows = append(rows, row(in, s("empty folder", cDark)))
 	}
-	tail := []string{"", row(in, s("> ", cOrange), s(K.Reply+" opens · h up · enter in Finder · b GitHub · esc closes", cDark))}
+	tail := []string{"", row(in, s("> ", cOrange), s(K.Reply+" opens · h up · enter in Finder · b GitHub · i copy path · esc closes", cDark))}
 	avail := max(1, h-2-len(head)-len(tail))
 	first := 0
 	if t.sel >= avail {
