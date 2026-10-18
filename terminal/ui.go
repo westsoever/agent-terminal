@@ -543,6 +543,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case prDetailMsg:
 		m.prDet[msg.URL] = PRDetail(msg)
 		return m, nil
+	case prMergedMsg:
+		delete(m.prDet, msg.url)
+		if msg.err != "" {
+			m.setErr("not merged: " + msg.ref + ": " + msg.err)
+			return m, m.prDetailCmd(0)
+		}
+		m.setStatus("✓ merged " + msg.ref + " (" + msg.how + ")")
+		if i := m.pulls.index(msg.url); i >= 0 { // gone at once; GitHub's search can list it a little longer
+			m.pulls.Items = append(m.pulls.Items[:i:i], m.pulls.Items[i+1:]...)
+			if m.listSel >= len(m.pulls.Items) {
+				m.listSel = max(0, len(m.pulls.Items)-1)
+			}
+		}
+		return m, m.prDetailCmd(time.Minute)
 	case pcActedMsg:
 		if msg.err != "" {
 			m.setErr(msg.ref + ": " + msg.err)
@@ -1106,6 +1120,31 @@ func (m *model) prStart(pr *PullReq, comment string) tea.Cmd {
 	}
 }
 
+// prMergeNow merges pr right away with gh pr merge, no agent (D55); it refuses, and says why, when its panel shows
+// conflicts or checks that failed or still run. A panel that has not loaded is read again.
+func (m *model) prMergeNow(pr *PullReq) tea.Cmd {
+	if pr == nil {
+		return nil
+	}
+	p, d := *pr, m.prDet[pr.URL]
+	ref := fmt.Sprintf("%s#%d", p.Repo, p.Number)
+	if why := prMergeBlock(p, d); why != "" {
+		m.setErr("not merged: " + ref + ": " + why)
+		if d.HeadSHA == "" {
+			return m.prDetailCmd(0)
+		}
+		return nil
+	}
+	m.setStatus("merging " + ref + "…")
+	return func() tea.Msg {
+		how, err := prMerge(p, d.HeadSHA)
+		if err != nil {
+			return prMergedMsg{p.URL, ref, how, err.Error()}
+		}
+		return prMergedMsg{p.URL, ref, how, ""}
+	}
+}
+
 // pcDetailCmd reads the selected issue's side panel when it has none or it is older than stale.
 func (m *model) pcDetailCmd(stale time.Duration) tea.Cmd {
 	it := m.pcSelected()
@@ -1194,6 +1233,9 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 		}
 		if len(ks) == 1 && ks[0] >= '1' && ks[0] <= '9' { // the panel's quick comments; never an agent's answer here
 			if i := int(ks[0] - '1'); m.prOpen && i < len(prQuick) {
+				if prQuick[i].text == "" {
+					return true, m.prMergeNow(m.prSelected())
+				}
 				return true, m.prStart(m.prSelected(), prQuick[i].text)
 			}
 			if !m.prOpen {

@@ -880,9 +880,13 @@ func (m model) prPanel(w, h int) []string {
 		}
 	}
 	K := m.cfg.Keys
-	tail = append(tail, "", row(in, s("A NEW AGENT WORKS ON IT", cDark)))
+	tail = append(tail, "")
 	for i, q := range prQuick {
-		tail = append(tail, row(in, s(fmt.Sprint(i+1), cOrange), s(" "+q.label, cWhite)))
+		how := " · a new agent works on it"
+		if q.text == "" {
+			how = " · now, with gh pr merge (no agent)"
+		}
+		tail = append(tail, row(in, s(fmt.Sprint(i+1), cOrange), s(" "+q.label, cWhite), s(how, cDark)))
 	}
 	box := "─ your comment: the agent's task (enter starts it) "
 	tail = append(tail, "", row(in, s(box, cDark), s(strings.Repeat("─", max(0, in-width(box))), cDark)))
@@ -1194,7 +1198,7 @@ func (m model) helpLines() []string {
 		row2("FL", "the last 30 files the agents wrote about, newest first (enter opens)"),
 		row2("RP", "repos: the clones here and your GitHub repos, with the sync check's notes (work you can lose) first"),
 		row2("RC", "recaps: what each agent summed up while you were away (enter goes to it)"),
-		row2("PR", "pull requests: the open ones that involve you on GitHub, the last updated first; "+K.Reply+" opens one on the right (description, files, thread), "+K.Reply+" again comments: enter starts a new agent with your comment as its task; 1 review it, 2 merge it; enter opens it in the browser"),
+		row2("PR", "pull requests: the open ones that involve you on GitHub, the last updated first; "+K.Reply+" opens one on the right (description, files, thread), "+K.Reply+" again comments: enter starts a new agent with your comment as its task; 1 review it (a new agent), 2 merge it (at once with gh pr merge, no agent); enter opens it in the browser"),
 		row2("PO", "proposals: enter shows, a approve, x reject, z hide 7 days (the tab is orange while some are open)"),
 		row2("PC", "Paperclip issues and company approvals, the selected one's thread on the right: 1-9 answer what it asks (approve, decline, …), "+K.Reply+" comment, "+K.PCAgent+" / "+K.PCTerm+" hand the issue to a new background agent / Terminal session (@Name: a running one), enter opens it in the browser (orange while one needs you); the keys below"),
 		row2("NW [folder] [opts]", "start a background agent: write its first message, enter starts it (folder: a path, a folder in ~/bbq, an agent's name; none: the selected agent's). Opts, in any place: a model (opus sonnet haiku fable), an effort (low … max), a mode (plan auto bypass accept manual dontask), e.g. NW soii sonnet high"),
@@ -1205,6 +1209,7 @@ func (m model) helpLines() []string {
 		row2("HELP, QUIT", "this page (it scrolls: up/down, pgup/pgdown, home/end); stop kaching (ctrl+c also stops it)"),
 		"",
 		"## New on 2026-10-18",
+		row2("2 in PR", "merge it: kaching runs gh pr merge itself at once, pinned to the commit the panel shows (a merge commit where the repo allows one). It refuses when the panel shows conflicts or checks that failed or still run. It used to start an agent"),
 		row2("space + key", "space waits for its second key with no time limit: the status line lists the keys, esc cancels, a key bound to nothing ends it. It used to jump after half a second"),
 		row2(strings.Replace(k(K.Waiting), "space", "space space", 1), "the agent in INPUT that has waited the longest (it was space alone)"),
 		row2(K.Dismiss, "takes a waiting agent off the list, a background one too; it keeps running and comes back when it has something new. It does not close the session (STOP stops a background agent)"),

@@ -1,7 +1,7 @@
 package main
 
-// The PR view's side panel: one pull request read with gh pr view, and the hand-off of a comment on it to a new
-// background agent that works on it in the repo's local clone.
+// The PR view's side panel: one pull request read with gh pr view, the hand-off of a comment on it to a new
+// background agent that works on it in the repo's local clone, and the merge that kaching does itself.
 
 import (
 	"context"
@@ -22,6 +22,7 @@ type PRDetail struct {
 	Err       string
 	At        time.Time
 	Head      string // its branch
+	HeadSHA   string // its branch's last commit: a merge takes exactly this one
 	Base      string // the branch it merges into
 	Body      string
 	Add, Del  int
@@ -48,7 +49,7 @@ type prDetailMsg PRDetail
 // ghPRView reads one pull request; a variable so tests can hand back their own JSON.
 var ghPRView = func(ctx context.Context, url string) ([]byte, error) {
 	return exec.CommandContext(ctx, "gh", "pr", "view", url, "--json",
-		"body,headRefName,baseRefName,additions,deletions,files,mergeable,reviewDecision,statusCheckRollup,comments,reviews").Output()
+		"body,headRefName,headRefOid,baseRefName,additions,deletions,files,mergeable,reviewDecision,statusCheckRollup,comments,reviews").Output()
 }
 
 func loadPRDetail(url string) PRDetail {
@@ -70,6 +71,7 @@ func loadPRDetail(url string) PRDetail {
 	var raw struct {
 		Body      string `json:"body"`
 		Head      string `json:"headRefName"`
+		HeadSHA   string `json:"headRefOid"`
 		Base      string `json:"baseRefName"`
 		Additions int    `json:"additions"`
 		Deletions int    `json:"deletions"`
@@ -101,7 +103,7 @@ func loadPRDetail(url string) PRDetail {
 		d.Err = "gh pr view: " + err.Error()
 		return d
 	}
-	d.Head, d.Base, d.Body, d.Add, d.Del = raw.Head, raw.Base, raw.Body, raw.Additions, raw.Deletions
+	d.Head, d.HeadSHA, d.Base, d.Body, d.Add, d.Del = raw.Head, raw.HeadSHA, raw.Base, raw.Body, raw.Additions, raw.Deletions
 	d.Mergeable, d.Review = raw.Mergeable, raw.Review
 	for _, f := range raw.Files {
 		d.Files = append(d.Files, PRFile{f.Path, f.Additions, f.Deletions})
@@ -146,10 +148,68 @@ func loadPRDetail(url string) PRDetail {
 	return d
 }
 
-// prQuick: the panel's number keys, each a comment that starts an agent on the pull request at once.
+// prQuick: the panel's number keys. One with a text starts an agent on the pull request with it as the comment;
+// merge it is done by kaching itself at once with gh pr merge, no agent (D55).
 var prQuick = []struct{ label, text string }{
 	{"review it", "Review this pull request: does it do what it says, and is the code right? Tell me what you find."},
-	{"merge it", "Merge this pull request if it is ready: its checks pass and it has no conflicts. If it isn't, tell me what stops it."},
+	{"merge it", ""},
+}
+
+const prMergeTimeout = 30 * time.Second
+
+type prMergedMsg struct{ url, ref, how, err string }
+
+// prMergeBlock: why kaching does not merge pr as its panel d shows it, "" when it does. The rule the merge agent had:
+// checks pass and no conflicts.
+func prMergeBlock(pr PullReq, d PRDetail) string {
+	switch {
+	case d.At.IsZero() || d.Err != "" || d.HeadSHA == "":
+		return "its panel has not loaded"
+	case pr.Draft:
+		return "it is a draft"
+	case d.Mergeable == "CONFLICTING":
+		return "it has conflicts"
+	case strings.Contains(d.Checks, "failed") || strings.Contains(d.Checks, "running"):
+		return "checks: " + d.Checks
+	}
+	return ""
+}
+
+// ghMergeRun runs gh outside any local clone (a merge never touches a checkout here); a variable so tests can
+// record the calls.
+var ghMergeRun = func(ctx context.Context, args ...string) ([]byte, error) {
+	c := exec.CommandContext(ctx, "gh", args...)
+	c.Dir = os.TempDir()
+	return c.CombinedOutput()
+}
+
+// prMerge merges pr with gh pr merge, pinned to the commit its panel showed: a merge commit when the repo allows
+// one, else squash, else rebase. The branch is kept (the repo's own setting may still delete it).
+func prMerge(pr PullReq, sha string) (how string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), prMergeTimeout)
+	defer cancel()
+	how = "merge"
+	if out, err := ghMergeRun(ctx, "repo", "view", pr.Repo, "--json", "mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed"); err == nil {
+		var r struct{ MergeCommitAllowed, SquashMergeAllowed, RebaseMergeAllowed bool }
+		if json.Unmarshal(out, &r) == nil {
+			switch {
+			case r.MergeCommitAllowed:
+			case r.SquashMergeAllowed:
+				how = "squash"
+			case r.RebaseMergeAllowed:
+				how = "rebase"
+			}
+		}
+	}
+	out, err := ghMergeRun(ctx, "pr", "merge", pr.URL, "--"+how, "--match-head-commit", sha)
+	if err != nil {
+		msg := strings.Join(strings.Fields(string(out)), " ")
+		if msg == "" {
+			msg = err.Error()
+		}
+		return how, fmt.Errorf("gh pr merge: %s", msg)
+	}
+	return how, nil
 }
 
 // prPrompt: the first message of the agent that works on pr, with the owner's comment as its task.

@@ -107,7 +107,8 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | `RC` | `Enter` | Go to the desk, with that agent selected. |
 | `PR` | `Enter` | Open the pull request on GitHub in your browser. |
 | `PR` | `k` | Open the pull request on the right: its branch, size, checks, description, files and thread. Push `k` again to write a comment for a new agent. |
-| `PR` | `1`, `2` | With the pull request open: start a new agent that reviews it (`1`) or merges it when it is ready (`2`). |
+| `PR` | `1` | With the pull request open: start a new agent that reviews it. |
+| `PR` | `2` | With the pull request open: merge it now. Kaching runs `gh pr merge` itself; no agent starts. It does not merge when the pull request has conflicts or checks that failed or still run. |
 | `PR` | `↑`, `↓` | Scroll the pull request on the right. |
 | `PR` | `Esc` | Close the pull request on the right. Push `Esc` again to go to the desk. |
 | `PO` | `Enter` | Show the full proposal. Push `q` to close it. |
@@ -508,8 +509,14 @@ The folder must be trusted by Claude Code. If the command line shows `Workspace 
 2. Push `l` (down) or `j` (up) to select a pull request. Each line shows the repo and number, how long ago it changed, and its title. A draft shows `draft` after its number.
 3. Push `Enter` to open it on GitHub in your browser, or push `k` to read it on the right: the branch, how many lines and files it changes, conflicts and checks, the description, the files and the comments and reviews. Push `↑` and `↓` to scroll. Push `l` or `j` to go to the next pull request; the right side follows.
 4. To have an agent work on it, push `k` again. Write what it should do, for example `review this feature and check that it does what it says`. Push `Enter`. Kaching starts a new background agent in your local clone of the repo (in your home folder when there is none) with the pull request and your comment as its task. It works in its own worktree of the pull request's branch and reports back to you; it comments on GitHub only if you ask it to. It shows in the inbox like any other agent.
-5. For the usual tasks, push a number instead: `1` reviews it, `2` merges it when its checks pass and it has no conflicts.
-6. Push `Esc` to close the pull request on the right.
+5. To have an agent review it, push `1`.
+6. To merge it, push `2`. Kaching merges it at once with `gh pr merge`; no agent starts. The status line shows `merging…`, then `✓ merged` and the merge method, and the pull request goes off the list.
+   - Kaching merges the commit that the right side shows. If somebody pushed a new commit after that, GitHub refuses the merge.
+   - Kaching makes a merge commit. When the repo does not allow merge commits, it uses squash, then rebase.
+   - Kaching does not delete the branch. The repo's own setting can still delete it.
+   - Kaching does not merge a draft, a pull request with conflicts, or one with checks that failed or still run. It also does not merge when the right side has not loaded. The status line tells you why.
+   - When GitHub refuses the merge, for example because of a branch rule, the status line shows the message from `gh`.
+7. Push `Esc` to close the pull request on the right.
 
 Kaching reads the list with `gh`: every 30 seconds while the view is open, every 2 minutes for the number in the tab. If a read fails, the last list stays and the error shows at the top. If the error says you are not logged in, write `gh auth login` in a terminal.
 

@@ -2,6 +2,12 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D55 (2026-10-18): `2` in PR merges at once, with no agent
+
+**Decision (user):** "Currently, if I click K and then 2 to merge it, an agent gets sent off to merge it. I would want this to become just a terminal action where I merge it right away, without an agent merging it."
+
+**Built:** `2` in the PR panel runs `gh pr merge <url> --<method> --match-head-commit <sha>` from kaching itself, outside any local clone. The commit is the head that the panel read (`headRefOid`), so a push after that makes GitHub refuse. The method is a merge commit when the repo allows one, else squash, else rebase (`gh repo view`). The branch is kept. Kaching refuses before it calls gh, with the reason in the status line, when the panel has not loaded, the pull request is a draft, it has conflicts, or checks failed or still run (the same rule the merge agent had). A gh refusal shows in the status line. A merged pull request leaves the list at once. `1` still starts a review agent. No confirm step: the owner wants one key.
+
 ## D54 (2026-10-18): HELP scrolls and starts with what is new
 
 **Decision (user):** "Add them to the HELP section in the app so I have an overview of what I can now do with kaching".
