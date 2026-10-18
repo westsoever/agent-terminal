@@ -61,9 +61,10 @@ tables = "auto"
 
 # /NW starts a background agent. These are its defaults; words after /NW override them, e.g. /NW soii sonnet high.
 # Model: opus, sonnet, haiku, fable or a full name. Effort: low, medium, high, xhigh, max. Permission: plan, auto,
-# bypass, accept, manual, dontask. Empty: Claude Code's own default.
-nw_model = ""
-nw_effort = ""
+# bypass, accept, manual, dontask. Empty: Claude Code's own default (the "model" and "effortLevel" of
+# ~/.claude/settings.json). The same options start the agents that b and t hand a Paperclip issue to.
+nw_model = "claude-sonnet-5-5"
+nw_effort = "high"
 nw_permission = ""
 
 [keys]

@@ -329,3 +329,17 @@ func TestBackgroundModelCommandLive(t *testing.T) {
 	}
 	t.Fatalf("still on %q", readLast(a.Transcript, a.Cwd).Model)
 }
+
+// A new keys.toml starts the agents kaching starts (NW, b and t in PC) on Sonnet 5.5 at high effort.
+func TestNWDefaultsSonnetHigh(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	cfg, _, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := parseNW("", cfg)
+	want := []string{"--bg", "--model", "claude-sonnet-5-5", "--effort", "high", "--", "go"}
+	if got := o.args("go"); strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("args %q, want %q", got, want)
+	}
+}

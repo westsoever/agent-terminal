@@ -1182,7 +1182,7 @@ func (m model) helpView(h int) []string {
 		row2(K.Open+" then a-i", "open that file"),
 		row2(K.Goto, "show the agent's own Terminal window, where it is; a background agent (◦) gets a new window attached to it"),
 		row2(K.Here, "bring its window to monitor 1 and into focus, to type in it; a prompt sends it back"),
-		row2(K.Dismiss, "remove a waiting agent from the list, no answer"),
+		row2(K.Dismiss, "remove a waiting agent from the list, no answer; it comes back when it has something new"),
 		row2(K.Refresh, "read all data again"),
 		"",
 		"## Writing a message",

@@ -368,7 +368,7 @@ Use this procedure when an agent waits but you do not want to answer now.
 2. Push `x`.
 3. Make sure that the command line shows `Dismissed <name>`.
 
-The agent window goes back to its position on the second display. The agent does not get a message.
+The agent leaves the list. A background agent, which has no window, leaves it too. If the agent has a Terminal window that came over to the main display, the window goes back to its position on the second display. The agent does not get a message. When the agent finishes another turn or asks something new, it comes back to the list.
 
 ### 6.11 Look at all agents together
 
@@ -640,7 +640,7 @@ Kaching draws the markdown tables in an agent's messages as tables.
 ### 7.6 Change how `NW` starts agents and the quick approve key
 
 1. Open `~/.agent/terminal/keys.toml`.
-2. Above `[keys]`, set `nw_model`, `nw_effort` and `nw_permission`. Words that you write after `NW` have priority. An empty value leaves the choice to Claude Code.
+2. Above `[keys]`, set `nw_model`, `nw_effort` and `nw_permission`. A new `keys.toml` has `claude-sonnet-5-5` and `high`. Words that you write after `NW` have priority. An empty value leaves the choice to Claude Code, which then uses the `model` and `effortLevel` of `~/.claude/settings.json`. These options also start the agents that `b` and `t` hand a Paperclip issue to.
 3. In `[keys]`, set `quick_approve` to change the key of quick approve (`a`). Set `pc_agent` (`b`) and `pc_terminal` (`t`) to change the keys that hand a Paperclip issue to an agent.
 4. Save the file.
 

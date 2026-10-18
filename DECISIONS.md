@@ -2,6 +2,28 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D52 (2026-10-18): PC hands an issue to an agent with the owner's permissions (b, t, @Name)
+
+**Decision (user):** the request itself is not in the logs I could search. The owner tried it on 2026-10-18: "pressing b has now moved it to the inbox and is working on it".
+
+**Built (0cd5b50):** in the PC view `b` hands the selected issue to a new background agent, `t` to a new session in a Terminal window, and a box text that starts with `@Name` to a session that already runs. The agent gets a short first message and a briefing file in `~/.agent/terminal/handoff/` (description, thread, the request that waits, the folder from the issue's `repo:` line, and how to report through Paperclip's local API: one comment, status `in_review`, never `done`). It starts with the model, effort and mode of `/NW` (D51).
+
+## D51 (2026-10-18): agents kaching starts run Sonnet 5.5 at high effort
+
+**Decision (user):** "which model are the sessions running when i activate them with agent or background? - for me it shows opus but the standard should be sonnet 5.5 high".
+
+**Why:** `nw_model` and `nw_effort` in keys.toml were empty, so every agent started from kaching (`/NW`, the PR comment, `b` and `t` in PC) took Claude Code's own default, which is `opus[1m]` at `xhigh` from `~/.claude/settings.json`.
+
+**Built:** a new keys.toml has `nw_model = "claude-sonnet-5-5"` and `nw_effort = "high"`; the owner's keys.toml has the same two lines. Words after `/NW` still win, and an empty value still leaves it to Claude Code. `~/.claude/settings.json` is untouched, so sessions the owner starts by hand stay on Opus.
+
+## D50 (2026-10-18): x takes a waiting agent out of the queue, background agents too
+
+**Decision (user):** "this session is still sitting at INPUT, even though it has been completed (pressing x should actually remove it from this view - so please fix that)".
+
+**Why:** `x` only called `queue.sh dismiss`, which forgets the window of a Terminal tab. A background agent has no tab, so it answered `Unknown session` and nothing changed; and for a tab, the row stayed anyway because the sections come from the agent's state, not from the window queue.
+
+**Built:** `x` writes the session and the time to `~/.agent/terminal/dismissed.json` and takes the row out at once. The agent stays out while it is waiting and its last event is not newer than the dismissal; when it works again or finishes another turn it is listed again. A Terminal tab also leaves the window queue as before. Not yet changed: why the agent that prompted this sat in INPUT. Its last turn said nothing was left, but a bullet in it read "It's waiting for you to review it", which `bin/ask-check.sh` took for a request (D41).
+
 ## D49 (2026-10-18): `i` in RP copies a path
 
 **Decision (user):** "One hotkey to create is 'i' to copy the file path" (after trying the PR and RP views).

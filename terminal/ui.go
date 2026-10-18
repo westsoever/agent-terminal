@@ -780,14 +780,18 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setErr("only a waiting agent can be dismissed")
 			return m, nil
 		}
-		sid := a.SID
+		sid, tty, bg := a.SID, a.TTY, a.Bg
+		txt := "Dismissed " + a.Name + ": it comes back when it has something new"
+		dismissAgent(*a, time.Now())
+		m.dropAgent(sid)
+		m.setStatus(txt)
+		if bg || tty == "" { // no Terminal tab, so nothing in the window queue
+			return m, nil
+		}
+		// a Terminal tab leaves the window queue too: a window it brought over goes back to its cell
 		return m, func() tea.Msg {
-			out, err := exec.Command(queueBin(), "dismiss", sid).CombinedOutput()
-			res := strings.TrimSpace(string(out))
-			if err != nil || strings.HasPrefix(res, "Unknown") {
-				return sentMsg{"", a.Name, "dismiss", "error: " + res}
-			}
-			return statusMsg(res)
+			_ = exec.Command(queueBin(), "dismiss", sid).Run()
+			return statusMsg(txt)
 		}
 	case ks == K.Zoom && m.view == vWall:
 		m.zoom = !m.zoom

@@ -116,6 +116,7 @@ func hidden(cs claudeSession) bool {
 // loadAgents builds the agent list. tabs maps the ttys of Terminal.app tabs to their window and tab (nil when
 // not known yet; then every agent with a tty counts as one).
 func loadAgents(tabs map[string]tabPos, groups [][]string) []Agent {
+	dismissed := loadDismissals()
 	dir := filepath.Join(os.Getenv("HOME"), ".claude", "sessions")
 	files, _ := filepath.Glob(filepath.Join(dir, "*.json"))
 	var out []Agent
@@ -157,6 +158,9 @@ func loadAgents(tabs map[string]tabPos, groups [][]string) []Agent {
 			a.Name = filepath.Base(a.Cwd) + " " + short(a.SID)
 		}
 		a.Transcript = findTranscript(a.Transcript, a.Cwd, a.SID)
+		if dismissed.hides(a) { // x: out of the queue until it has something new (D50)
+			continue
+		}
 		out = append(out, a)
 		pids = append(pids, strconv.Itoa(cs.PID))
 	}

@@ -205,7 +205,7 @@ func TestPCHandBackground(t *testing.T) {
 	log := filepath.Join(bin, "args.txt")
 	os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+log+"\necho 'backgrounded · cafe1234 · x'\n"), 0o755)
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
-	m.cfg.NWModel, m.cfg.NWPerm = "sonnet", "plan"
+	m.cfg.NWModel, m.cfg.NWEffort, m.cfg.NWPerm = "sonnet", "", "plan"
 	m.mode = mTyping
 	m.ed.open("pcgo:i14@b", "", 80)
 	m.ed.ta.SetValue("review only, change nothing")
