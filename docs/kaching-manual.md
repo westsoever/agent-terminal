@@ -123,6 +123,8 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | `PC` | `a` | Give the recommended answer to every question and send. Kaching refuses if one question has none. |
 | `PC` | `n`, `p` | Show the next or previous page of a long list. |
 | `PC` | `↑`, `↓` | Scroll the row on the right: its description, its thread and the full request. |
+| `PC` | `b` | Hand the issue to a new background agent. Refer to section 6.14. |
+| `PC` | `t` | Hand the issue to a new session in a Terminal window. |
 | `PC` | `Enter` | Open the row in Paperclip in your browser. |
 | `PC` | `k` | Write a comment on the row. `Enter` sends it. |
 | `RP` | `Enter` | Open the folder of the repo. A repo without a local folder asks `No local folder. Open it on GitHub?`: push `Enter` or `y` to open it, any other key to stop. |
@@ -429,6 +431,19 @@ Only a person can approve a proposal. An agent cannot approve it.
 7. To write a comment, push `k`. Write the comment. Push `Enter`. This also works on an approval.
 8. To open the row in your browser, push `Enter`.
 
+**Hand an issue to an agent with your permissions.** The agents of Paperclip have restricted permissions. Some work they cannot finish: for example, set a status, or write outside their folder. A session that you start has your permissions. Use it to look over the work and to finish it.
+
+1. Select the issue.
+2. Push `b` for a new background agent. Push `t` for a new session in a Terminal window.
+3. The message box opens. Write the task, or leave the box empty. An empty box sends this task: look over the issue and finish what the Paperclip agents could not.
+4. To give the issue to a session that already runs, write `@` and its name at the start of the box. Example: `@miso check the pull request`. The session gets the issue and the text after the name.
+5. Push `Enter`.
+
+Kaching writes a briefing file for the agent in `~/.agent/terminal/handoff/`. It has the description of the issue, its thread, the request that waits for you, and the folder of the work. The folder is the one that the `repo:` line of the issue names, in `~/bbq` or in your home folder. The agent gets a short first message that names the file.
+
+The briefing tells the agent how to report. It writes one comment on the issue and sets the status to `in review`. It never sets `done`. It does not answer the requests of the issue, and it does not answer approvals: those are yours. It uses Paperclip's API on this Mac (`http://localhost:3100`), which needs no login.
+
+A background agent shows in the agent list with `◦`, and a session in Terminal shows as a Terminal agent. Their names start with `paperclip` and the number of the issue. If the box stays open, the command line says why: for example, no session has that name.
 **Company approval.** The panel shows the payload: for example the name, the role and the monthly budget of an agent to hire. It also shows the issue that the approval belongs to.
 
 - Push `1` to approve or `2` to reject. Kaching sends the answer at once.
@@ -624,7 +639,7 @@ Kaching draws the markdown tables in an agent's messages as tables.
 
 1. Open `~/.agent/terminal/keys.toml`.
 2. Above `[keys]`, set `nw_model`, `nw_effort` and `nw_permission`. Words that you write after `NW` have priority. An empty value leaves the choice to Claude Code.
-3. In `[keys]`, set `quick_approve` to change the key of quick approve (`a`).
+3. In `[keys]`, set `quick_approve` to change the key of quick approve (`a`). Set `pc_agent` (`b`) and `pc_terminal` (`t`) to change the keys that hand a Paperclip issue to an agent.
 4. Save the file.
 
 ## 8. Kaching and the Terminal windows
@@ -678,6 +693,7 @@ To read the screen of a background agent, Kaching does not attach. It runs `clau
 | `~/.agent/terminal/keys.toml` | Your keys and fixed messages. |
 | `~/.agent/terminal/open` | Tells the monitor queue that Kaching operates and which agent is selected. Kaching removes it when it stops. |
 | `~/.agent/terminal/send.js` | The script that sends text to Terminal windows. Kaching writes it when it starts. |
+| `~/.agent/terminal/handoff/` | The briefing files for the agents that you hand a Paperclip issue to. |
 | `~/.agent/terminal/files.json` | The last 30 files that the agents wrote about (the `FL` view). |
 | `~/.claude/projects/` | The conversations of all sessions. The `FIND` view reads them. It never changes them. |
 | `kaching-find` in the temporary folder of your Mac | An empty folder. The `AI` step of `FIND` runs Claude there, so that Claude finds no project settings. |

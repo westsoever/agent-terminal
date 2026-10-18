@@ -160,6 +160,7 @@ var bgStartedRe = regexp.MustCompile(`backgrounded\s+·\s+([0-9a-f]+)`)
 // (the claude flags --model, --effort and --permission-mode). Unset ones are left to Claude Code's own defaults.
 type nwOpts struct {
 	Dir, Model, Effort, Perm string
+	Name                     string // the session's name in the list ("" for Claude Code's own)
 }
 
 var (
@@ -211,6 +212,9 @@ func (o nwOpts) summary() string {
 // args are the claude flags for the options; the prompt follows after "--", so it may start with "/" or "-".
 func (o nwOpts) args(prompt string) []string {
 	a := []string{"--bg"}
+	if o.Name != "" {
+		a = append(a, "-n", o.Name)
+	}
 	if o.Model != "" {
 		a = append(a, "--model", o.Model)
 	}

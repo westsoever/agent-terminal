@@ -899,6 +899,15 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case edSend:
 		text := strings.TrimRight(m.ed.ta.Value(), " \n")
 		text = strings.TrimLeft(text, " \n")
+		if id, kind, ok := pcHandTarget(m.ed.target); ok { // an empty text hands the issue over with the default task
+			cmd, keep := m.pcHandSend(id, kind, text)
+			if keep {
+				return m, nil
+			}
+			m.ed.sent()
+			m.mode = mKeys
+			return m, cmd
+		}
 		if text == "" {
 			return m, nil
 		}
@@ -1171,6 +1180,12 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 		n = len(m.pc.Items)
 		if m.pcScrollKey(ks) {
 			return true, nil
+		}
+		if (ks == K.PCAgent || ks == K.PCTerm) && m.pcSelected() != nil { // hand the issue to an agent with your permissions
+			if ks == K.PCTerm {
+				return true, m.pcHandOpen("t")
+			}
+			return true, m.pcHandOpen("b")
 		}
 		if cmd, ok := m.pcAskKey(ks); ok { // a request with a form: ticks, several questions, verdicts (pcform.go)
 			return true, cmd

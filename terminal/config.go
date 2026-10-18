@@ -34,6 +34,8 @@ type Keys struct {
 	Older   string `toml:"scroll_up"`
 	Newer   string `toml:"scroll_down"`
 	Quick   string `toml:"quick_approve"`
+	PCAgent string `toml:"pc_agent"`    // PC view: hand the issue to a new background agent
+	PCTerm  string `toml:"pc_terminal"` // PC view: hand the issue to a new Terminal session
 }
 
 type Config struct {
@@ -78,6 +80,8 @@ zoom = "z"            # in the wall: one tile full screen
 dismiss = "x"         # take a waiting agent out of the queue without answering
 refresh = "R"         # re-read everything now
 quick_approve = "a"   # an agent that asks questions: take every recommended answer and submit
+pc_agent = "b"        # PC view: hand the selected issue to a new background agent (it has your permissions)
+pc_terminal = "t"     # PC view: hand it to a new session in a Terminal window
 scroll_up = "up"      # the agent's conversation: 3 lines back (pgup a page, home the start)
 scroll_down = "down"  # 3 lines on (pgdown a page, end the newest)
 
@@ -173,6 +177,8 @@ func loadConfig() (Config, time.Time, error) {
 	fill(&c.Keys.Dismiss, def.Keys.Dismiss)
 	fill(&c.Keys.Refresh, def.Keys.Refresh)
 	fill(&c.Keys.Quick, def.Keys.Quick)
+	fill(&c.Keys.PCAgent, def.Keys.PCAgent)
+	fill(&c.Keys.PCTerm, def.Keys.PCTerm)
 	for i := range c.Replies {
 		c.Replies[i].Key = strings.TrimSpace(c.Replies[i].Key)
 		if c.Replies[i].Label == "" {
