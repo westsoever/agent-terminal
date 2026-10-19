@@ -165,7 +165,7 @@ func newModel() model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tick(), loadTTYs, tea.SetWindowTitle("agterm"))
+	return tea.Batch(tick(), loadTTYs, tea.SetWindowTitle("AgentTerminal"))
 }
 
 func tick() tea.Cmd {
