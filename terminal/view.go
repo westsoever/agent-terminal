@@ -731,17 +731,64 @@ func (m model) filesView(h int) []string {
 	return m.listBox(fmt.Sprintf("FILES AGENTS MENTIONED   the last %d, newest first", histMax), items, h, "no files mentioned yet")
 }
 
-// recapsView: every agent's latest recap, newest first; the selected one shows it in full.
+// recapsView: the agents with a recap, newest recap first, by name on the left; the selected one's recap on the
+// right, in full.
 func (m model) recapsView(h int) []string {
-	var items [][]seg
-	var details []string
-	for _, r := range m.recaps() {
-		items = append(items, []seg{s(padTo(r.agent.Name, 18), cWhite), s(" "+padTo(age(r.last.RecapAt), 4), cDark),
-			s(" "+r.last.Recap, cGrey)})
-		details = append(details, r.last.Recap)
+	rs := m.recaps()
+	if len(rs) == 0 {
+		return m.listBox("RECAPS", nil, h, "no recaps yet: Claude Code writes one when you come back to a session after a while")
 	}
-	return m.listBox("RECAPS   what Claude Code summed up while you were away · enter goes to the agent", items, h,
-		"no recaps yet: Claude Code writes one when you come back to a session after a while", details...)
+	lw, rw := recapWidths(m.w)
+	left, right := m.recapList(rs, lw, h), m.recapPanel(rs[min(m.listSel, len(rs)-1)], rw, h)
+	out := make([]string, h)
+	for i := range out {
+		out[i] = " " + left[i] + " " + right[i]
+	}
+	return out
+}
+
+// recapWidths: the RC view's name list and recap panel outer widths for a screen w wide.
+func recapWidths(w int) (lw, rw int) {
+	lw = min(max(w*30/100, 30), 44)
+	return lw, w - lw - 2
+}
+
+// recapList: the RC view's list of names, each with how long ago its recap was written.
+func (m model) recapList(rs []agentRecap, w, h int) []string {
+	in := w - 2
+	var body []string
+	first := 0
+	if vis := h - 2; m.listSel >= vis {
+		first = m.listSel - vis + 1
+	}
+	for i := first; i < len(rs); i++ {
+		a := " " + age(rs[i].last.RecapAt) + " "
+		name := padTo(rs[i].agent.Name, max(1, in-3-width(a)))
+		if i == m.listSel {
+			body = append(body, row(in, s(padTo(" > "+name+a, in), cSel)))
+			continue
+		}
+		body = append(body, row(in, s("   ", cPlain), s(name, cWhite), s(a, cDark)))
+	}
+	return box(w, h, []seg{s("RECAPS", cGrey)}, cDark, body)
+}
+
+// recapPanel: the selected agent's recap in full, with its folder; enter goes to the agent.
+func (m model) recapPanel(r agentRecap, w, h int) []string {
+	in := w - 4
+	title := []seg{s(r.agent.Name, cWhite), s(" · "+age(r.last.RecapAt)+" ago", cDark)}
+	msg := []string{row(in, s(tildify(r.agent.Cwd), cDark)), ""}
+	for _, l := range wrap(r.last.Recap, in) {
+		msg = append(msg, row(in, s(l, cGrey)))
+	}
+	K := m.cfg.Keys
+	scroll := K.Older + "/" + K.Newer
+	if K.Older == "up" && K.Newer == "down" {
+		scroll = "↑↓"
+	}
+	tail := []string{"", row(in, s("enter goes to the agent · "+scroll+" scroll · esc desk", cDark))}
+	id := r.agent.SID + "@" + r.last.RecapAt.String() // another agent, or a new recap, starts at the top
+	return boxR(w, h, title, nil, cDark, m.panelBody(m.rcScroll, id, true, msg, tail, in, h))
 }
 
 func (m model) proposalsView(h int) []string {
@@ -1200,7 +1247,7 @@ func (m model) helpLines() []string {
 		row2("IN", "inbox (the desk): all agents and the selected agent"),
 		row2("FL", "the last 30 files the agents wrote about, newest first (enter opens)"),
 		row2("RP", "repos: the clones here and your GitHub repos, with the sync check's notes (work you can lose) first"),
-		row2("RC", "recaps: what each agent summed up while you were away (enter goes to it)"),
+		row2("RC", "recaps: the agents by name on the left, the selected one's recap in full on the right (enter goes to the agent)"),
 		row2("PR", "pull requests: the open ones that involve you on GitHub, the last updated first; "+K.Reply+" opens one on the right (description, files, thread), "+K.Reply+" again comments: enter starts a new agent with your comment as its task; 1 review it (a new agent), 2 merge it (at once with gh pr merge, no agent), 3 close it (at once with gh pr close, no agent); enter opens it in the browser"),
 		row2("PO", "proposals: enter shows, a approve, x reject, z hide 7 days (the tab is orange while some are open)"),
 		row2("PC", "Paperclip issues and company approvals, the selected one's thread on the right: 1-9 answer what it asks (approve, decline, …), "+K.Reply+" comment, "+K.PCAgent+" / "+K.PCTerm+" hand the issue to a new background agent / Terminal session (@Name: a running one), enter opens it in the browser (orange while one needs you); the keys below"),
@@ -1352,7 +1399,13 @@ func (m model) footer() []string {
 			add(&r1, "esc", "desk")
 			add(&r1, K.Command, "command")
 		}
-	case vFiles, vProposals, vRecaps:
+	case vRecaps:
+		add(&r1, K.Next+" "+K.Prev, "agent")
+		add(&r1, key(K.Older)+key(K.Newer), "scroll")
+		add(&r1, "enter", "go to it")
+		add(&r1, "esc", "desk")
+		add(&r1, K.Command, "command")
+	case vFiles, vProposals:
 		add(&r1, K.Next+" "+K.Prev, "move")
 		add(&r1, "enter", "open")
 		add(&r1, "esc", "desk")

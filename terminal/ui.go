@@ -80,6 +80,7 @@ type model struct {
 	prOpen     bool                // the PR view's side panel is open (k)
 	prDet      map[string]PRDetail // pull request url -> its side panel
 	prScroll   *chatScroll         // how far the PR side panel is scrolled back
+	rcScroll   *chatScroll         // how far the RC view's recap panel is scrolled back
 	badgeAt    time.Time           // when the proposals and Paperclip were last read for the tab bar
 	pendingJob string              // a background agent /NW started: selected once it shows in the list
 	props      []string
@@ -143,7 +144,7 @@ type execDone struct{ err error }
 
 func newModel() model {
 	cfg, ct, err := loadConfig()
-	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, pcForms: &pcFormSet{}, prDet: map[string]PRDetail{}, prScroll: &chatScroll{}, askProg: map[string]*askProg{}, bgScr: map[string]Prompt{}}
+	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, pcForms: &pcFormSet{}, prDet: map[string]PRDetail{}, prScroll: &chatScroll{}, rcScroll: &chatScroll{}, askProg: map[string]*askProg{}, bgScr: map[string]Prompt{}}
 	m.ed.drafts = loadDrafts()
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
@@ -1222,7 +1223,7 @@ func (m *model) pcAnswer(n int) tea.Cmd {
 // pcScrollKey scrolls the PC side panel for the scroll keys; false for any other key.
 func (m *model) pcScrollKey(ks string) bool { return m.panelScroll(m.pcScroll, ks) }
 
-// panelScroll scrolls a side panel (PC, PR) for the scroll keys; false for any other key.
+// panelScroll scrolls a side panel (PC, PR, RC) for the scroll keys; false for any other key.
 func (m *model) panelScroll(c *chatScroll, ks string) bool {
 	if c == nil {
 		return false
@@ -1287,6 +1288,9 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 		}
 	case vRecaps:
 		n = len(m.recaps())
+		if m.panelScroll(m.rcScroll, ks) {
+			return true, nil
+		}
 	case vPaperclip:
 		n = len(m.pc.Items)
 		if m.pcScrollKey(ks) {

@@ -13,7 +13,7 @@ Push `/`, write the code, then push `Enter`.
 | `IN` | Inbox (the desk) | All agents and the selected agent. This is the start view. |
 | `FL` | Files | The last 30 files that the agents wrote about, newest first. Files of agents that stopped stay in the list. |
 | `RP` | Repos | The git clones on this Mac and your GitHub repos (`westsoever`, `technobbq`) that have no clone. Repos with work that you can lose (the git sync check) are at the top. |
-| `RC` | Recaps | The last recap of each agent. Claude Code writes a recap when you come back to a session after some time. The desk also shows the recap of the selected agent above its last message. |
+| `RC` | Recaps | The last recap of each agent. The names are on the left, newest recap first; the recap of the selected agent shows in full in a box on the right. Claude Code writes a recap when you come back to a session after some time. The desk also shows the recap of the selected agent above its last message. |
 | `PR` | Pull requests | The open GitHub pull requests that involve you (yours, assigned to you, that ask your review, or where you commented or were mentioned), the last updated first. The number in the tab is how many. |
 | `PO` | Proposals | The changes that the learner proposes. The tab is orange when proposals are open. |
 | `PC` | Paperclip | Paperclip issues and company approvals that need you, and issues in progress. The selected row shows on the right, with what it asks you. The tab is orange when a row needs you. |
@@ -104,6 +104,8 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 |---|---|---|
 | All lists | `l`, `j` | Select the next or previous line. |
 | `FL` | `Enter` | Open the selected file. |
+| `RC` | `l`, `j` | Select the next or previous agent. Its recap shows on the right. |
+| `RC` | `Up`, `Down`, `PgUp`, `PgDn`, `Home`, `End` | Scroll a long recap. |
 | `RC` | `Enter` | Go to the desk, with that agent selected. |
 | `PR` | `Enter` | Open the pull request on GitHub in your browser. |
 | `PR` | `k` | Open the pull request on the right: its branch, size, checks, description, files and thread. Push `k` again to write a comment for a new agent. |
