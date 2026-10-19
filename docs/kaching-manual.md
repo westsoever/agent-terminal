@@ -528,7 +528,11 @@ When Kaching cannot answer a request (a connection request, or a kind that a lat
 A background agent is a Claude Code session without a window. It does the work while you do other work.
 
 1. Select an agent that works in the folder that you want, or know the folder.
-2. Push `/`, write `NW`, push `Enter`. To use another folder, write it after `NW`: a path (`NW ~/bbq/soii`), a folder in `~/bbq` (`NW soii`), or the start of an agent name (`NW miso`).
+2. Push `/`, write `NW`, push `Enter`. Without a folder, the agent starts in the folder of the selected agent. If no agent is selected, Kaching shows an error: it never uses the home folder on its own (write `NW ~` for that). To use another folder, write it after `NW`:
+   - a path: `NW ~/bbq/soii`, or `NW ./sub` and `NW ..` from the folder of the selected agent;
+   - a folder in `~/bbq`: `NW soii`;
+   - the start of a name: `NW mis` fits the folders in `~/bbq` and the agents. If it fits more than one folder, Kaching lists them: write more of the name. An agent in a worktree stands for the main folder of its repo.
+   The message box shows the folder, its branch, and how Kaching found it (`folder: the selected agent miso`). An orange `⚠` line warns when the folder is the home folder, is not a git repo, or is a worktree. Press `Esc` and write `NW` again if the folder is wrong.
 3. To choose the model, the effort or the permission mode, write them after `NW`, in any place: a model (`opus`, `sonnet`, `haiku`, `fable`, or a full name), an effort (`low`, `medium`, `high`, `xhigh`, `max`), a mode (`plan`, `auto`, `bypass`, `accept`, `manual`, `dontask`). Example: `NW soii sonnet high`. The defaults are `nw_model`, `nw_effort` and `nw_permission` in `keys.toml` (section 7.6).
 4. The message box opens with `new background agent in <folder>` and the options. Write the task.
 5. Push `Enter`. The command line shows `✓ background agent <id> started`. Kaching selects the new agent when it shows in the list.

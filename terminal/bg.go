@@ -269,37 +269,3 @@ func firstLine(t string) string {
 	t, _, _ = strings.Cut(t, "\n")
 	return t
 }
-
-// resolveDir: the folder for /NW. Empty: the selected agent's folder, else home. A path (/..., ~/...), a folder
-// in ~/bbq, or the folder of an agent whose name starts with arg. ” when none is found.
-func (m *model) resolveDir(arg string) string {
-	home := os.Getenv("HOME")
-	arg = strings.TrimSpace(arg)
-	if arg == "" {
-		if a := m.sel(); a != nil && dirExists(a.Cwd) {
-			return a.Cwd
-		}
-		return home
-	}
-	switch {
-	case arg == "~":
-		return home
-	case strings.HasPrefix(arg, "~/"):
-		arg = filepath.Join(home, arg[2:])
-	}
-	if filepath.IsAbs(arg) {
-		if dirExists(arg) {
-			return filepath.Clean(arg)
-		}
-		return ""
-	}
-	if p := filepath.Join(home, "bbq", arg); dirExists(p) {
-		return p
-	}
-	for _, a := range m.agents {
-		if strings.HasPrefix(strings.ToLower(a.Name), strings.ToLower(arg)) && dirExists(a.Cwd) {
-			return a.Cwd
-		}
-	}
-	return ""
-}
