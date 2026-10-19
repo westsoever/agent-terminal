@@ -83,7 +83,7 @@ func (m model) tabBar() []string {
 	// a view with work that waits for the owner is filled orange: open proposals, Paperclip issues that need you
 	alert := map[view]bool{vProposals: len(m.props) > 0, vPaperclip: pcNeeds > 0}
 	var cells []cell
-	cells = append(cells, cell{[]seg{s("agterm", cWhite)}, false})
+	cells = append(cells, cell{[]seg{s("AgentTerminal", cWhite)}, false})
 	for _, t := range tabs {
 		active := m.view == t.v || (t.v == vDesk && m.view == vWall) // the wall (W) is the inbox as tiles
 		lbl := cGrey
@@ -126,6 +126,10 @@ func (m model) tabBar() []string {
 		}
 		if tw > cw-2 { // still too narrow: code only
 			c.segs = c.segs[:1]
+			tw = segsWidth(c.segs)
+		}
+		if i == 0 && tw > cw-2 { // the name cell, too narrow for the full name
+			c.segs = []seg{s("AT", cWhite)}
 			tw = segsWidth(c.segs)
 		}
 		l := (cw - tw) / 2

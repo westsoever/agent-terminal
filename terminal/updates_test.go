@@ -122,6 +122,24 @@ func TestTabAlerts(t *testing.T) {
 	}
 }
 
+// The first cell of the tab bar says AgentTerminal, or AT when the cell is too narrow; the row keeps its width.
+func TestTabBarName(t *testing.T) {
+	m := newModel()
+	for _, c := range []struct {
+		w    int
+		want string
+	}{{160, "│ AgentTerminal "}, {120, "│ AT "}, {80, "│ AT "}} {
+		m.w = c.w
+		bar := escRe.ReplaceAllString(m.tabBar()[1], "")
+		if !strings.Contains(strings.Join(strings.Fields(bar), " "), strings.Join(strings.Fields(c.want), " ")) {
+			t.Fatalf("width %d: want %q in %q", c.w, c.want, bar)
+		}
+		if n := lipgloss.Width(bar); n != c.w {
+			t.Fatalf("width %d: the row is %d wide: %q", c.w, n, bar)
+		}
+	}
+}
+
 // Background sessions (claude --bg) are agents agterm can write to; unclaimed spares are not listed.
 func TestLoadAgentsBackground(t *testing.T) {
 	home := t.TempDir()
