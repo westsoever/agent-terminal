@@ -43,6 +43,8 @@ func (m model) View() string {
 		body = m.paperclipView(bodyH)
 	case vFind:
 		body = m.findView(bodyH)
+	case vTheme:
+		body = m.themeView(bodyH)
 	case vHelp:
 		body = m.helpView(bodyH)
 	}
@@ -204,6 +206,9 @@ func (m model) commandLine() string {
 		}
 		if m.view == vFind {
 			code = "FIND"
+		}
+		if m.view == vTheme {
+			code = "THEME"
 		}
 		left = []seg{s(" > ", cOrange), s(code, cWhite), s(" <GO>", cGrey)}
 		if m.leader {
@@ -1395,6 +1400,9 @@ func (m model) helpLines() []string {
 		row2("NW", "never guesses its folder: with none written it uses the selected agent's (an error when none is selected, NW ~ for home)\n"+
 			"NW ./x and NW .. start at that folder; NW mis fits ~/bbq and the agents, and lists the folders if it fits several\n"+
 			"the box shows the folder, its branch and where it came from; an orange ⚠ marks home, a non-repo and a worktree"),
+		row2("THEME", "the accent color, now orange: pick one of 8 (orange amber green cyan blue violet magenta red)\n"+
+			k(K.Next)+" / "+k(K.Prev)+" or 1-8 move, the whole screen shows the color under the cursor · enter saves it to keys.toml · esc keeps the old one\n"+
+			"THEME green sets one at once"),
 		row2("RC", "recaps in full: the agents by name on the left, the selected one's recap on the right"),
 		row2("links", "cmd+click opens a link in the text"),
 		row2("b, w in RP", "b: the repo's branches, local and on origin only, each against the default branch (+ahead −behind, merged), its upstream (↑ to push, not pushed, gone) and its worktree (⌂)\n"+
@@ -1517,6 +1525,11 @@ func (m model) footer() []string {
 		add(&r1, K.PCTerm, "Terminal")
 		add(&r1, "enter", "in browser")
 		add(&r1, "esc", "desk")
+	case vTheme:
+		add(&r1, K.Next+" "+K.Prev, "color")
+		add(&r1, "1-8", "jump")
+		add(&r1, "enter", "save")
+		add(&r1, "esc", "cancel")
 	case vFind:
 		for _, h := range m.findHints() {
 			add(&r1, h[0], h[1])

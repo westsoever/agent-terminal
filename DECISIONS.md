@@ -2,6 +2,20 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D63 (2026-10-19): `THEME` picks the accent color from 8; the choice is the `theme` line of keys.toml
+
+**Decision (user):** "add a /THEME command to the kaching terminal that lets the user pick one of 8 accent colors … The current orange stays the default."
+
+**Why:** the one orange was fixed in the code. The terminal.shop palette (grey, white, one accent) stays; only the accent changes.
+
+**Built (`theme.go`, so the edits to other files stay small):**
+- `cOrange` and `cSel` in `render.go` were already the only places that name the accent, and they are variables: a theme reassigns them, so the ~80 drawing sites did not change. The reply box takes the color through `editor.restyle()`.
+- 8 themes: orange `#ff5f00` (256-color 202, as before; the default), amber `#d9930d`, green `#2ea043`, cyan `#12a8b8`, blue `#3b82f6`, violet `#8b6cf0`, magenta `#d946b4`, red `#e5484d`. Each is at least 4.3:1 against `#1c1c1c` and 2.2:1 against white (amber is the lowest on white) and carries the black text of a selected row at 5.4:1 or more.
+- `THEME` opens a picker: swatch, name and hex per row; the cursor applies the color to the whole screen at once; Enter saves, Esc restores. `THEME green` sets one without the picker. The picker takes all keys, so no preview is left unsaved.
+- The choice is `theme = "<id>"` in `keys.toml`. Saving replaces that line, or writes it above the first `[table]`, and keeps the rest of the file (comments included) as it was. A missing, empty or unknown value is orange.
+
+**Not built:** a custom hex value, and a light variant of the whole palette (the greys stay as they are).
+
 ## D62 (2026-10-19): NW never guesses its folder; the box says where the folder came from
 
 **Decision (user):** "it often starts in the wrong folder … maybe create some more clarity there", then "go ahead with the changes that you recommended".
