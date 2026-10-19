@@ -109,6 +109,7 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | `PR` | `k` | Open the pull request on the right: its branch, size, checks, description, files and thread. Push `k` again to write a comment for a new agent. |
 | `PR` | `1` | With the pull request open: start a new agent that reviews it. |
 | `PR` | `2` | With the pull request open: merge it now. Kaching runs `gh pr merge` itself; no agent starts. It does not merge when the pull request has conflicts or checks that failed or still run. |
+| `PR` | `3` | With the pull request open: close it now, without a merge. Kaching runs `gh pr close` itself; no agent starts and there is no confirm step. It also closes drafts and pull requests with conflicts or failing checks. |
 | `PR` | `↑`, `↓` | Scroll the pull request on the right. |
 | `PR` | `Esc` | Close the pull request on the right. Push `Esc` again to go to the desk. |
 | `PO` | `Enter` | Show the full proposal. Push `q` to close it. |
@@ -209,7 +210,9 @@ The screen has five parts, from the top to the bottom:
 4. The agent panel (right). It shows the selected agent.
 5. The key bar (bottom). The first line shows the keys for the current view. The second line shows the fixed messages. On the right, the two lines show your Claude usage: the 5-hour window above the 7-day limit. Each line shows the exact percentage, a bar, and the time until it starts again (`↻ 1h33m`, `↻ 1d08h`). When the screen is narrow, keys at the end of the lines give way.
 
-The usage comes from the statusline: `~/.claude/statusline-command.sh` writes the `rate_limits` of each session to `~/.agent/usage/<session id>.json` when they change, and Kaching shows the newest file. Before any session has updated its statusline, the bar says `no statusline reading yet`.
+The usage comes from the statusline: `~/.claude/statusline-command.sh` writes the `rate_limits` of each session to `~/.agent/usage/<session id>.json` when they change, and Kaching shows the newest file. Before any session has updated its statusline, the bar says `no statusline reading yet`. If it stays that way, check that your statusline script has the lines that write `~/.agent/usage/<session id>.json`: without them no file exists and Kaching has nothing to read.
+
+Links in the text (`http://` and `https://`) are real links. Push `Cmd` and click on one in your terminal to open it in the default browser. A link that is too long for the line shows cut with `…`, but the click opens the whole address.
 
 ### 4.2 The agent list
 
@@ -514,6 +517,9 @@ The folder must be trusted by Claude Code. If the command line shows `Workspace 
    - Kaching merges the commit that the right side shows. If somebody pushed a new commit after that, GitHub refuses the merge.
    - Kaching makes a merge commit. When the repo does not allow merge commits, it uses squash, then rebase.
    - Kaching does not delete the branch. The repo's own setting can still delete it.
+7. To close it without a merge, push `3`. Kaching closes it at once with `gh pr close`; no agent starts and there is no confirm step. The status line shows `closing…`, then `✓ closed`, and the pull request goes off the list.
+   - A draft, or a pull request with conflicts or failing checks, closes too. Kaching does not need the right side to be loaded.
+   - If you push `3` by mistake, open the pull request on GitHub and push `Reopen pull request`.
    - Kaching does not merge a draft, a pull request with conflicts, or one with checks that failed or still run. It also does not merge when the right side has not loaded. The status line tells you why.
    - When GitHub refuses the merge, for example because of a branch rule, the status line shows the message from `gh`.
 7. Push `Esc` to close the pull request on the right.

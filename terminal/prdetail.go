@@ -149,15 +149,18 @@ func loadPRDetail(url string) PRDetail {
 }
 
 // prQuick: the panel's number keys. One with a text starts an agent on the pull request with it as the comment;
-// merge it is done by kaching itself at once with gh pr merge, no agent (D55).
-var prQuick = []struct{ label, text string }{
-	{"review it", "Review this pull request: does it do what it says, and is the code right? Tell me what you find."},
-	{"merge it", ""},
+// merge it and close it are done by kaching itself at once with gh pr merge / gh pr close, no agent (D55, D56).
+var prQuick = []struct{ label, text, act string }{
+	{"review it", "Review this pull request: does it do what it says, and is the code right? Tell me what you find.", ""},
+	{"merge it", "", "merge"},
+	{"close it", "", "close"},
 }
 
 const prMergeTimeout = 30 * time.Second
 
 type prMergedMsg struct{ url, ref, how, err string }
+
+type prClosedMsg struct{ url, ref, err string }
 
 // prMergeBlock: why kaching does not merge pr as its panel d shows it, "" when it does. The rule the merge agent had:
 // checks pass and no conflicts.
@@ -210,6 +213,21 @@ func prMerge(pr PullReq, sha string) (how string, err error) {
 		return how, fmt.Errorf("gh pr merge: %s", msg)
 	}
 	return how, nil
+}
+
+// prClose closes pr without merging it, with gh pr close. It can be reopened on GitHub.
+func prClose(pr PullReq) error {
+	ctx, cancel := context.WithTimeout(context.Background(), prMergeTimeout)
+	defer cancel()
+	out, err := ghMergeRun(ctx, "pr", "close", pr.URL)
+	if err != nil {
+		msg := strings.Join(strings.Fields(string(out)), " ")
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("gh pr close: %s", msg)
+	}
+	return nil
 }
 
 // prPrompt: the first message of the agent that works on pr, with the owner's comment as its task.
