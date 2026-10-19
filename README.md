@@ -72,7 +72,7 @@ cd ~/agent-terminal        # wherever you cloned it
 `install.sh` is idempotent. It backs up `~/.claude/settings.json` before writing and only adds entries; it never removes your own hooks. A second run should say `nothing to do`.
 
 What it installs:
-- **The links:** `~/.claude/agent-terminal`, pointing to this folder, and `~/.claude/kaching` and `~/.claude/ching`, its names before D65 and D35.
+- **The links:** `~/.claude/agent-terminal`, pointing to this folder, and, on a machine that had them, `~/.claude/kaching` and `~/.claude/ching` (the names before D65 and D35), kept leading here.
 - **The hooks:** SessionStart, UserPromptSubmit, Stop, PreCompact, Notification, SessionEnd, and the PreToolUse guard.
 - **The slash commands:** `/handoff`, `/next` and `/dash`.
 - **The launchd job:** `org.agent-terminal.watch`, which runs `bin/agent-terminal-watch.sh` every 5 minutes.

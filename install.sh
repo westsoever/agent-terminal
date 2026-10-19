@@ -388,7 +388,8 @@ fi
 # ---------------- symlinks and files ----------------
 if [ "$UNINSTALL" -eq 0 ]; then
   plan_link "$AGENT_TERMINAL_ROOT" "$LINK"
-  for l in "${OLD_LINKS[@]}"; do plan_compat_link "$AGENT_TERMINAL_ROOT" "$l"; done
+  # an old link is kept leading here, never made on a machine that has not had it (a new install has none)
+  for l in "${OLD_LINKS[@]}"; do if [ -L "$l" ] || [ -e "$l" ]; then plan_compat_link "$AGENT_TERMINAL_ROOT" "$l"; fi; done
   for c in "$AGENT_TERMINAL_ROOT"/commands/*.md; do
     [ -f "$c" ] || continue
     plan_link "$c" "$CLAUDE_DIR/commands/$(basename "$c")"
