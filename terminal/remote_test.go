@@ -40,6 +40,19 @@ func TestParseRemote(t *testing.T) {
 	}
 }
 
+// A session whose terminal runs on this Mac is already an agent row: it is left out of REMOTE, however many of
+// this Mac's windows have a Remote Control connection; other machines' sessions stay.
+func TestDropLocal(t *testing.T) {
+	st := parseRemote([]byte(remoteJSON))
+	got := dropLocal(st.Items, map[string]bool{"session_A": true, "session_gone": true})
+	if len(got) != 1 || got[0].ID != "session_D" {
+		t.Fatalf("local session must be dropped: %+v", got)
+	}
+	if all := dropLocal(st.Items, nil); len(all) != 2 {
+		t.Fatalf("with no local sessions nothing is dropped: %+v", all)
+	}
+}
+
 // The REMOTE section sits below DONE, j/l walk from the agents into it, the panel shows the session, r writes to it
 // through the CLI, enter opens it on claude.ai/code.
 func TestRemoteSection(t *testing.T) {

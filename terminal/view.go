@@ -1256,21 +1256,42 @@ func (m model) pcPanel(w, h int) []string {
 	return boxR(w, h, title, right, border, body)
 }
 
+// textBody lays the help page out in two columns: the key (or name) on the left, its text on the right. A text
+// that does not fit wraps under itself, never back under the key; a "\n" in a text starts a new line there. A
+// "## " line is a heading with a rule; a line with no tab is a plain paragraph (see helpLines).
 func (m model) textBody(lines []string) []string {
 	in := m.w - 6
-	var body []string
+	kw := 0
 	for _, l := range lines {
-		st := cGrey
-		if strings.HasPrefix(l, "## ") {
-			st = cWhite
-			l = strings.TrimPrefix(l, "## ")
+		if k, _, ok := strings.Cut(l, "\t"); ok {
+			kw = max(kw, width(k))
 		}
-		if width(l) <= in { // keep its spacing: columns stay aligned
-			body = append(body, " "+row(in, s(l, st))+" ")
-			continue
-		}
-		for _, wl := range wrap(l, in) {
-			body = append(body, " "+row(in, s(wl, st))+" ")
+	}
+	kw = min(kw, in/3)
+	dw := max(10, min(in-kw-2, 110)) // a line much longer than this is hard to read
+	var body []string
+	add := func(segs ...seg) { body = append(body, " "+row(in, segs...)+" ") }
+	for _, l := range lines {
+		switch k, d, ok := strings.Cut(l, "\t"); {
+		case ok:
+			first := true
+			for _, part := range strings.Split(d, "\n") {
+				for _, wl := range wrap(part, dw) {
+					lead := s(strings.Repeat(" ", kw), cGrey)
+					if first {
+						lead = s(fmt.Sprintf("%-*s", kw, k), cWhite)
+					}
+					add(lead, s("  "+wl, cGrey))
+					first = false
+				}
+			}
+		case strings.HasPrefix(l, "## "):
+			h := strings.TrimPrefix(l, "## ")
+			add(s(h+" ", cWhite), s(strings.Repeat("─", max(0, min(in, kw+2+dw)-width(h)-1)), cDark))
+		default:
+			for _, wl := range wrap(l, in) {
+				add(s(wl, cGrey))
+			}
 		}
 	}
 	return body
@@ -1306,6 +1327,8 @@ func (m model) helpView(h int) []string {
 	return indent(box(m.w-2, h, title, cDark, body[off:]))
 }
 
+// helpLines is the help page as lines for textBody: "## title" a heading, row2(key, text) a row, "" a gap, any
+// other line a paragraph.
 func (m model) helpLines() []string {
 	K := m.cfg.Keys
 	k := func(key string) string {
@@ -1314,82 +1337,111 @@ func (m model) helpLines() []string {
 		}
 		return key
 	}
-	row2 := func(key, what string) string { return fmt.Sprintf("%-14s %s", key, what) }
+	row2 := func(key, what string) string { return key + "\t" + what }
 	nwDefault := parseNW("", m.cfg).summary()
 	if nwDefault == "" {
 		nwDefault = "Claude Code's own defaults"
 	}
 	lines := []string{
-		"## Go to a view: push " + K.Command + ", write the code, push enter. esc goes back to the desk.",
-		row2("IN", "inbox (the desk): all agents and the selected agent"),
-		row2("FL", "the last 30 files the agents wrote about, newest first (enter opens)"),
-		row2("RP", "repos: the 10 worked on last, then all the others A–Z; the sync check's notes (work you can lose) in orange"),
-		row2("RC", "recaps: the agents by name on the left, the selected one's recap in full on the right (enter goes to the agent)"),
-		row2("PR", "pull requests: the open ones that involve you on GitHub, the last updated first; "+K.Reply+" opens one on the right (description, files, thread), "+K.Reply+" again comments: enter starts a new agent with your comment as its task; 1 review it (a new agent), 2 merge it (at once with gh pr merge, no agent), 3 close it (at once with gh pr close, no agent); enter opens it in the browser"),
-		row2("PO", "proposals: enter shows, a approve, x reject, z hide 7 days (the tab is orange while some are open)"),
-		row2("PC", "Paperclip issues and company approvals, the selected one's thread on the right: 1-9 answer what it asks (approve, decline, …), "+K.Reply+" comment, "+K.PCAgent+" / "+K.PCTerm+" hand the issue to a new background agent / Terminal session (@Name: a running one), enter opens it in the browser (orange while one needs you); the keys below"),
-		row2("NW [folder] [opts]", "start a background agent: write its first message, enter starts it (folder: a path, a folder in ~/bbq, an agent's name; none: the selected agent's). Opts, in any place: a model (opus sonnet haiku fable), an effort (low … max), a mode (plan auto bypass accept manual dontask), e.g. NW soii sonnet high"),
-		row2("FIND words", "find a session: by its name, then by what was said in it (one message with all the words), then Claude picks (s). See Find below"),
+		"## Views",
+		"Push " + K.Command + ", write the code, push enter. esc goes back to the desk.",
+		row2("IN", "inbox (the desk): all agents, and the selected one"),
+		row2("FL", "the last 30 files the agents wrote about, newest first\nenter opens one"),
+		row2("RP", "repos: the clones here and your GitHub repos\nthe 10 worked on last first, then all the others A–Z; the sync check's notes (work you can lose) in orange"),
+		row2("RC", "recaps: the agents by name on the left, the selected one's recap in full on the right\nenter goes to the agent"),
+		row2("PR", "the open pull requests that involve you on GitHub, the last updated first\n"+
+			K.Reply+" opens one on the right (description, files, thread); "+K.Reply+" again comments: enter starts a new agent with your comment as its task\n"+
+			"1 review it (a new agent) · 2 merge it (gh pr merge, no agent) · 3 close it (gh pr close, no agent)\n"+
+			"enter opens it in the browser"),
+		row2("PO", "proposals: enter shows · a approve · x reject · z hide 7 days\nthe tab is orange while some are open"),
+		row2("PC", "Paperclip issues and company approvals, the selected one's thread on the right\n"+
+			"1-9 answer what it asks (approve, decline, …) · "+K.Reply+" comment\n"+
+			K.PCAgent+" / "+K.PCTerm+" hand the issue to a new background agent / Terminal session (@Name: a running one)\n"+
+			"enter opens it in the browser · the tab is orange while one needs you · more keys: Paperclip requests below"),
+		"",
+		"## Commands",
+		"Typed in the same line as the views.",
+		row2("NW folder", "start a background agent: write its first message, enter starts it\n"+
+			"folder: a path, a folder in ~/bbq, or an agent's name; left out: the selected agent's\n"+
+			"options after it, in any order: a model (opus sonnet haiku fable) · an effort (low … max) · a mode (plan auto bypass accept manual dontask)\n"+
+			"e.g. NW soii sonnet high"),
+		row2("FIND words", "find a session: by its name, then by what was said in it (one message with all the words), then Claude picks (s)\nmore: Find below"),
 		row2("STOP", "stop the selected background agent (its conversation stays)"),
-		row2("ALL group", "one message to a group of agents: waiting (INPUT and WAITING), input, idle or working; agents with a menu on screen are left out"),
-		row2("A3, or a name", "select agent 3, or the first agent whose name starts so"),
-		row2("HELP, QUIT", "this page (it scrolls: up/down, pgup/pgdown, home/end); stop kaching (ctrl+c also stops it)"),
+		row2("ALL group", "one message to a group of agents: waiting (INPUT and WAITING), input, idle or working\nagents with a menu on screen are left out"),
+		row2("A3 or name", "select agent 3, or the first agent whose name starts so"),
+		row2("HELP", "this page"),
+		row2("QUIT", "stop kaching (ctrl+c also stops it)"),
+		"",
+		"## New on 2026-10-19",
+		row2("REMOTE", "below DONE: the connected sessions on other machines (Remote Control), active ones only, read every 30 s\n"+
+			"this Mac's own windows are not listed: they are agents above\n"+
+			k(K.Next)+" / "+k(K.Prev)+" walk into it · "+K.Reply+" writes to the selected one (sent with claude -p --cloud)\n"+
+			"enter opens it on claude.ai/code to read the reply: its messages can't be read here"),
+		row2("RC", "recaps in full: the agents by name on the left, the selected one's recap on the right"),
+		row2("links", "cmd+click opens a link in the text"),
+		row2("b, w in RP", "b: the repo's branches, local and on origin only, each against the default branch (+ahead −behind, merged), its upstream (↑ to push, not pushed, gone) and its worktree (⌂)\n"+
+			"w: its worktrees with their branch and changed files\n"+
+			"1 review it · 2 merge it · 3 fix it · "+K.Reply+" your own task: each a new background agent in the branch's worktree\n"+
+			"f fetches origin · g opens GitHub (what b was)"),
 		"",
 		"## New on 2026-10-18",
-		row2("2, 3 in PR", "2 merges it at once (gh pr merge, pinned to the commit shown; refuses on conflicts or failed or running checks), 3 closes it at once (gh pr close). No agent, no confirm"),
-		row2("space + key", "space waits for its second key with no time limit: the status line lists the keys, esc cancels, a key bound to nothing ends it. It used to jump after half a second"),
+		row2("2, 3 in PR", "2 merges it at once (gh pr merge, pinned to the commit shown; refuses on conflicts or failed or running checks)\n3 closes it at once (gh pr close)\nno agent, no confirm"),
+		row2("space + key", "space waits for its second key with no time limit: the status line lists the keys, esc cancels, a key bound to nothing ends it\nit used to jump after half a second"),
 		row2(strings.Replace(k(K.Waiting), "space", "space space", 1), "the agent in INPUT that has waited the longest (it was space alone)"),
-		row2(K.Dismiss, "takes a waiting agent off the list, a background one too; it keeps running and comes back when it has something new. It does not close the session (STOP stops a background agent)"),
-		row2("NW, "+K.PCAgent+", "+K.PCTerm, "agents that kaching starts run on "+nwDefault+" (nw_model, nw_effort, nw_permission in keys.toml); words after NW win"),
-		row2(K.PCAgent+" / "+K.PCTerm+" in PC", "hand the selected issue to a new background agent / Terminal session with your permissions; a box text that starts with @Name goes to a session that already runs"),
+		row2(K.Dismiss, "takes a waiting agent off the list, a background one too\nit keeps running and comes back when it has something new; it does not close the session (STOP stops a background agent)"),
+		row2("NW, "+K.PCAgent+", "+K.PCTerm, "agents that kaching starts run on "+nwDefault+" (nw_model, nw_effort, nw_permission in keys.toml)\nwords after NW win"),
+		row2(K.PCAgent+" / "+K.PCTerm+" in PC", "hand the selected issue to a new background agent / Terminal session with your permissions\na box text that starts with @Name goes to a session that already runs"),
 		row2("i in RP", "copy the path of the repo's folder, or of the selected file or folder"),
 		row2("DONE", "an agent that finished with nothing left sits in its own section at the end of the list, below IDLE"),
-		row2("REMOTE", "below DONE: the connected sessions on other machines (Remote Control), active ones only, read every 30 s. "+k(K.Next)+" / "+k(K.Prev)+" walk into it; "+K.Reply+" writes to the selected one (sent with claude -p --cloud), enter opens it on claude.ai/code to read the reply: its messages can't be read here"),
-		row2("b, w in RP", "b: the repo's branches, local and on origin only, each against the default branch (+ahead −behind, merged), its upstream (↑ to push, not pushed, gone) and its worktree (⌂); w: its worktrees with their branch and changed files. 1 review it, 2 merge it, 3 fix it, "+K.Reply+" your own task: each a new background agent in the branch's worktree. f fetches origin. g on GitHub is what b was"),
 		"",
 		"## Desk",
 		row2(k(K.Next)+" / "+k(K.Prev), "next / previous agent"),
-		row2(strings.Replace(k(K.Waiting), "space", "space space", 1), "the agent in INPUT that has waited the longest (space waits for its second key, esc cancels)"),
-		row2(k(K.Older)+" / "+k(K.Newer), "scroll the agent's conversation 3 lines back / on (also when zoomed, and while writing on the draft's first / last line)"),
-		row2("pgup / pgdown", "a page back / on   ·   home: its start   ·   end: the newest"),
+		row2(strings.Replace(k(K.Waiting), "space", "space space", 1), "the agent in INPUT that has waited the longest\nspace waits for its second key, esc cancels"),
+		row2(k(K.Older)+" / "+k(K.Newer), "scroll the agent's conversation 3 lines back / on\nalso when zoomed, and while writing on the draft's first / last line"),
+		row2("pgup / pgdown", "a page back / on"),
+		row2("home / end", "the start / the newest line"),
 		row2("1-9", "send that numbered answer"),
-		row2(K.Quick, "an agent asks questions: take the recommended answer (★, the one the agent marks) of every question and submit; it refuses when a question has none"),
+		row2(K.Quick, "an agent asks questions: take the recommended answer (★, the one the agent marks) of every question and submit\nit refuses when a question has none"),
 		row2("enter, ←, →", "when the agent asks: confirm, previous / next part"),
-		row2(K.Reply, "write a message (keys below); esc keeps it as a draft; sending it sends a window on monitor 1 back"),
+		row2(K.Reply, "write a message (keys below)\nesc keeps it as a draft; sending it sends a window on monitor 1 back"),
 		row2(K.Open+" then a-i", "open that file"),
-		row2(K.Goto, "show the agent's own Terminal window, where it is; a background agent (◦) gets a new window attached to it"),
-		row2(K.Here, "bring its window to monitor 1 and into focus, to type in it; a prompt sends it back"),
-		row2(K.Dismiss, "remove a waiting agent (a background one too) from the list, no answer; it keeps running and comes back when it has something new"),
+		row2(K.Goto, "show the agent's own Terminal window, where it is\na background agent (◦) gets a new window attached to it"),
+		row2(K.Here, "bring its window to monitor 1 and into focus, to type in it\na prompt sends it back"),
+		row2(K.Dismiss, "remove a waiting agent (a background one too) from the list, no answer\nit keeps running and comes back when it has something new"),
 		row2(K.Refresh, "read all data again"),
 		"",
 		"## Writing a message",
-		row2("enter", "send   ·   option+enter, ctrl+j or \\ enter: new line"),
+		row2("enter", "send"),
+		row2("new line", "option+enter, ctrl+j, or \\ then enter"),
 		row2("option+key", "your layout's character: option+l @, option+5 [, option+8 {, option+7 |"),
-		row2("@ / /", "suggest the agent's files and the other sessions / commands; tab or enter takes one"),
-		row2("@Name text", "a message that starts with a live session's name goes to that session (@\"two words\" for names with spaces); a mention elsewhere stays in the text, and the agent itself passes it on"),
-		row2("ctrl+v", "paste a clipboard image (saved, its path goes in); cmd+v pastes text"),
-		row2("option+arrows", "move by word   ·   option+backspace: delete a word"),
+		row2("@ and /", "suggest the agent's files and the other sessions / commands; tab or enter takes one"),
+		row2("@Name text", "a message that starts with a live session's name goes to that session (@\"two words\" for names with spaces)\na mention elsewhere stays in the text, and the agent itself passes it on"),
+		row2("ctrl+v", "paste a clipboard image (saved, its path goes in)"),
+		row2("cmd+v", "paste text"),
+		row2("option+arrows", "move by word"),
+		row2("option+backspace", "delete a word"),
 		"",
 		"## Repos (RP)",
 		row2(k(K.Next)+" / "+k(K.Prev), "next / previous repo"),
 		row2("enter", "open its folder; on GitHub only: asks, then enter or y opens it on GitHub"),
-		row2("b, opt+enter", "open it on GitHub (option+enter; shift+enter too, where the terminal tells it from enter)"),
+		row2("b / w", "the repo's branches / worktrees (1 review · 2 merge · 3 fix · f fetch; more: New on 2026-10-19)"),
+		row2("g, opt+enter", "open it on GitHub (option+enter; shift+enter too, where the terminal tells it from enter)"),
 		row2(K.Reply, "its folders on the right: "+K.Reply+" goes into a folder or opens a file, h (or backspace) up, enter shows it in Finder, esc closes"),
 		row2("i", "copy the path of the repo's folder, or of the selected file or folder in the panel (its GitHub URL without a clone)"),
 		"",
 		"## Paperclip requests (PC)",
 		row2("1-9", "answer; in a list: tick the item; in a question: pick the option; with verdicts: give the current item that verdict"),
-		row2("approvals", "1 approve, 2 reject, 3 request revision (needs a note), 4 approve with a note, 5 reject with a note"),
+		row2("approvals", "1 approve · 2 reject · 3 request revision (needs a note) · 4 approve with a note · 5 reject with a note"),
 		row2("s", "send the ticks, the answers or the verdicts"),
 		row2("x / r", "decline a list of choices or tasks / decline with a reason (the box opens)"),
 		row2("← / →", "the previous / next question or item"),
 		row2("o", "write your own answer to a question (enter keeps it)"),
-		row2("a", "questions: give every ★ recommended answer and send; it says which question has none and sends nothing"),
+		row2("a", "questions: give every ★ recommended answer and send\nit says which question has none and sends nothing"),
 		row2("n / p", "next / previous page of a long list"),
 		"",
-		"## Find (/FIND words)",
+		"## Find (FIND words)",
 		row2(k(K.Next)+" / "+k(K.Prev), "next / previous result"),
-		row2("enter", "a live session: go to it on the desk. An ended one: read the messages that match, with the message before and after (esc closes)"),
+		row2("enter", "a live session: go to it on the desk\nan ended one: read the messages that match, with the message before and after (esc closes)"),
 		row2("s", "ask Claude which sessions fit (it runs by itself when names and text find nothing)"),
 		row2("r", "resume an ended session in a new Terminal window: cd to its folder, claude --resume"),
 		"",
@@ -1397,12 +1449,14 @@ func (m model) helpLines() []string {
 		row2("1-9", "select that tile"),
 		row2(K.Zoom, "tile on the full screen, again to go back (then 1-9 answer)"),
 		"",
-		"## Fixed messages (desk and wall; space keys: push space, then the key; no time limit, esc cancels)",
+		"## Fixed messages",
+		"On the desk and the wall. The space ones: push space, then the key; no time limit, esc cancels.",
 	}
 	for _, r := range m.cfg.Replies {
 		lines = append(lines, row2(r.Key, fmt.Sprintf("%q", r.Text)))
 	}
 	lines = append(lines, "",
+		"## More",
 		"Change keys, messages and how tables show (tables = auto, rule, grid or records) in "+tildify(configPath())+". Save: kaching reloads it.",
 		"Full manual: ~/.claude/kaching/docs/kaching-manual.md")
 	return lines

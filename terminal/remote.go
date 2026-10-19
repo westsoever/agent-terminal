@@ -2,7 +2,7 @@ package main
 
 // The REMOTE section of the desk: Claude Code sessions that run on another machine (Remote Control) and are
 // connected to the owner's account now, read from the same list claude.ai/code shows, with the owner's own Claude
-// login. Only active sessions are listed: connected and not archived. Reading a session's messages needs a
+// login. Only active sessions on other machines are listed: connected, not archived, and not a window of this Mac. Reading a session's messages needs a
 // trusted device and is refused for this login, so kaching shows its state and sends a message with the CLI's
 // own path (claude -p ... --cloud <id>); the reply is read on claude.ai/code (enter).
 
@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -109,7 +110,46 @@ func loadRemote() RemoteState {
 	if err != nil {
 		return RemoteState{Err: "remote sessions: " + strings.Join(strings.Fields(err.Error()), " ")}
 	}
-	return parseRemote(b)
+	st := parseRemote(b)
+	st.Items = dropLocal(st.Items, remoteLocal())
+	return st
+}
+
+// remoteLocal: the remote ids of the sessions running on this Mac. Claude Code writes bridgeSessionId into
+// ~/.claude/sessions/<pid>.json when a terminal gets a Remote Control connection, so a live process with one is a
+// window here, already an agent row, and not a REMOTE one. A variable so tests need no session files.
+var remoteLocal = func() map[string]bool {
+	home, _ := os.UserHomeDir()
+	files, _ := filepath.Glob(filepath.Join(home, ".claude", "sessions", "*.json"))
+	ids := map[string]bool{}
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		var c struct {
+			PID    int    `json:"pid"`
+			Bridge string `json:"bridgeSessionId"`
+		}
+		if json.Unmarshal(b, &c) != nil || c.Bridge == "" || c.PID <= 0 {
+			continue
+		}
+		if err := syscall.Kill(c.PID, 0); err == nil || err == syscall.EPERM { // the process is still there
+			ids[c.Bridge] = true
+		}
+	}
+	return ids
+}
+
+// dropLocal leaves out the sessions that run on this Mac: only other machines' sessions belong in REMOTE.
+func dropLocal(items []RemoteSession, local map[string]bool) []RemoteSession {
+	var out []RemoteSession
+	for _, r := range items {
+		if !local[r.ID] {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func parseRemote(b []byte) RemoteState {
