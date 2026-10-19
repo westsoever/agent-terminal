@@ -14,6 +14,6 @@
 # @raycast.description Brings the oldest waiting agent's Terminal window to the front, then the next one on each press.
 
 K="$HOME/.claude/agent-terminal"
-[ -d "$K" ] || K="$HOME/.claude/kaching"   # before install.sh ran since the rename (D64)
+[ -d "$K" ] || K="$HOME/.claude/kaching"   # before install.sh ran since the rename (D65)
 [ -d "$K" ] || K="$HOME/.claude/ching"     # and since D35
 exec "$K/bin/queue.sh" next

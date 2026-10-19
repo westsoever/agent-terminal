@@ -14,6 +14,6 @@
 # @raycast.description Lays out the Terminal windows of each display in a grid: 2 side by side, 3 in columns, 4 as 2x2.
 
 K="$HOME/.claude/agent-terminal"
-[ -d "$K" ] || K="$HOME/.claude/kaching"   # before install.sh ran since the rename (D64)
+[ -d "$K" ] || K="$HOME/.claude/kaching"   # before install.sh ran since the rename (D65)
 [ -d "$K" ] || K="$HOME/.claude/ching"     # and since D35
 exec "$K/bin/queue.sh" tile

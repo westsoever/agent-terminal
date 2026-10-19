@@ -403,7 +403,7 @@ assert_eq "rename: ... and leads here" "$KIT" "$(readlink "$MD/ching")"
 out=$(minst --uninstall --yes)
 assert_no_file "rename: uninstall removes the old dot's job too" "$MLA/org.ching.menubar.plist"
 
-# ---------- D64: upgrading a machine installed under the name Kaching ----------
+# ---------- D65: upgrading a machine installed under the name Kaching ----------
 # The kaching link, hook entries under it and the org.kaching.* jobs: install replaces the hooks and jobs, keeps the
 # kaching link (and a ching link) leading here, and a second run has nothing to do.
 KD="$WORK/kmig-claude"; KLA="$WORK/kmig-la"; KAH="$WORK/kmig-ah"

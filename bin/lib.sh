@@ -10,7 +10,7 @@
 AGENT_HOME=${AGENT_HOME:-$HOME/.agent}
 CLAUDE_DIR=${CLAUDE_DIR:-$HOME/.claude}
 
-# D35, D64: the kit was Ching, then Kaching, and is now Agent Terminal. A variable set under an older name (KACHING_*,
+# D35, D65: the kit was Ching, then Kaching, and is now Agent Terminal. A variable set under an older name (KACHING_*,
 # or CHING_* from before D35) still counts when the AGENT_TERMINAL_* one is unset (launchd jobs, shells and notes from
 # before the rename); KACHING_* wins over CHING_*. Scripts that check a variable before sourcing this file spell the
 # fallback out themselves.

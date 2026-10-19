@@ -99,6 +99,7 @@ type model struct {
 	scroll     *chatScroll         // shared by every copy of the model: View records the limits it drew
 	usage      Usage               // the Claude usage limits, read on every tick
 	askProg    map[string]*askProg // sid -> where a background agent's menu is (see ask.go)
+	theme      *themeState         // the /THEME picker
 	nw         nwOpts              // what /NW is starting: its folder, model, effort and permission mode
 	nwDir      nwFolder            // where that folder came from and what is there (the box shows it)
 	bgScr      map[string]Prompt   // sid -> the menu on a background agent's screen (rebuilt from claude logs)
@@ -149,6 +150,7 @@ type execDone struct{ err error }
 
 func newModel() model {
 	cfg, ct, err := loadConfig()
+	applyTheme(cfg.Theme)
 	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, pcForms: &pcFormSet{}, prDet: map[string]PRDetail{}, prScroll: &chatScroll{}, rcScroll: &chatScroll{}, askProg: map[string]*askProg{}, bgScr: map[string]Prompt{}}
 	m.ed.drafts = loadDrafts()
 	if err != nil {
@@ -194,6 +196,10 @@ func (m *model) refresh() {
 	if st, err := os.Stat(configPath()); err == nil && st.ModTime().After(m.cfgTime) {
 		cfg, ct, err := loadConfig()
 		m.cfg, m.cfgTime = cfg, ct
+		if m.view != vTheme { // a picker open keeps its preview
+			applyTheme(cfg.Theme)
+			m.ed.restyle()
+		}
 		if err != nil {
 			m.setErr("keys.toml: " + err.Error())
 		} else {
@@ -312,6 +318,14 @@ func (m *model) selIndex() int {
 }
 
 func (m *model) last(a *Agent) Last {
+	if a != nil && a.CLI == "opencode" { // its conversation is in opencode's database, not a transcript file
+		if c, ok := m.lastCache[a.SID]; ok && c.mtime.Equal(a.Since) {
+			return c.last
+		}
+		l := readOpencodeLast(a.SID)
+		m.lastCache[a.SID] = cachedLast{0, a.Since, l}
+		return l
+	}
 	if a == nil || a.Transcript == "" {
 		return Last{}
 	}
@@ -705,6 +719,9 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		removeState()
 		return m, tea.Quit
 	}
+	if m.view == vTheme && m.mode == mKeys {
+		return m.themeKey(ks)
+	}
 	switch m.mode {
 	case mCommand:
 		switch k.Type {
@@ -875,6 +892,9 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		sid, tty, name := a.SID, a.TTY, a.Name
+		if a.CLI != "" { // the monitor queue only places Claude Code windows
+			return m, func() tea.Msg { return sentMsg{"", name, "bring here", raiseTab(tty)} }
+		}
 		return m, func() tea.Msg { return sentMsg{"", name, "bring here", bringHere(sid, tty)} }
 	case ks == K.Goto && m.sel() != nil && m.sel().Bg: // a background session has no window: open one attached to it
 		job, name := m.sel().Job, m.sel().Name
@@ -954,7 +974,8 @@ func (m *model) screenWanted(a Agent) bool {
 		return asked || a.State == "input" || a.State == "blocked" || (a.SID == m.selSID && m.ticks%3 == 0)
 	}
 	busy := a.Busy && m.ticks%2 == 0
-	return a.InTerminal && (a.SID == m.selSID || a.State == "input" || a.State == "blocked" || asked || busy)
+	return a.InTerminal && a.CLI == "" && // the menus it reads are Claude Code's
+		(a.SID == m.selSID || a.State == "input" || a.State == "blocked" || asked || busy)
 }
 
 // A busy agent that shows a menu has waited since the menu first showed, not since its turn began.
@@ -1495,6 +1516,9 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 		}
 	}
 	switch {
+	case c == "THEME":
+		_, arg, _ := strings.Cut(strings.TrimSpace(code), " ")
+		return m.themeCommand(arg)
 	case c == "FIND":
 		return m.findCommand(code)
 	case c == "HELP" || c == "?":
@@ -1555,7 +1579,7 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// kitDir is the Agent Terminal kit: ~/.claude/agent-terminal, or its older names ~/.claude/kaching (D64) and
+// kitDir is the Agent Terminal kit: ~/.claude/agent-terminal, or its older names ~/.claude/kaching (D65) and
 // ~/.claude/ching (D35) on a machine where install.sh has not run since the rename.
 func kitDir() string {
 	k := filepath.Join(os.Getenv("HOME"), ".claude", "agent-terminal")

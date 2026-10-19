@@ -113,7 +113,7 @@ final class Hotkeys {
         if b.script.hasPrefix("/") { path = b.script }
         else if b.script.hasPrefix("~/") { path = NSHomeDirectory() + String(b.script.dropFirst(1)) }
         else { path = paths.agentTerminalDir.appendingPathComponent(b.script).path }
-        // a hotkeys file written before D64 names ui/raycast/kaching-*.sh: the same script is agent-terminal-*.sh now
+        // a hotkeys file written before D65 names ui/raycast/kaching-*.sh: the same script is agent-terminal-*.sh now
         if !FileManager.default.fileExists(atPath: path), let r = path.range(of: "/kaching-", options: .backwards) {
             path.replaceSubrange(r, with: "/agent-terminal-")
         }

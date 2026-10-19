@@ -18,7 +18,7 @@ import (
 	"github.com/muesli/termenv"
 )
 
-// legacyEnv lets a variable under an older name (KACHING_*, before D64; CHING_*, before D35) stand for its
+// legacyEnv lets a variable under an older name (KACHING_*, before D65; CHING_*, before D35) stand for its
 // AGENT_TERMINAL_* name when that one is unset; KACHING_* wins over CHING_*.
 func legacyEnv() {
 	for _, prefix := range []string{"KACHING_", "CHING_"} {

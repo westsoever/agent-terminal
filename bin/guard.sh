@@ -698,7 +698,7 @@ check_proposals_call() { # TOKS is the segment
   rawpat=$(printf '%s' "${TOKS[$k]}" | sed 's/\[[^]]*\]//g')
   # shellcheck disable=SC2053
   if [[ "$b" == *[\*\?\[]* ]] && [[ "$b" != *')' ]] && [[ "$rawpat" == *[A-Za-z0-9/]* ]] && { [[ agent-terminal-proposals == $b ]] || [[ kaching-proposals == $b ]] || [[ ching-proposals == $b ]]; } && glob_path_may_name_cli "${TOKS[$k]}"; then b=agent-terminal-proposals; fi
-  case "$b" in kaching-proposals|ching-proposals) b=agent-terminal-proposals ;; esac   # the old names (D35, D64) are wrappers that run the same CLI
+  case "$b" in kaching-proposals|ching-proposals) b=agent-terminal-proposals ;; esac   # the old names (D35, D65) are wrappers that run the same CLI
   if [ "$b" = agent-terminal-proposals ]; then
     j=$((k + 1))
     while [ "$j" -lt "$NT" ]; do case "${TOKS[$j]}" in -h|--help) break ;; -*) j=$((j + 1)) ;; *) break ;; esac; done
@@ -706,7 +706,7 @@ check_proposals_call() { # TOKS is the segment
     if [ -n "$sub" ]; then case "$PROPOSALS_SUBS" in *" $sub "*) return 0 ;; esac; fi
     deny_proposals
   fi
-  # ching-proposals also matches kaching-proposals (the old names, D35 and D64)
+  # ching-proposals also matches kaching-proposals (the old names, D35 and D65)
   case " ${TOKS[*]} " in *[Cc][Hh][Ii][Nn][Gg]-[Pp][Rr][Oo][Pp][Oo][Ss][Aa][Ll][Ss]*|*[Aa][Gg][Ee][Nn][Tt]-[Tt][Ee][Rr][Mm][Ii][Nn][Aa][Ll]-[Pp][Rr][Oo][Pp][Oo][Ss][Aa][Ll][Ss]*) ;; *) return 0 ;; esac
   case "$PROPOSALS_READERS" in
     *" $b "*) if [ "$b" = git ] && { seg_matches '-c' || seg_matches '--config-env*'; }; then deny_proposals; fi; return 0 ;;
@@ -1022,7 +1022,7 @@ is_tamper_path() { # macOS volumes are case-insensitive: match on the lower-case
   case "$l" in "$s"|"$s"/*) return 0 ;; esac
   case "$l" in
     */.claude/settings.json|*/.claude/settings.local.json|*/.git/hooks|*/.git/hooks/*|*.githooks|*.githooks/*|*/agent-terminal/bin|*/agent-terminal/bin/*|*/.claude/agent-terminal|*/.claude/agent-terminal/*) return 0 ;;
-    */kaching/bin|*/kaching/bin/*|*/.claude/kaching|*/.claude/kaching/*) return 0 ;;   # the pre-D64 link and paths
+    */kaching/bin|*/kaching/bin/*|*/.claude/kaching|*/.claude/kaching/*) return 0 ;;   # the pre-D65 link and paths
     */ching/bin|*/ching/bin/*|*/.claude/ching|*/.claude/ching/*) return 0 ;;   # the pre-D35 link and paths
   esac
   return 1

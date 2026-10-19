@@ -21,7 +21,7 @@ if [ -n "$pid" ] && [ -n "$tty" ] && kill -0 "$pid" 2>/dev/null; then
 fi
 # not running: a new Terminal window on the main display (the one with the menu bar, or queue_main_display),
 # filling it; the one agent window the monitor queue brings there sits behind it.
-AT_BIN="$HOME/.local/bin/agterm"; [ -x "$AT_BIN" ] || AT_BIN="$HOME/.local/bin/kaching"   # before D64
+AT_BIN="$HOME/.local/bin/agterm"; [ -x "$AT_BIN" ] || AT_BIN="$HOME/.local/bin/kaching"   # before D65
 wid=$(osascript -e 'tell application "Terminal"
   activate
   set t to do script "exec '"$AT_BIN"'"
@@ -29,7 +29,7 @@ wid=$(osascript -e 'tell application "Terminal"
   return id of front window
 end tell')
 K="$HOME/.claude/agent-terminal"
-[ -d "$K" ] || K="$HOME/.claude/kaching"   # before install.sh ran since the rename (D64)
+[ -d "$K" ] || K="$HOME/.claude/kaching"   # before install.sh ran since the rename (D65)
 [ -d "$K" ] || K="$HOME/.claude/ching"     # and since D35
 QT="$K/bin/queue-term.js"
 want=$(sed -n 's/^queue_main_display=//p' "${AGENT_HOME:-$HOME/.agent}/config" 2>/dev/null | tail -1)

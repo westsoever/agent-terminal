@@ -13,7 +13,7 @@
 #       VoiceMode converse tool names to permissions.allow when they are missing (--uninstall leaves them).
 #   $CLAUDE_DIR/agent-terminal  -> symlink to this directory;  $CLAUDE_DIR/commands/<name>.md -> symlink for every
 #       file in commands/ (handoff, next, dash).
-#   From Kaching (D64) or Ching (D35): hooks under kaching/ or ching/ and the org.kaching.* / org.ching.* jobs are replaced; both links stay.
+#   From Kaching (D65) or Ching (D35): hooks under kaching/ or ching/ and the org.kaching.* / org.ching.* jobs are replaced; both links stay.
 #   ~/.agent-repos: created empty with a comment if absent (optional extra list for dash.sh).
 #   $LAUNCH_AGENTS_DIR/org.agent-terminal.watch.plist (default ~/Library/LaunchAgents): runs bin/agent-terminal-watch.sh every 300 s.
 #   $LAUNCH_AGENTS_DIR/org.agent-terminal.learn.plist: runs bin/learn.sh every day at 05:30 local (the learner, Phase 6; the
@@ -47,7 +47,7 @@ if [ -z "${AGENT_REPOS_FILE:-}" ]; then
   if [ "$CLAUDE_DIR" = "$HOME/.claude" ]; then AGENT_REPOS_FILE=$HOME/.agent-repos; else AGENT_REPOS_FILE=$(dirname "$CLAUDE_DIR")/.agent-repos; fi
 fi
 LINK="$CLAUDE_DIR/agent-terminal"
-OLD_LINKS=("$CLAUDE_DIR/kaching" "$CLAUDE_DIR/ching")   # D64, D35: the link's names before the renames, kept as more links to this directory
+OLD_LINKS=("$CLAUDE_DIR/kaching" "$CLAUDE_DIR/ching")   # D65, D35: the link's names before the renames, kept as more links to this directory
 AGENT_TERMINAL_APPS_DIR=${AGENT_TERMINAL_APPS_DIR:-${KACHING_APPS_DIR:-${CHING_APPS_DIR:-}}}
 
 DRY=0; YES=0; POPUP=0; UNINSTALL=0; PREPUSH=""; DISPATCHER=0; MENUBAR=0
@@ -81,7 +81,7 @@ AH=${AGENT_HOME:-$HOME/.agent}
 MB_APP="${AGENT_TERMINAL_APPS_DIR:-$HOME/Applications}/AgentTerminalBar.app"
 MB_PLIST="$LAUNCH_AGENTS_DIR/org.agent-terminal.menubar.plist"
 MB_ID=org.agent-terminal.menubar
-# the dot before D64 (KachingBar) and before D35 (ChingBar): app name and bundle id / job label, one per line
+# the dot before D65 (KachingBar) and before D35 (ChingBar): app name and bundle id / job label, one per line
 OLD_MBS="KachingBar|org.kaching.menubar
 ChingBar|org.ching.menubar"
 old_mb_app() { printf '%s' "${AGENT_TERMINAL_APPS_DIR:-$HOME/Applications}/$1.app"; }
@@ -351,7 +351,7 @@ else
         --argjson olds "$OLD_BINS_JSON" '
     def has_cmd($g; $c): ([$g[]? | .hooks[]? | .command] | index($c)) != null;
     .hooks = (.hooks // {})
-    # D35, D64: our entries under the old links make way for the same entries under the new one (no hook runs twice)
+    # D35, D65: our entries under the old links make way for the same entries under the new one (no hook runs twice)
     | .hooks |= (with_entries(.value |= (map(.hooks |= map(select(((.command // "") as $c | any($olds[]; . as $p | $c | startswith($p))) | not)))
                                         | map(select((.hooks | length) > 0))))
                  | with_entries(select((.value | length) > 0)))
@@ -450,7 +450,7 @@ EOP
 )
 NEED_LPLIST=0; if need_plist "$LPLIST" "$LPLIST_BODY"; then NEED_LPLIST=1; fi
 
-# ---------------- the jobs under their names before D64 and D35: replaced by org.agent-terminal.* (install) or removed (uninstall) ----------------
+# ---------------- the jobs under their names before D65 and D35: replaced by org.agent-terminal.* (install) or removed (uninstall) ----------------
 OLD_JOBS=""   # "plist|label" lines for the old jobs whose plist exists
 for _j in org.kaching.watch org.kaching.learn org.ching.watch org.ching.learn; do
   [ ! -f "$LAUNCH_AGENTS_DIR/$_j.plist" ] || OLD_JOBS="$OLD_JOBS$LAUNCH_AGENTS_DIR/$_j.plist|$_j"$'\n'
@@ -518,7 +518,7 @@ show_plist_diff() { # file body
 [ "$NEED_PLIST" -eq 0 ] || show_plist_diff "$PLIST" "$PLIST_BODY"
 [ "$NEED_LPLIST" -eq 0 ] || show_plist_diff "$LPLIST" "$LPLIST_BODY"
 [ "$NEED_MB_RM" -eq 0 ] || show_plist_diff "$MB_PLIST" ""
-show_old_plist() { # the job under its pre-D64 or pre-D35 name, which this run removes
+show_old_plist() { # the job under its pre-D65 or pre-D35 name, which this run removes
   say "== launchd: $1 (the name before the rename)"
   diff -u --label "$1 (current)" --label "$1 (removed)" "$1" /dev/null || true
 }
@@ -612,7 +612,7 @@ apply_plist() { # file body label what
 [ "$NEED_LPLIST" -eq 0 ] || apply_plist "$LPLIST" "$LPLIST_BODY" org.agent-terminal.learn "learn.sh every day at 05:30"
 [ "$NEED_MB_RM" -eq 0 ] || apply_plist "$MB_PLIST" "" "$MB_ID" "the menu bar dot"
 if [ "$NEED_MB_APP_RM" -eq 1 ]; then rm -rf "$MB_APP"; act "removed $MB_APP"; fi
-# the pre-D64 and pre-D35 jobs go only after their replacements loaded (a failed bootstrap above exits first)
+# the pre-D65 and pre-D35 jobs go only after their replacements loaded (a failed bootstrap above exits first)
 remove_old_job() { # plist label
   "$LAUNCHCTL" bootout "gui/$(id -u)/$2" >/dev/null 2>&1 || true
   rm -f "$1"; act "removed $1 ($2, the name before the rename)"

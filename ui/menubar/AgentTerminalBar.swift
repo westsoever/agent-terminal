@@ -32,7 +32,7 @@
 //
 // CLI: AgentTerminalBar --status-once  prints the computed state as key=value lines and exits (used by tests/t_menubar.sh).
 // Env: AGENT_HOME (~/.agent) AGENT_TERMINAL_DIR (~/.claude/agent-terminal) LAUNCH_AGENTS_DIR (~/Library/LaunchAgents) CLAUDE_DIR (~/.claude)
-//      AGENT_TERMINAL_BAR_STALE_SECS (660) AGENT_TERMINAL_BAR_POLL_SECS (12); the KACHING_* names (before D64) and the
+//      AGENT_TERMINAL_BAR_STALE_SECS (660) AGENT_TERMINAL_BAR_POLL_SECS (12); the KACHING_* names (before D65) and the
 //      CHING_* names (before D35) still count. The watcher counts as installed under its old labels org.kaching.watch and
 //      org.ching.watch too, until install.sh replaces them.
 
@@ -50,7 +50,7 @@ struct AgentTerminalPaths: Sendable {
     var heartbeat: URL { agentHome.appendingPathComponent("watch.heartbeat") }
     var watchLog: URL { agentHome.appendingPathComponent("watch.log") }
     var watchPlist: URL { launchAgentsDir.appendingPathComponent("org.agent-terminal.watch.plist") }
-    var oldWatchPlists: [URL] {   // before D64 and before D35
+    var oldWatchPlists: [URL] {   // before D65 and before D35
         ["org.kaching.watch.plist", "org.ching.watch.plist"].map { launchAgentsDir.appendingPathComponent($0) }
     }
     var dash: URL { agentTerminalDir.appendingPathComponent("bin/dash.sh") }
@@ -627,7 +627,7 @@ final class StatusBarController: NSObject {
             if !ok {
                 let binDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin")
                 var bin = binDir.appendingPathComponent("agterm").path
-                if !FileManager.default.fileExists(atPath: bin) { bin = binDir.appendingPathComponent("kaching").path }   // before D64
+                if !FileManager.default.fileExists(atPath: bin) { bin = binDir.appendingPathComponent("kaching").path }   // before D65
                 TerminalLauncher.run(name: "agterm", body: "export AGENT_HOME=\(TerminalLauncher.quote(paths.agentHome.path))\nexec \(TerminalLauncher.quote(bin))")
             }
         }
@@ -682,7 +682,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 // MARK: - Entry
 
-/// The environment, with a variable under an older name (KACHING_*, before D64; CHING_*, before D35) counting when the
+/// The environment, with a variable under an older name (KACHING_*, before D65; CHING_*, before D35) counting when the
 /// AGENT_TERMINAL_* one is unset. KACHING_* wins over CHING_*.
 func agentTerminalEnvironment() -> [String: String] {
     var env = ProcessInfo.processInfo.environment

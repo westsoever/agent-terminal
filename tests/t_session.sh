@@ -139,7 +139,7 @@ for m in start touch end; do
 done
 assert_no_file "learner: no registry entry in sessions/" "$AGENT_HOME/sessions/s-learner"
 assert_eq "learner: no events" "0" "$(grep -c '"s-learner"' "$AGENT_HOME/events.jsonl" 2>/dev/null || true)"
-# ---------- the old variable names still count (D64: KACHING_*, D35: CHING_*): lib.sh maps them to AGENT_TERMINAL_* ----------
+# ---------- the old variable names still count (D65: KACHING_*, D35: CHING_*): lib.sh maps them to AGENT_TERMINAL_* ----------
 assert_eq "env: KACHING_X fills AGENT_TERMINAL_X" "from-kaching" "$(env -u AGENT_TERMINAL_ZZ KACHING_ZZ=from-kaching bash -c '. "$1"; echo "$AGENT_TERMINAL_ZZ"' _ "$BIN/lib.sh")"
 assert_eq "env: CHING_X fills AGENT_TERMINAL_X" "from-ching" "$(env -u AGENT_TERMINAL_ZZ CHING_ZZ=from-ching bash -c '. "$1"; echo "$AGENT_TERMINAL_ZZ"' _ "$BIN/lib.sh")"
 assert_eq "env: KACHING_X wins over CHING_X" "from-kaching" "$(env -u AGENT_TERMINAL_ZZ KACHING_ZZ=from-kaching CHING_ZZ=from-ching bash -c '. "$1"; echo "$AGENT_TERMINAL_ZZ"' _ "$BIN/lib.sh")"

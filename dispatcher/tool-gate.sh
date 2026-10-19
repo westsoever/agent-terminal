@@ -39,7 +39,7 @@ KIT_P=$(cd "$SELF_DIR/.." && pwd -P)
 CLAUDE_DIR=${CLAUDE_DIR:-$HOME/.claude}
 # shellcheck disable=SC2088
 BASES=("~/.claude/agent-terminal" '$HOME/.claude/agent-terminal' "$CLAUDE_DIR/agent-terminal" "$KIT_L" "$KIT_P"
-       "~/.claude/kaching" '$HOME/.claude/kaching' "$CLAUDE_DIR/kaching"   # the link's name before D64
+       "~/.claude/kaching" '$HOME/.claude/kaching' "$CLAUDE_DIR/kaching"   # the link's name before D65
        "~/.claude/ching" '$HOME/.claude/ching' "$CLAUDE_DIR/ching")   # and before D35
 INPUT=$(cat)
 DECIDED=0

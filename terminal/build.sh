@@ -1,6 +1,6 @@
 #!/bin/bash
 # build.sh: build the agent terminal and install it as ~/.local/bin/agterm (or $1).
-# D64: the command was called kaching. A kaching left in the same folder (the owner's old install, which Raycast scripts
+# D65: the command was called kaching. A kaching left in the same folder (the owner's old install, which Raycast scripts
 # and the menu bar dot may still start) becomes a link to the new binary, so those keep working.
 set -euo pipefail
 cd "$(dirname "$0")"

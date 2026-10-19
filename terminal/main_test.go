@@ -18,7 +18,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// An older variable name (KACHING_* from before D64, CHING_* from before D35) stands for the AGENT_TERMINAL_* one
+// An older variable name (KACHING_* from before D65, CHING_* from before D35) stands for the AGENT_TERMINAL_* one
 // when that is unset, and KACHING_* wins over CHING_*.
 func TestLegacyEnv(t *testing.T) {
 	for _, k := range []string{"AGENT_TERMINAL_T1", "AGENT_TERMINAL_T2", "AGENT_TERMINAL_T3", "AGENT_TERMINAL_T4"} {

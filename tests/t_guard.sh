@@ -127,7 +127,7 @@ gdeny "edit settings.json via sed" "$R" "sed -i '' 's/guard//' $HOME/.claude/set
 gdeny "redirect into settings.json" "$R" "echo '{}' > $HOME/.claude/settings.json"
 gdeny "modify the guard itself" "$R" "echo 'exit 0' >> $KIT/bin/guard.sh && : $CLAUDE_DIR/agent-terminal/bin/guard.sh"
 gdeny "write through the agent-terminal symlink" "$R" "cp /tmp/x $CLAUDE_DIR/agent-terminal/bin/guard.sh"
-gdeny "write through the kaching link (the name before D64)" "$R" "cp /tmp/x $CLAUDE_DIR/kaching/bin/guard.sh"
+gdeny "write through the kaching link (the name before D65)" "$R" "cp /tmp/x $CLAUDE_DIR/kaching/bin/guard.sh"
 gdeny "write through the ching link (the name before D35)" "$R" "cp /tmp/x $CLAUDE_DIR/ching/bin/guard.sh"
 tdeny "Edit tool on settings.json" Edit "$R" "$(jq -n --arg p "$HOME/.claude/settings.json" '{file_path:$p,old_string:"a",new_string:"b"}')"
 tdeny "Write tool into .git/hooks" Write "$R" "$(jq -n --arg p "$RP/.git/hooks/pre-push" '{file_path:$p,content:"exit 0"}')"
@@ -1252,7 +1252,7 @@ EOF
 gdeny "agent-terminal-proposals approve from a session" "$R" 'agent-terminal-proposals approve rule-x'
 gdeny "approve through the kit path" "$R" "$HOME/.claude/agent-terminal/bin/agent-terminal-proposals approve rule-x"
 gdeny "approve under a fake pty" "$R" 'script -q /dev/null agent-terminal-proposals approve rule-x'
-gdeny "old name: kaching-proposals approve (D64)" "$R" 'kaching-proposals approve rule-x'
+gdeny "old name: kaching-proposals approve (D65)" "$R" 'kaching-proposals approve rule-x'
 gdeny "old name: ching-proposals approve (D35)" "$R" 'ching-proposals approve rule-x'
 gdeny "old name: kaching-proposals approve under bash -c" "$R" "bash -c 'kaching-proposals approve rule-x'"
 gdeny "approve after a cd and &&" "$R" 'cd /tmp && bin/agent-terminal-proposals approve skill-y'
@@ -1380,9 +1380,9 @@ out=$(printf '%s' "$(guard_json Write "$WORK" "$(fp_json "$WORK/sl-learner/propo
 if is_deny "$out"; then pass "learner deny: a symlinked proposals root"; else fail "learner deny: a symlinked proposals root" "$out"; fi
 why=$(printf '%s' "$(guard_json Skill "$PRL/.work" '{"skill":"x"}')" | AGENT_TERMINAL_LEARNER=1 "$BIN/guard.sh" | jq -r .hookSpecificOutput.permissionDecisionReason)
 assert_contains "learner deny: the reason names learner mode" "$why" "learner mode (AGENT_TERMINAL_LEARNER=1)"
-# D64: a job started before the rename still sets KACHING_LEARNER (or CHING_LEARNER before D35): learner mode all the same
+# D65: a job started before the rename still sets KACHING_LEARNER (or CHING_LEARNER before D35): learner mode all the same
 out=$(printf '%s' "$(guard_json Skill "$PRL/.work" '{"skill":"x"}')" | KACHING_LEARNER=1 "$BIN/guard.sh" 2>&1)
-assert_contains "learner deny: KACHING_LEARNER=1 still counts (D64)" "$out" "learner mode"
+assert_contains "learner deny: KACHING_LEARNER=1 still counts (D65)" "$out" "learner mode"
 out=$(printf '%s' "$(guard_json Skill "$PRL/.work" '{"skill":"x"}')" | CHING_LEARNER=1 "$BIN/guard.sh" 2>&1)
 assert_contains "learner deny: CHING_LEARNER=1 still counts (D35)" "$out" "learner mode"
 # without AGENT_TERMINAL_LEARNER=1 nothing changes (D24 push gate default stays off; tools the guard does not rule stay allowed)
