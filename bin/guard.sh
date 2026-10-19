@@ -694,8 +694,8 @@ check_proposals_call() { # TOKS is the segment
   # as the CLI denied any command quoting shell code. A glob with a letter or a path (bin/c*s, bin/*s,
   # bin/???????????????) still counts, unless its directory part cannot name a copy of the CLI (glob_path_may_name_cli).
   # Run inside bin/, an all-pattern word could still start the CLI; the CLI's own checks refuse approve there.
-  local rawpat
-  rawpat=$(printf '%s' "${TOKS[$k]}" | sed 's/\[[^]]*\]//g')
+  local rawpat=""   # only a glob command word needs it: a sed per segment cost ~3 ms each
+  if [[ "$b" == *[\*\?\[]* ]]; then rawpat=$(printf '%s' "${TOKS[$k]}" | sed 's/\[[^]]*\]//g'); fi
   # shellcheck disable=SC2053
   if [[ "$b" == *[\*\?\[]* ]] && [[ "$b" != *')' ]] && [[ "$rawpat" == *[A-Za-z0-9/]* ]] && { [[ agent-terminal-proposals == $b ]] || [[ kaching-proposals == $b ]] || [[ ching-proposals == $b ]]; } && glob_path_may_name_cli "${TOKS[$k]}"; then b=agent-terminal-proposals; fi
   case "$b" in kaching-proposals|ching-proposals) b=agent-terminal-proposals ;; esac   # the old names (D35, D65) are wrappers that run the same CLI
