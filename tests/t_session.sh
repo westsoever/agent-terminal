@@ -103,6 +103,13 @@ assert_contains "precompact(repo): uncommitted file listed" "$st" "dirty.txt"
 assert_contains "precompact(repo): narrative content preserved" "$st" "shipped the widget"
 run_hook pre-compact.sh "$(hook_json PreCompact "$R" s-repo)"
 assert_eq "precompact is idempotent (one snapshot block)" "1" "$(grep -c 'ching:snapshot:begin' "$R/.agent/STATE.md")"
+# the snapshot is written under the STATE.md lock (stop-check.sh takes it too): a holder is waited for, not overwritten
+( . "$BIN/lib.sh"; lock_fd9 "$R/.agent/.state.lock"; : >"$WORK/pc-held"; sleep 2; printf 'HELD-NOTE\n' >>"$R/.agent/STATE.md" ) & hp=$!
+while [ ! -f "$WORK/pc-held" ]; do sleep 0.05; done
+s=$SECONDS; run_hook pre-compact.sh "$(hook_json PreCompact "$R" s-repo)"
+wait "$hp"
+assert_ok "precompact waits for the STATE.md lock" test $((SECONDS - s)) -ge 1
+assert_contains "precompact keeps a note written while it waited" "$(cat "$R/.agent/STATE.md")" "HELD-NOTE"
 run_hook pre-compact.sh "$(hook_json PreCompact "$P" s-plain)"
 assert_contains "precompact(non-git): snapshot in session STATE.md" "$(cat "$AGENT_HOME/sessions/s-plain/STATE.md")" "not a git repository"
 assert_contains "precompact(non-git): earlier notes preserved" "$(cat "$AGENT_HOME/sessions/s-plain/STATE.md")" "RESUMED-STATE-77"

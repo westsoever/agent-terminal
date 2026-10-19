@@ -243,9 +243,7 @@ route_list() {
   while IFS=$'\t' read -r pid sid cwd jname jstatus sock; do
     msg=$jname
     if [ "$sock" != "-" ] && [ -n "$dupes" ] && printf '%s\n' "$dupes" | grep -qxF -- "$jname"; then msg="uds:$sock"; fi
-    # the registry dir name, as hook_init derives it from the session id
-    case "$sid" in .*|*..*|*[!A-Za-z0-9._-]*) sid="sid-$(printf '%s' "$sid" | shasum | cut -c1-16)" ;; esac
-    [ "${#sid}" -le 128 ] || sid="sid-$(printf '%s' "$sid" | shasum | cut -c1-16)"
+    sid_dir "$sid"; sid=$SID_NAME   # the registry dir name, as hook_init derives it
     sd="$AGENT_HOME/sessions/$sid"
     meta_load "$sd/meta"
     root=$M_root; branch=$M_branch

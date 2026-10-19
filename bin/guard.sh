@@ -87,9 +87,10 @@ on_exit() {
 }
 trap on_exit EXIT
 
-TOOL=$(jq -r '.tool_name // ""' <<<"$INPUT")
-TOOL_LC=$(printf '%s' "$TOOL" | tr '[:upper:]' '[:lower:]')
-CWD=$(jq -r '.cwd // ""' <<<"$INPUT")
+# One jq for the fields every call reads (@sh quotes newlines and quotes for eval). Assigned first: a failing jq
+# inside eval "$(...)" would not stop set -e.
+FIELDS=$(jq -r '@sh "TOOL=\(.tool_name // "" | tostring) TOOL_LC=\(.tool_name // "" | tostring | ascii_downcase) CWD=\(.cwd // "" | tostring) RAW_CMD=\(.tool_input.command? // "" | tostring)"' <<<"$INPUT")
+eval "$FIELDS"
 [ -n "$CWD" ] || CWD=$PWD
 
 # ---------- path helpers ----------
@@ -117,12 +118,17 @@ resolve_path() { # path base -> absolute, physical (existing ancestor resolved),
 }
 
 CWD_PHYS=$(phys_dir "$CWD")
-ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null || true)
-[ -n "$ROOT" ] || ROOT=$CWD_PHYS
-ROOT=$(phys_dir "$ROOT")
+ROOT=""
+repo_root() { # sets ROOT once (only rm -rf needs it): the git top of the session folder, else the folder; physical
+  [ -z "$ROOT" ] || return 0
+  ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null || true)
+  [ -n "$ROOT" ] || ROOT=$CWD_PHYS
+  ROOT=$(phys_dir "$ROOT")
+}
 
 is_safe_delete_target() {
   local p=$1 tmp
+  repo_root
   [ "$p" != "$ROOT" ] || return 1
   [ "$p" != "$ROOT/.git" ] || return 1
   case "$p" in "$ROOT"/*) return 0 ;; esac
@@ -266,6 +272,7 @@ check_delete_target() { # path-as-written
       pre=${a%%[\*\?\[]*}
       case "$pre" in */*) dir=${pre%/*}; [ -n "$dir" ] || dir=/ ;; *) dir=. ;; esac
       abs=$(resolve_path "$dir" "$SIM_CWD")
+      repo_root
       if [ "$abs" = "$ROOT" ] || is_safe_delete_target "$abs"; then return 0; fi
       # a named glob straight inside a temp root (/tmp/myrun.*): only entries under it can match. A bare /tmp/*
       # or a short one like /tmp/cla* (which hits /tmp/claude-501, every session's live scratch) stays denied: the
@@ -694,8 +701,8 @@ check_proposals_call() { # TOKS is the segment
   # as the CLI denied any command quoting shell code. A glob with a letter or a path (bin/c*s, bin/*s,
   # bin/???????????????) still counts, unless its directory part cannot name a copy of the CLI (glob_path_may_name_cli).
   # Run inside bin/, an all-pattern word could still start the CLI; the CLI's own checks refuse approve there.
-  local rawpat
-  rawpat=$(printf '%s' "${TOKS[$k]}" | sed 's/\[[^]]*\]//g')
+  local rawpat=""   # only a glob command word needs it: a sed per segment cost ~3 ms each
+  if [[ "$b" == *[\*\?\[]* ]]; then rawpat=$(printf '%s' "${TOKS[$k]}" | sed 's/\[[^]]*\]//g'); fi
   # shellcheck disable=SC2053
   if [[ "$b" == *[\*\?\[]* ]] && [[ "$b" != *')' ]] && [[ "$rawpat" == *[A-Za-z0-9/]* ]] && { [[ agent-terminal-proposals == $b ]] || [[ kaching-proposals == $b ]] || [[ ching-proposals == $b ]]; } && glob_path_may_name_cli "${TOKS[$k]}"; then b=agent-terminal-proposals; fi
   case "$b" in kaching-proposals|ching-proposals) b=agent-terminal-proposals ;; esac   # the old names (D35, D65) are wrappers that run the same CLI
@@ -945,8 +952,8 @@ check_misc() { # one segment, tokens in TOKS
           if seg_matches '*supabase.co*' || seg_matches '*supabase.com*' || seg_matches '*pooler*' || seg_matches '$*DATABASE*' || seg_matches '$*SUPABASE*' || seg_matches '$*POSTGRES*'; then
             emit_deny "psql against the shared Supabase database bypasses the migration ledger. Use migrate-gate.sh and db-migrate.ts."
           fi ;;
-        bash|sh|zsh)
-          if [ "$k" -eq 0 ] && ! seg_has_operand; then emit_deny "piping into a shell hides what will run. Save the script to a file and review it."; fi ;;
+        bash|sh|zsh)   # a lone --version or --help prints and exits without reading stdin (bash --version | head -1)
+          if [ "$k" -eq 0 ] && ! seg_has_operand && ! { [ "$NT" -eq 2 ] && [[ "${TOKS[1]}" == --version || "${TOKS[1]}" == --help ]]; }; then emit_deny "piping into a shell hides what will run. Save the script to a file and review it."; fi ;;
       esac
     fi
     case "$b" in
@@ -1353,7 +1360,7 @@ size_verdict() { # stdin: the raw command -> prints "ok", or "big" when it canno
 
 check_bash() {
   local raw plain joined prev verdict
-  raw=$(jq -r '.tool_input.command // ""' <<<"$INPUT")
+  raw=$RAW_CMD
   [ -n "$raw" ] || allow
   # before any view is computed: a command that cannot be scanned in time is refused (fail closed)
   verdict=$(printf '%s\n' "$raw" | size_verdict) || { echo "GUARD: could not measure the command; failing closed" >&2; exit 2; }

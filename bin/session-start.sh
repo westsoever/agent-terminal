@@ -18,9 +18,9 @@ resolve_state
 NOW=$(date +%s)
 
 case "$MODE" in
-  touch) meta_set state working; meta_set updated "$NOW"; meta_set prompted "$NOW"; ev prompt
+  touch) meta_set state working updated "$NOW" prompted "$NOW"; ev prompt
          QUEUE_SID=$SID QUEUE_NAME=$NAME "$SELF_DIR/queue.sh" back </dev/null || true; exit 0 ;;
-  end)   meta_set state ended;   meta_set updated "$NOW"; ev session_end
+  end)   meta_set state ended updated "$NOW"; ev session_end
          QUEUE_SID=$SID QUEUE_NAME=$NAME "$SELF_DIR/queue.sh" forget </dev/null || true; exit 0 ;;
 esac
 

@@ -82,21 +82,13 @@ session_tty() { # the controlling tty of the nearest ancestor that has one ('' w
   done
 }
 
-# One queue change at a time (two sessions stopping together would both count the parked windows).
-# mkdir is atomic; a lock older than 30 s is from a run that died and is taken over.
-lock() {
-  local n=0
-  until mkdir "$QDIR/.lock" 2>/dev/null; do
-    if [ $(( $(date +%s) - $(file_mtime "$QDIR/.lock") )) -gt 30 ]; then rmdir "$QDIR/.lock" 2>/dev/null || true; continue; fi
-    n=$((n + 1)); [ "$n" -lt 100 ] || return 1
-    sleep 0.1
-  done
-  trap 'rmdir "$QDIR/.lock" 2>/dev/null || true' EXIT
-}
+# One queue change at a time (two sessions stopping together would both count the parked windows). An flock (lib.sh
+# lock_fd9): held until this run exits, dropped by the kernel if it dies. 30 s covers the slowest retile.
+lock() { lock_fd9 "$QDIR/.queue.lock" 30; }
 
 WINDOWS=""   # queue-term.js windows: "id x y w h ttys onscreen", updated in place by relocate
 SCREENS=""
-load_windows() { WINDOWS=$(term windows 2>/dev/null || true); }
+load_windows() { WINDOWS=$(term windows 2>/dev/null || true); screens >/dev/null; }   # screens here: later calls run in $(...) and could not fill the cache
 screens() { [ -n "$SCREENS" ] || SCREENS=$(term screens 2>/dev/null || true); printf '%s\n' "$SCREENS"; }
 window_of() { # tty -> "id x y w h ttys" of the window holding that tab
   printf '%s\n' "$WINDOWS" | awk -v t="$1" 'NF >= 6 { n = split($6, a, ","); for (i = 1; i <= n; i++) if (a[i] == t) { print; exit } }'

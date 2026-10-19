@@ -314,4 +314,27 @@ awk '$1 == 331 { $2 = 500; $3 = 300 } { print }' "$FT/windows" >"$FT/w.tmp" && m
 QUEUE_SID=s330 QUEUE_TTY=ttys330 "$Q" back
 assert_eq "dragged, then prompted with agent-terminal closed: back on monitor 2" "1920 -67 1920 1080" "$(win 331)"
 assert_no_file "dragged, then prompted: no longer parked" "$QD/parked/331"
+
+# one retile asks Terminal for the screens once (the cache used to be filled inside $(...) and lost)
+setcfg
+reset "411 2000 30 700 700 ttys410" "412 2800 30 700 700 ttys411"
+QUEUE_TTY=ttys411 "$Q" retile
+assert_eq "retile: tiled" "1920 -67 960 1080" "$(win 411)"
+assert_eq "retile: one screens call" "1" "$(grep -c "^screens" "$FT/calls")"
+
+# the queue lock is an flock: a run waits for the holder instead of dropping its change, and a holder that dies
+# (kill -9) leaves no lock to wait for
+reset "401 2000 100 800 500 ttys400"
+( . "$BIN/lib.sh"; lock_fd9 "$QD/.queue.lock"; : >"$WORK/held1"; sleep 2 ) & hp=$!
+while [ ! -f "$WORK/held1" ]; do sleep 0.05; done
+s=$SECONDS; QUEUE_SID=s400 QUEUE_NAME=l QUEUE_TTY=ttys400 "$Q" retile
+assert_ok "queue lock: a run waits for the holder" test $((SECONDS - s)) -ge 1
+assert_eq "queue lock: the waiting run keeps its change" "ttys400 401 1 l" "$(cat "$TB/s400")"
+wait "$hp"
+( . "$BIN/lib.sh"; lock_fd9 "$QD/.queue.lock"; : >"$WORK/held2"; exec sleep 30 ) & hp=$!
+while [ ! -f "$WORK/held2" ]; do sleep 0.05; done
+kill -9 "$hp"; wait "$hp" 2>/dev/null
+s=$SECONDS; QUEUE_SID=s401 QUEUE_NAME=m QUEUE_TTY=ttys400 "$Q" retile
+assert_ok "queue lock: a dead holder does not block" test $((SECONDS - s)) -le 1
+assert_eq "queue lock: the run after a dead holder keeps its change" "ttys400 401 1 m" "$(cat "$TB/s401")"
 exit 0

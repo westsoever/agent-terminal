@@ -94,6 +94,7 @@ case "$HANDOFF_COOLDOWN_MINS" in ''|*[!0-9]*) HANDOFF_COOLDOWN_MINS=120 ;; esac
 [ "${#HANDOFF_COOLDOWN_MINS}" -le 6 ] || HANDOFF_COOLDOWN_MINS=120
 HANDOFF_COOLDOWN_MINS=$((10#$HANDOFF_COOLDOWN_MINS))
 WHY=""
+put() { printf '%s\n' "$2" >"$1.$$" && mv -f "$1.$$" "$1"; }   # file value: a reader never sees it empty
 budget_ok() { # 0 when a budgeted alert may go out now (and books it); else sets WHY
   local hour used last file
   hour=$(date -r "$NOW" +%H 2>/dev/null || true); hour=${hour#0}
@@ -106,7 +107,7 @@ budget_ok() { # 0 when a budgeted alert may go out now (and books it); else sets
     file="$AGENT_HOME/notify/$SESSION.handoff"
     last=$(cat "$file" 2>/dev/null || echo 0); case "$last" in ''|*[!0-9]*) last=0 ;; esac
     if [ $((NOW - last)) -lt $((HANDOFF_COOLDOWN_MINS * 60)) ]; then WHY=handoff-cooldown; return 1; fi
-    printf '%s\n' "$NOW" >"$file"
+    put "$file" "$NOW"
     return 0
   fi
   file="$AGENT_HOME/notify/budget-$(date -r "$NOW" +%Y-%m-%d)"
@@ -114,15 +115,16 @@ budget_ok() { # 0 when a budgeted alert may go out now (and books it); else sets
   if [ "$used" -ge "${NOTIFY_BUDGET:-4}" ]; then WHY=daily-budget; return 1; fi
   last=$(cat "$AGENT_HOME/notify/$SESSION.budgeted" 2>/dev/null || echo 0); case "$last" in ''|*[!0-9]*) last=0 ;; esac
   if [ $((NOW - last)) -lt $(( ${NOTIFY_COOLDOWN_MINS:-45} * 60 )) ]; then WHY=cooldown; return 1; fi
-  printf '%s\n' $((used + 1)) >"$file"
-  printf '%s\n' "$NOW" >"$AGENT_HOME/notify/$SESSION.budgeted"
+  put "$file" $((used + 1))
+  put "$AGENT_HOME/notify/$SESSION.budgeted" "$NOW"
   return 0
 }
 
 OUTCOME=delivered
 case "$CLASS" in
   inbox) METHOD=inbox; OUTCOME=suppressed; WHY=routed-to-inbox ;;
-  budgeted) if ! budget_ok; then METHOD="suppressed:$WHY"; OUTCOME=suppressed; fi ;;
+  # booked under a lock: two alerts at once read the same count and both went out
+  budgeted) if ! with_lock "$AGENT_HOME/notify/.budget.lock" budget_ok; then METHOD="suppressed:${WHY:-lock-busy}"; OUTCOME=suppressed; fi ;;
 esac
 
 printf '%s\t%s\t%s\t%s\n' "$(date -r "$NOW" '+%Y-%m-%d %H:%M:%S')" "$METHOD" "$TITLE" "$MSG" >>"$LOG"

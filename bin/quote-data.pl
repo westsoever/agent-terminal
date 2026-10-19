@@ -6,7 +6,8 @@
 #     The splitter cuts at ; | & ( ) without looking at quotes, so `grep -nE 'gh release create|npm publish' f`
 #     became a second command `npm publish' f` (a false deny). This blanks ; | & ( ) < > (to a space) inside the
 #     quoted strings that are data: arguments, after the command word, of a command that never runs its
-#     arguments (grep, egrep, fgrep, rg, echo, printf, git commit/tag, gh pr|issue create/comment/edit).
+#     arguments (grep, egrep, fgrep, rg, echo, printf, curl, jq, git commit/tag, gh pr|issue create/comment/edit).
+#     curl and jq carry JSON: a ; in `curl -d '{"run":"ls; rm -rf /tmp/x"}' ~/out` made `~/out` an rm operand.
 #     Quoted text handed to bash -c, eval, ssh, watch, an interpreter or any unknown command is left as it was,
 #     so it is still split and scanned. Only a string that opens and closes on one line is blanked, a
 #     double-quoted one only when it holds no $( substitution (that is code), and never a redirect target.
@@ -36,7 +37,7 @@ my $i = 0;
 sub unchanged { print $s; exit 0 }
 unchanged() if $s =~ /\besac\b/;
 
-my %DATA = map { $_ => 1 } qw(grep egrep fgrep rg echo printf);
+my %DATA = map { $_ => 1 } qw(grep egrep fgrep rg echo printf curl jq);
 # wrappers that run their command directly (no shell re-parse of the words: not eval, watch, ssh, parallel, bash)
 my %WRAP = map { $_ => 1 } qw(sudo env command exec time nohup nice ionice xargs timeout caffeinate then do else if elif while until ! {);
 my %VALUE_OPT = (xargs => qr/^-[IJadELnPRSs]$/, sudo => qr/^-[ugpCDRrtU]$/, env => qr/^-[uCP]$/,
