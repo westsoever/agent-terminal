@@ -193,7 +193,7 @@ type ghReposMsg GHRepos
 
 // ghRepoList lists one owner's repos; a variable so tests can hand back their own JSON.
 var ghRepoList = func(ctx context.Context, owner string) ([]byte, error) {
-	return exec.CommandContext(ctx, "gh", "repo", "list", owner, "--no-archived", "--limit", "300",
+	return cmdCtx(ctx, "gh", "repo", "list", owner, "--no-archived", "--limit", "300",
 		"--json", "nameWithOwner,pushedAt").Output()
 }
 
@@ -386,7 +386,7 @@ var ghContents = func(ctx context.Context, remote, rel string) ([]byte, error) {
 	if rel != "" {
 		p += "/" + escapePath(rel)
 	}
-	return exec.CommandContext(ctx, "gh", "api", p).Output()
+	return cmdCtx(ctx, "gh", "api", p).Output()
 }
 
 func loadGHTree(remote, rel string) treeMsg {

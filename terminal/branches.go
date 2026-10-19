@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -95,7 +94,7 @@ func (b Branches) find(name string) *Branch {
 // gitRun runs git in dir, never asking for a password and never taking the index lock (another session may be
 // working in that folder); a variable so tests can record the calls.
 var gitRun = func(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	c := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	c := cmdCtx(ctx, "git", append([]string{"-C", dir}, args...)...)
 	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
 	return c.Output()
 }
@@ -287,7 +286,7 @@ func (b *Branches) sortItems() {
 
 // ghBranches lists a repo's branches on GitHub; a variable so tests can hand back their own JSON.
 var ghBranches = func(ctx context.Context, remote string) ([]byte, error) {
-	return exec.CommandContext(ctx, "gh", "api", "--paginate", "repos/"+remote+"/branches?per_page=100").Output()
+	return cmdCtx(ctx, "gh", "api", "--paginate", "repos/"+remote+"/branches?per_page=100").Output()
 }
 
 // loadGHBranches: the branch names of a repo with no clone here.

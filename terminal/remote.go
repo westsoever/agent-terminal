@@ -51,7 +51,7 @@ const (
 // remoteCreds: the owner's Claude login (the keychain item Claude Code keeps) and organisation. The token goes to
 // api.anthropic.com only. A variable so tests need no keychain.
 var remoteCreds = func() (token, org string, err error) {
-	out, err := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-w").Output()
+	out, err := runFor(5*time.Second, false, "security", "find-generic-password", "-s", "Claude Code-credentials", "-w")
 	if err != nil {
 		return "", "", fmt.Errorf("no Claude login in the keychain")
 	}
@@ -239,7 +239,7 @@ type remoteSentMsg struct{ id, title, err string }
 
 // remoteSendRun runs the claude CLI outside any project; a variable so tests can record the calls.
 var remoteSendRun = func(ctx context.Context, args ...string) ([]byte, error) {
-	c := exec.CommandContext(ctx, "claude", args...)
+	c := cmdCtx(ctx, "claude", args...)
 	c.Dir = os.TempDir()
 	return c.CombinedOutput()
 }

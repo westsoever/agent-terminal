@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -48,7 +47,7 @@ type prDetailMsg PRDetail
 
 // ghPRView reads one pull request; a variable so tests can hand back their own JSON.
 var ghPRView = func(ctx context.Context, url string) ([]byte, error) {
-	return exec.CommandContext(ctx, "gh", "pr", "view", url, "--json",
+	return cmdCtx(ctx, "gh", "pr", "view", url, "--json",
 		"body,headRefName,headRefOid,baseRefName,additions,deletions,files,mergeable,reviewDecision,statusCheckRollup,comments,reviews").Output()
 }
 
@@ -58,11 +57,7 @@ func loadPRDetail(url string) PRDetail {
 	d := PRDetail{URL: url, At: time.Now()}
 	out, err := ghPRView(ctx, url)
 	if err != nil {
-		msg := err.Error()
-		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
-			msg = string(ee.Stderr)
-		}
-		d.Err = "gh pr view: " + strings.Join(strings.Fields(msg), " ")
+		d.Err = ghErr("gh pr view", err)
 		return d
 	}
 	type author struct {
@@ -181,7 +176,7 @@ func prMergeBlock(pr PullReq, d PRDetail) string {
 // ghMergeRun runs gh outside any local clone (a merge never touches a checkout here); a variable so tests can
 // record the calls.
 var ghMergeRun = func(ctx context.Context, args ...string) ([]byte, error) {
-	c := exec.CommandContext(ctx, "gh", args...)
+	c := cmdCtx(ctx, "gh", args...)
 	c.Dir = os.TempDir()
 	return c.CombinedOutput()
 }
@@ -275,8 +270,7 @@ func prCloneDir(repo string) string {
 			if !e.IsDir() || !dirExists(filepath.Join(dir, ".git")) {
 				continue
 			}
-			out, _ := exec.Command("git", "-C", dir, "remote", "get-url", "origin").Output()
-			if remoteRepo(string(out)) != key {
+			if remoteRepo(gitOrigin(dir)) != key { // .git/config, no git process per folder
 				continue
 			}
 			if found == "" || strings.EqualFold(e.Name(), filepath.Base(repo)) {
