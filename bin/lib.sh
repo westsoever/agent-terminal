@@ -87,6 +87,24 @@ meta_set() {
   ' "$SESS_DIR" "$1" "$2" 2>/dev/null
 }
 
+# lock_fd9 LOCKFILE [SECS]: take an flock on LOCKFILE through fd 9 and keep it until `exec 9>&-` or the shell exits.
+# perl locks the open file that this shell keeps on fd 9, so the lock outlives perl, and the kernel drops it when
+# the holder dies: no stale lock to take over. Waits SECS (default 10), then fails (1). One lock per shell (fd 9);
+# a child that outlives the work keeps the lock unless it is started with 9>&-.
+lock_fd9() {
+  { exec 9>>"$1"; } 2>/dev/null || return 1
+  perl -e 'use Fcntl ":flock"; open(my $l, ">&=", 9) or exit 1;
+    for (1 .. $ARGV[0] * 50) { exit 0 if flock($l, LOCK_EX | LOCK_NB); select undef, undef, undef, 0.02 } exit 1' "${2:-10}" && return 0
+  exec 9>&-; return 1
+}
+# with_lock LOCKFILE CMD...: run CMD (a function too) holding lock_fd9 on LOCKFILE; CMD's status, 1 on timeout.
+with_lock() {
+  local rc
+  lock_fd9 "$1" || return 1
+  shift; "$@"; rc=$?
+  exec 9>&-; return "$rc"
+}
+
 meta_get() { # file key
   sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1
 }
