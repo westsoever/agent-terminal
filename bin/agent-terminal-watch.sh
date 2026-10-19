@@ -2,7 +2,8 @@
 # agent-terminal-watch.sh - one-shot watcher, run every 5 minutes by launchd (org.agent-terminal.watch). Not a daemon.
 # For every live session in $AGENT_HOME/sessions: stall detection, context pressure and today's token
 # total, read incrementally from the transcript (byte offset in meta). Then token-budget alerts and
-# events.jsonl rotation. It never touches a session: it writes meta keys, $AGENT_HOME/tokens/<UTC day>,
+# events.jsonl and notify.log rotation. Then pruning (step 6): an ended session's folder that holds only bookkeeping
+# goes after 14 days. Otherwise it never touches a session: it writes meta keys, $AGENT_HOME/tokens/<UTC day>,
 # events and notifications only.
 # Meta keys written: tok_offset tok_last_mid ctx_level ctx_pct stalled_at
 # Check-in nudges (3b): sessions waiting on the user get a `waiting` banner (finished sessions with open
@@ -351,4 +352,27 @@ EVF="$AGENT_HOME/events.jsonl"
 if [ -f "$EVF" ] && [ "$(wc -c <"$EVF" | tr -d ' ')" -gt "${WATCH_ROTATE_BYTES:-20971520}" ]; then
   mv "$EVF" "$AGENT_HOME/events-$(date -u -r "$NOW" +%Y%m%d-%H%M%S).jsonl"
 fi
+if [ -f "$NOTIFY_LOG_FILE" ] && [ "$(wc -c <"$NOTIFY_LOG_FILE" | tr -d ' ')" -gt "${WATCH_ROTATE_BYTES:-20971520}" ]; then
+  mv "$NOTIFY_LOG_FILE" "${NOTIFY_LOG_FILE%.log}-$(date -u -r "$NOW" +%Y%m%d-%H%M%S).log"
+fi
+
+# 6. pruning: dash.sh (the menu bar runs it every 12 s) reads every session folder. A folder goes when its meta says
+# state=ended and has not been written for 14 days, and it holds only bookkeeping (meta, its lock and temp files,
+# last-pass, retries). Notes or anything else (STATE.md, NEXT.md, a draft) keep it, like every session not marked
+# ended. notify/ files untouched for 14 days go too: they are cooldown stamps and day counts, stale by then.
+PREF="$TMP/ref14d"
+touch -t "$(date -r $((NOW - 14 * 86400)) +%Y%m%d%H%M.%S)" "$PREF"
+only_bookkeeping() { # session folder -> 0 when every entry in it is the hooks' own
+  local f
+  for f in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    [ -e "$f" ] || continue
+    case "${f##*/}" in meta|.meta.*|last-pass|retries) ;; *) return 1 ;; esac
+  done
+}
+for m in "$AGENT_HOME"/sessions/*/meta; do
+  [ -f "$m" ] && [ "$PREF" -nt "$m" ] || continue   # builtin -nt: no fork for the recent ones
+  [ "$(meta_get "$m" state)" = ended ] && only_bookkeeping "${m%/meta}" || continue
+  rm -rf "${m%/meta}" 2>/dev/null || true
+done
+find "$AGENT_HOME/notify" -type f ! -name '.*' ! -newer "$PREF" -delete 2>/dev/null || true
 exit 0

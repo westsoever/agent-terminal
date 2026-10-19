@@ -101,6 +101,36 @@ assert_no_file "lock removed after the run" "$AGENT_HOME/watch.lock"
 WATCH_ROTATE_BYTES=10 "$W"
 assert_no_file "events.jsonl rotated away" "$EVF"
 assert_eq "one rotated file kept" "1" "$(ls "$AGENT_HOME"/events-*.jsonl | wc -l | tr -d ' ')"
+printf 'a line longer than ten bytes\n' >>"$AGENT_HOME/notify.log"
+WATCH_ROTATE_BYTES=10 "$W"
+assert_no_file "notify.log rotated away" "$AGENT_HOME/notify.log"
+assert_ok "rotated notify log kept" ls "$AGENT_HOME"/notify-*.log   # the run above may have rotated an earlier one
+
+# pruning: only an ended session's folder that holds nothing but bookkeeping, untouched for 14 days
+OLD=$(date -r $((NOW - 20 * 86400)) +%Y%m%d%H%M.%S); RECENT=$(date -r $((NOW - 3 * 86400)) +%Y%m%d%H%M.%S)
+pr() { # sid state stamp [extra file]
+  local d="$AGENT_HOME/sessions/$1"; mkdir -p "$d"; printf 'cwd=%s\nstate=%s\n' "$P" "$2" >"$d/meta"
+  : >"$d/.meta.flock"; : >"$d/last-pass"
+  if [ -n "${4:-}" ]; then mkdir -p "$d/$(dirname "$4")"; : >"$d/$4"; fi
+  touch -t "$3" "$d/meta"
+}
+pr p-gone ended "$OLD"; pr p-notes ended "$OLD" STATE.md; pr p-next ended "$OLD" NEXT.md; pr p-sub ended "$OLD" helpers/x.sh
+pr p-live idle "$OLD"; pr p-recent ended "$RECENT"
+mkdir -p "$AGENT_HOME/notify"
+: >"$AGENT_HOME/notify/p-gone.last"; : >"$AGENT_HOME/notify/budget-2020-01-01"; : >"$AGENT_HOME/notify/p-live.last"
+: >"$AGENT_HOME/notify/.budget.lock"; : >"$AGENT_HOME/notify/p-recent.last"
+touch -t "$OLD" "$AGENT_HOME/notify/p-gone.last" "$AGENT_HOME/notify/budget-2020-01-01" "$AGENT_HOME/notify/.budget.lock"
+"$W"
+assert_no_file "prune: an ended, old, bookkeeping-only folder goes" "$AGENT_HOME/sessions/p-gone"
+assert_file "prune: a folder with STATE.md stays" "$AGENT_HOME/sessions/p-notes/STATE.md"
+assert_file "prune: a folder with NEXT.md stays" "$AGENT_HOME/sessions/p-next/NEXT.md"
+assert_file "prune: a folder with other files stays" "$AGENT_HOME/sessions/p-sub/helpers/x.sh"
+assert_file "prune: a session not marked ended stays" "$AGENT_HOME/sessions/p-live/meta"
+assert_file "prune: an ended session younger than 14 days stays" "$AGENT_HOME/sessions/p-recent/meta"
+assert_no_file "prune: an old notify stamp goes" "$AGENT_HOME/notify/p-gone.last"
+assert_no_file "prune: an old day count goes" "$AGENT_HOME/notify/budget-2020-01-01"
+assert_file "prune: a recent notify stamp stays" "$AGENT_HOME/notify/p-recent.last"
+assert_file "prune: the budget lock stays" "$AGENT_HOME/notify/.budget.lock"
 
 # ---------- fix wave FC1-1: TOKEN_BUDGET_DAILY parsing ----------
 # Each case runs in its own AGENT_HOME that holds one day total (no sessions), so only the budget code runs.
