@@ -87,9 +87,10 @@ on_exit() {
 }
 trap on_exit EXIT
 
-TOOL=$(jq -r '.tool_name // ""' <<<"$INPUT")
-TOOL_LC=$(printf '%s' "$TOOL" | tr '[:upper:]' '[:lower:]')
-CWD=$(jq -r '.cwd // ""' <<<"$INPUT")
+# One jq for the fields every call reads (@sh quotes newlines and quotes for eval). Assigned first: a failing jq
+# inside eval "$(...)" would not stop set -e.
+FIELDS=$(jq -r '@sh "TOOL=\(.tool_name // "" | tostring) TOOL_LC=\(.tool_name // "" | tostring | ascii_downcase) CWD=\(.cwd // "" | tostring) RAW_CMD=\(.tool_input.command? // "" | tostring)"' <<<"$INPUT")
+eval "$FIELDS"
 [ -n "$CWD" ] || CWD=$PWD
 
 # ---------- path helpers ----------
@@ -117,12 +118,17 @@ resolve_path() { # path base -> absolute, physical (existing ancestor resolved),
 }
 
 CWD_PHYS=$(phys_dir "$CWD")
-ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null || true)
-[ -n "$ROOT" ] || ROOT=$CWD_PHYS
-ROOT=$(phys_dir "$ROOT")
+ROOT=""
+repo_root() { # sets ROOT once (only rm -rf needs it): the git top of the session folder, else the folder; physical
+  [ -z "$ROOT" ] || return 0
+  ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null || true)
+  [ -n "$ROOT" ] || ROOT=$CWD_PHYS
+  ROOT=$(phys_dir "$ROOT")
+}
 
 is_safe_delete_target() {
   local p=$1 tmp
+  repo_root
   [ "$p" != "$ROOT" ] || return 1
   [ "$p" != "$ROOT/.git" ] || return 1
   case "$p" in "$ROOT"/*) return 0 ;; esac
@@ -266,6 +272,7 @@ check_delete_target() { # path-as-written
       pre=${a%%[\*\?\[]*}
       case "$pre" in */*) dir=${pre%/*}; [ -n "$dir" ] || dir=/ ;; *) dir=. ;; esac
       abs=$(resolve_path "$dir" "$SIM_CWD")
+      repo_root
       if [ "$abs" = "$ROOT" ] || is_safe_delete_target "$abs"; then return 0; fi
       # a named glob straight inside a temp root (/tmp/myrun.*): only entries under it can match. A bare /tmp/*
       # or a short one like /tmp/cla* (which hits /tmp/claude-501, every session's live scratch) stays denied: the
@@ -1353,7 +1360,7 @@ size_verdict() { # stdin: the raw command -> prints "ok", or "big" when it canno
 
 check_bash() {
   local raw plain joined prev verdict
-  raw=$(jq -r '.tool_input.command // ""' <<<"$INPUT")
+  raw=$RAW_CMD
   [ -n "$raw" ] || allow
   # before any view is computed: a command that cannot be scanned in time is refused (fail closed)
   verdict=$(printf '%s\n' "$raw" | size_verdict) || { echo "GUARD: could not measure the command; failing closed" >&2; exit 2; }
