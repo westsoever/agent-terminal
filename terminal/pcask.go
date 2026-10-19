@@ -15,7 +15,7 @@ package main
 //   request_item_verdicts          items[{id,label,description,previewMarkdown}], verdicts (approve, reject, defer),
 //                                  requireReasonOn; result.items holds the verdicts already given
 //     POST .../verdicts {verdicts:[{id, verdict, reason}]}   (some items at a time is allowed; no reject endpoint)
-//   connection_intent and any other kind: kaching posts nothing, the browser answers.
+//   connection_intent and any other kind: agterm posts nothing, the browser answers.
 
 import (
 	"errors"
@@ -69,7 +69,7 @@ type pcOptRaw struct {
 	Description string `json:"description"`
 }
 
-// pcPayload is the part of an interaction's payload that kaching reads, for every kind.
+// pcPayload is the part of an interaction's payload that agterm reads, for every kind.
 type pcPayload struct {
 	Prompt          string `json:"prompt"`
 	DetailsMarkdown string `json:"detailsMarkdown"`

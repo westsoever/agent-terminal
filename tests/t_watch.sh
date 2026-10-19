@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# kaching-watch.sh: tokens (dedupe, incremental, today only), context levels, stall, budget alerts,
+# agent-terminal-watch.sh: tokens (dedupe, incremental, today only), context levels, stall, budget alerts,
 # rotation, lock, shrinking transcripts.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 # shellcheck source=../bin/lib.sh
 . "$BIN/lib.sh"
-W="$BIN/kaching-watch.sh"
+W="$BIN/agent-terminal-watch.sh"
 export SYNC_CHECK_CMD=true   # the watcher starts the git sync check in the background: not the real one in these sections
 DAY=$(date -u +%Y-%m-%d)
 NOW=$(date +%s)
@@ -279,7 +279,7 @@ swait 1
 sreset; rc=0; FAKE_MODE=fail srun || rc=$?
 assert_eq "sync: a failing check: the watcher still exits 0" "0" "$rc"
 assert_eq "sync: ... and watch.log records the failure" "1" "$(wlog_has 'sync-check: exited with status 3')"
-assert_contains "sync: ... with a timestamp and the watcher's name" "$(cat "$SAH/watch.log")" "kaching-watch: sync-check"
+assert_contains "sync: ... with a timestamp and the watcher's name" "$(cat "$SAH/watch.log")" "agent-terminal-watch: sync-check"
 sreset; rc=0; SYNC_CHECK_CMD="$WORK/no-such-sync-check" srun || rc=$?
 assert_eq "sync: a check that cannot start: the watcher exits 0" "0" "$rc"
 assert_eq "sync: ... and watch.log says it" "1" "$(wlog_has 'cannot start')"
@@ -297,7 +297,7 @@ exec /usr/bin/git "$@"
 EOF
 chmod +x "$WORK/shim/git"
 sreset; HR=$(mk_repo hangrepo); printf '%s\n' "$HR" >"$SAH/repos"
-KACHING_INCLUDE_SANDBOX=1 AGENT_REPOS_FILE="$SAH/repos" PATH="$WORK/shim:$PATH" SHIM_SLEEP=23 SYNC_CHECK_CMD="$BIN/sync-check.sh" SYNC_CHECK_MAX_SECS=2 srun
+AGENT_TERMINAL_INCLUDE_SANDBOX=1 AGENT_REPOS_FILE="$SAH/repos" PATH="$WORK/shim:$PATH" SHIM_SLEEP=23 SYNC_CHECK_CMD="$BIN/sync-check.sh" SYNC_CHECK_MAX_SECS=2 srun
 assert_eq "sync: the real check is stopped at the ceiling while it fetches" "1" "$(wlog_has 'stopped after 2s')"
 sleep 2
 assert_eq "sync: ... and the hung fetch is not left behind" "0" "$(pgrep -f 'sleep 23' | wc -l | tr -d ' ')"

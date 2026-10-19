@@ -204,3 +204,30 @@ Stop the dispatcher first (`/exit`), so it does not hold the voice. If `/tmp/age
 **Tell Claude:** `0.7 pass`, or `0.7 fail: overlapped in test 1` / `0.7 fail: B never spoke in test 2`.
 
 **When you are done:** reply with one line per item, for example `V1 pass`, `0.6 pass 6.1 s average, line 8`, `4.3 pass`, `0.7 pass`. Cleanup: `rm -rf /tmp/kaching-accept /tmp/agent-sandbox`.
+
+---
+
+## 2026-10-19: Agent Terminal (the rename from Kaching, D65)
+
+Nothing here is needed to keep today's install running: every old name still works. Do these when the rename is merged, in this order. Each one is a few minutes.
+
+**A. Move your machine to the new names** (from `~/bbq/kaching`, on main after the merge):
+
+1. `./install.sh --dry-run`, read the diff, then `./install.sh --yes`. It writes `~/.claude/agent-terminal`, moves the hook entries in `~/.claude/settings.json` from `~/.claude/kaching/bin/` to `~/.claude/agent-terminal/bin/` (a backup `settings.json.bak.agent-terminal.<time>` is written first), replaces the jobs `org.kaching.watch` and `org.kaching.learn` with `org.agent-terminal.*`, and keeps `~/.claude/kaching` and `~/.claude/ching` as links. Check: a second `./install.sh` says `nothing to do`.
+2. `terminal/build.sh`. It builds `~/.local/bin/agterm` and turns `~/.local/bin/kaching` into a link to it. A running `kaching` keeps the old code until you quit it (ctrl+c); start `agterm` instead.
+3. `./install.sh --install-menubar --yes` replaces KachingBar with AgentTerminalBar. It is a new app to macOS: System Settings > Privacy & Security > Accessibility, remove KachingBar and add `~/Applications/AgentTerminalBar.app` (needed for the voice shortcut only). The first hotkey press asks again whether it may control Terminal: click OK.
+4. `./install.sh --install-dispatcher --yes` (only if you use the voice dispatcher) writes its settings with the new link. The old settings keep working until then.
+5. Raycast: Settings > Script Commands: re-add `ui/raycast` if the folder was added, and give the three renamed commands (`Next Waiting Agent`, `Tile Terminals`, `Open Agent Terminal`) their hotkeys again. The menu bar hotkeys in `~/.agent/hotkeys` need nothing.
+6. Optional: repos with the pre-push hook keep working through `~/.claude/kaching`. To point them at the new link: `./install.sh --install-prepush <repo>`.
+7. Optional: if your shell profile or a script sets `KACHING_*` variables, rename them to `AGENT_TERMINAL_*` when convenient; the old names still count.
+
+**B. Rename the GitHub repo and the folder, last** (after the PR is merged and every other kaching branch or worktree is merged or closed; close the Claude sessions that run in `~/bbq/kaching` first):
+
+1. `gh repo rename agent-terminal -R westsoever/ching`. GitHub redirects the old URL.
+2. In `~/bbq/kaching`: `git remote set-url origin https://github.com/westsoever/agent-terminal.git` (the worktrees share this remote).
+3. `mv ~/bbq/kaching ~/bbq/agent-terminal`, then `ln -s agent-terminal ~/bbq/kaching` so old paths still resolve, then `git -C ~/bbq/agent-terminal worktree repair` (and `git worktree repair <path>` for any worktree outside `.claude/worktrees`).
+4. `cd ~/bbq/agent-terminal && ./install.sh --yes` once more: it points the three links at the new folder. Then `./install.sh --install-menubar --yes` so the dot's job gets the new path.
+5. Claude Code keeps its per-folder history in `~/.claude/projects/-Users-clyde-bbq-kaching`; sessions started in the new folder get a new project folder. Nothing to do unless you want `claude --resume` to list the old sessions there (copy or link the folder to `-Users-clyde-bbq-agent-terminal`).
+6. In the README "Quick install", the clone URL names `westsoever/ching` until step 1; change it to `westsoever/agent-terminal` afterwards (GitHub's redirect keeps the old one working).
+
+**What stays under the old name:** `~/.agent/` and its contents, the D35 markers in STATE.md files (`ching:checkpoint`, `ching:snapshot`), `~/.agent/defaults/ching.env`, and history in this repo (DECISIONS, checkpoints, dated specs and plans).

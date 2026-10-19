@@ -1,10 +1,10 @@
-// kaching: the agent terminal. One keyboard-only screen for every Claude Code agent on this Mac.
+// agterm: the agent terminal. One keyboard-only screen for every Claude Code agent on this Mac.
 // Design: docs/superpowers/specs/2026-10-17-agent-terminal-design.md.
 //
-//	kaching                 open the desk
-//	kaching --render WxH    print one frame of the desk at that size and exit (for checks and screenshots)
-//	                        --view CODE picks another view (FL RP RC PR PO PC HELP, or "FIND words": the names and
-//	                        text tiers run first)
+//	agterm                 open the desk
+//	agterm --render WxH    print one frame of the desk at that size and exit (for checks and screenshots)
+//	                 --view CODE   picks another view (FL RP RC PR PO PC HELP, or "FIND words": the names and
+//	                               text tiers run first)
 package main
 
 import (
@@ -18,7 +18,25 @@ import (
 	"github.com/muesli/termenv"
 )
 
+// legacyEnv lets a variable under an older name (KACHING_*, before D65; CHING_*, before D35) stand for its
+// AGENT_TERMINAL_* name when that one is unset; KACHING_* wins over CHING_*.
+func legacyEnv() {
+	for _, prefix := range []string{"KACHING_", "CHING_"} {
+		for _, kv := range os.Environ() {
+			k, v, _ := strings.Cut(kv, "=")
+			rest, ok := strings.CutPrefix(k, prefix)
+			if !ok {
+				continue
+			}
+			if _, set := os.LookupEnv("AGENT_TERMINAL_" + rest); !set {
+				os.Setenv("AGENT_TERMINAL_"+rest, v)
+			}
+		}
+	}
+}
+
 func main() {
+	legacyEnv()
 	render := flag.String("render", "", "print one frame at WxH and exit")
 	code := flag.String("view", "", "with --render: the view's code")
 	flag.Parse()
@@ -61,7 +79,7 @@ func main() {
 	}
 	defer removeState()
 	if _, err := tea.NewProgram(newModel(), tea.WithAltScreen()).Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "kaching:", err)
+		fmt.Fprintln(os.Stderr, "agterm:", err)
 		os.Exit(1)
 	}
 }

@@ -1,6 +1,6 @@
 package main
 
-// The folder of /NW: where a new background agent starts, how kaching found that folder, and what is there.
+// The folder of /NW: where a new background agent starts, how agterm found that folder, and what is there.
 // The box of /NW shows all three, so a wrong folder is seen before the first message is sent.
 
 import (
@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// nwFolder is where /NW starts the agent and how kaching found the folder.
+// nwFolder is where /NW starts the agent and how agterm found the folder.
 type nwFolder struct {
 	Dir    string
 	Source string // how it was found: "the selected agent miso", "the folder ~/bbq/soii", ...

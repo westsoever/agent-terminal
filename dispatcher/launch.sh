@@ -22,7 +22,7 @@
 # before Claude Code aborts it, far above one listen.
 #
 # Models: haiku by default. To compare, start the same session on Sonnet:
-#   DISPATCHER_MODEL=sonnet ~/.claude/kaching/dispatcher/launch.sh "[shortcut] listen"
+#   DISPATCHER_MODEL=sonnet ~/.claude/agent-terminal/dispatcher/launch.sh "[shortcut] listen"
 # Any model name or alias claude --model takes is passed through as is. dispatcher/eval.sh runs the offline eval.
 #
 # Env: AGENT_HOME, DISPATCHER_DIR, CLAUDE_BIN (claude), DISPATCHER_MODEL (haiku), DISPATCHER_MODE (bypassPermissions),
@@ -35,7 +35,7 @@ CLAUDE_BIN=${CLAUDE_BIN:-claude}
 SETTINGS=$DIR/.claude/settings.json
 
 if [ ! -f "$SETTINGS" ] || [ ! -f "$DIR/mcp.json" ]; then
-  echo "launch: the dispatcher is not installed in $DIR. Run: ~/.claude/kaching/install.sh --install-dispatcher" >&2
+  echo "launch: the dispatcher is not installed in $DIR. Run: ~/.claude/agent-terminal/install.sh --install-dispatcher" >&2
   exit 1
 fi
 command -v jq >/dev/null 2>&1 || { echo "launch: jq is required" >&2; exit 1; }

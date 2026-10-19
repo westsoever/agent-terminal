@@ -430,7 +430,7 @@ func TestTypingScroll(t *testing.T) {
 	}
 }
 
-// An answer sent from kaching sends the agent's window back (queue.sh return); moving inside a menu does not.
+// An answer sent from agterm sends the agent's window back (queue.sh return); moving inside a menu does not.
 func TestReturnWindow(t *testing.T) {
 	for _, w := range []string{"key left", "key right", "key tab", "key up", "key down"} {
 		if returnWindow("s", w) != nil {

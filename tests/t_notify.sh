@@ -171,9 +171,9 @@ assert_contains "waiting counts against the daily budget" "$(tail -1 "$LOG")" "s
 rm -rf "$AGENT_HOME/notify"
 nt n6 waiting $((NOON + 10 * 3600))
 assert_contains "waiting waits out quiet hours" "$(tail -1 "$LOG")" "suppressed:quiet-hours"
-# ---------- the learner's own model calls (KACHING_LEARNER=1): nothing is logged, recorded or shown ----------
+# ---------- the learner's own model calls (AGENT_TERMINAL_LEARNER=1): nothing is logged, recorded or shown ----------
 : >"$FAKE_OUT"; : >"$FAKE_OUT_TN"; lines=$(wc -l <"$LOG" | tr -d " ")
-out=$(KACHING_LEARNER=1 NOTIFY_DRY_RUN='' "$BIN/notify.sh" input '{"labels":[]}' 2>&1 <<<"$(hook_json Notification "$R" s-learner)"); rc=$?
+out=$(AGENT_TERMINAL_LEARNER=1 NOTIFY_DRY_RUN='' "$BIN/notify.sh" input '{"labels":[]}' 2>&1 <<<"$(hook_json Notification "$R" s-learner)"); rc=$?
 assert_eq "learner: exit 0" "0" "$rc"
 assert_eq "learner: prints nothing" "" "$out"
 assert_eq "learner: no notify.log line" "$lines" "$(wc -l <"$LOG" | tr -d ' ')"

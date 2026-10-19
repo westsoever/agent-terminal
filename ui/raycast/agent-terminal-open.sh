@@ -1,6 +1,6 @@
 #!/bin/bash
-# Raycast script command: bring the agent terminal (kaching) forward, or open it in a new Terminal window.
-# KachingBar runs it from its hotkeys (ui/menubar/Hotkeys.swift, ~/.agent/hotkeys). Raycast can run it too: Settings >
+# Raycast script command: bring the agent terminal (agterm) forward, or open it in a new Terminal window.
+# AgentTerminalBar runs it from its hotkeys (ui/menubar/Hotkeys.swift, ~/.agent/hotkeys). Raycast can run it too: Settings >
 # Script Commands > Script Folders > + (this folder), then Record Hotkey on the command.
 
 # Required parameters:
@@ -10,8 +10,8 @@
 
 # Optional parameters:
 # @raycast.icon 🟠
-# @raycast.packageName Kaching
-# @raycast.description Brings the kaching agent terminal to the front, or starts it.
+# @raycast.packageName Agent Terminal
+# @raycast.description Brings the agent terminal (agterm) to the front, or starts it.
 
 STATE="${AGENT_HOME:-$HOME/.agent}/terminal/open"
 pid=$(sed -n 's/^pid=//p' "$STATE" 2>/dev/null)
@@ -21,13 +21,16 @@ if [ -n "$pid" ] && [ -n "$tty" ] && kill -0 "$pid" 2>/dev/null; then
 fi
 # not running: a new Terminal window on the main display (the one with the menu bar, or queue_main_display),
 # filling it; the one agent window the monitor queue brings there sits behind it.
+AT_BIN="$HOME/.local/bin/agterm"; [ -x "$AT_BIN" ] || AT_BIN="$HOME/.local/bin/kaching"   # before D65
 wid=$(osascript -e 'tell application "Terminal"
   activate
-  set t to do script "exec $HOME/.local/bin/kaching"
+  set t to do script "exec '"$AT_BIN"'"
   set background color of t to {2827, 2827, 2827}
   return id of front window
 end tell')
-K="$HOME/.claude/kaching"; [ -d "$K" ] || K="$HOME/.claude/ching"   # before install.sh ran since the rename (D35)
+K="$HOME/.claude/agent-terminal"
+[ -d "$K" ] || K="$HOME/.claude/kaching"   # before install.sh ran since the rename (D65)
+[ -d "$K" ] || K="$HOME/.claude/ching"     # and since D35
 QT="$K/bin/queue-term.js"
 want=$(sed -n 's/^queue_main_display=//p' "${AGENT_HOME:-$HOME/.agent}/config" 2>/dev/null | tail -1)
 screens=$(osascript -l JavaScript "$QT" screens 2>/dev/null)

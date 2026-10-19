@@ -158,7 +158,7 @@ func TestParseQuery(t *testing.T) {
 	}{
 		{"zebra deploy", "zebra|deploy"},
 		{"  Zebra   DEPLOY  ", "zebra|deploy"},
-		{`"kaching resume" bug`, "kaching resume|bug"},
+		{`"agent-terminal resume" bug`, "agent-terminal resume|bug"},
 		{`say "hello   world"`, "say|hello world"},
 		{`"unclosed phrase`, "unclosed|phrase"},
 		{"dup Dup dup", "dup"},
@@ -225,7 +225,7 @@ func TestTitlesIn(t *testing.T) {
 func TestFindNamesTier(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	now := time.Now()
-	writeSession(t, "-tmp-a", sid(1), now.Add(-time.Hour), append(titleLines(t, sid(1), "Kaching Find", ""),
+	writeSession(t, "-tmp-a", sid(1), now.Add(-time.Hour), append(titleLines(t, sid(1), "Agent-Terminal Find", ""),
 		userLine(t, "hello", now, "/tmp/a"))...)
 	writeSession(t, "-tmp-a", sid(2), now.Add(-2*time.Hour), append(titleLines(t, sid(2), "", "Fix the billing export"),
 		userLine(t, "hello", now, "/tmp/a"))...)
@@ -238,12 +238,12 @@ func TestFindNamesTier(t *testing.T) {
 	writeSession(t, observerFolder, sid(5), now, append(titleLines(t, sid(5), "", "Billing observer"), userLine(t, "x", now, "/x"))...)
 	live := []Agent{
 		{SID: "live-1", Name: "deploy-bot", Cwd: "/work/zebra", Branch: "feature/Billing", Since: now},
-		{SID: sid(1), Name: "Kaching Find", Cwd: "/tmp/a", Since: now.Add(-time.Hour)}, // its transcript is a session too: listed once
+		{SID: sid(1), Name: "Agent-Terminal Find", Cwd: "/tmp/a", Since: now.Add(-time.Hour)}, // its transcript is a session too: listed once
 	}
 	sessions := listSessions()
 	cases := []struct{ q, want string }{
-		{"kaching", sid(1)},                            // the live agent's name, once, though its transcript is a session too
-		{"find kaching", sid(1)},                       // both words, in one name
+		{"agent-terminal", sid(1)},                     // the live agent's name, once, though its transcript is a session too
+		{"find agent-terminal", sid(1)},                // both words, in one name
 		{"zebra bot", "live-1"},                        // the name and the folder together
 		{"billing", "live-1 " + sid(2) + " " + sid(3)}, // the live branch (any case), two past titles: not the untitled, not the observer
 		{"BILLING export", sid(2)},                     // all words
@@ -484,7 +484,7 @@ func fakeClaude(t *testing.T, answer string, exit int) (rec string) {
 	out := filepath.Join(dir, "out")
 	os.WriteFile(out, []byte(answer), 0o644)
 	script := `#!/bin/sh
-{ echo "pwd=$(pwd)"; echo "learner=$KACHING_LEARNER"; echo "mem=$CLAUDE_MEM_INTERNAL"; echo "claudecode=${CLAUDECODE:-unset}"; echo "session=${CLAUDE_CODE_SESSION_ID:-unset}"
+{ echo "pwd=$(pwd)"; echo "learner=$AGENT_TERMINAL_LEARNER"; echo "mem=$CLAUDE_MEM_INTERNAL"; echo "claudecode=${CLAUDECODE:-unset}"; echo "session=${CLAUDE_CODE_SESSION_ID:-unset}"
   for a in "$@"; do echo "arg=$a"; done; } > "` + rec + `"
 cat > "` + rec + `.stdin"
 cat "` + out + `"
@@ -492,7 +492,7 @@ cat "` + out + `"
 `
 	bin := filepath.Join(dir, "claude")
 	os.WriteFile(bin, []byte(script), 0o755)
-	t.Setenv("KACHING_CLAUDE_BIN", bin)
+	t.Setenv("AGENT_TERMINAL_CLAUDE_BIN", bin)
 	return rec
 }
 
@@ -558,7 +558,7 @@ func TestFindAITier(t *testing.T) {
 	aiTimeout = 100 * time.Millisecond
 	slow := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(slow, []byte("#!/bin/sh\nexec sleep 5\n"), 0o755)
-	t.Setenv("KACHING_CLAUDE_BIN", slow)
+	t.Setenv("AGENT_TERMINAL_CLAUDE_BIN", slow)
 	if _, err := searchAI(context.Background(), "invoices", nil, listSessions()); err == nil || !strings.Contains(err.Error(), "did not answer") {
 		t.Errorf("timeout: %v", err)
 	}
@@ -570,13 +570,13 @@ func TestFindAITier(t *testing.T) {
 }
 
 // The call is made so that it leaves nothing behind: no hooks, no transcript, no tools, an empty folder of its
-// own, the markers Kaching's hooks read, and none of a running session's variables.
+// own, the markers Agent Terminal's hooks read, and none of a running session's variables.
 func TestFindAICallHasNoSideEffects(t *testing.T) {
 	aiFixture(t)
 	rec := fakeClaude(t, envelope("[]", false), 0)
 	t.Setenv("CLAUDECODE", "1")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "some-session")
-	t.Setenv("KACHING_LEARNER", "0")
+	t.Setenv("AGENT_TERMINAL_LEARNER", "0")
 	if _, err := searchAI(context.Background(), "invoices", nil, listSessions()); err != nil {
 		t.Fatal(err)
 	}
@@ -1083,11 +1083,11 @@ func TestParseAIAnswer(t *testing.T) {
 }
 
 // Live: asks the real Claude (Haiku) about the owner's real sessions in ~/.claude/projects. It uses the owner's
-// Claude usage, so it runs only with KACHING_LIVE_FIND=<the question>. After it, ~/.agent/sessions has no new folder.
+// Claude usage, so it runs only with AGENT_TERMINAL_LIVE_FIND=<the question>. After it, ~/.agent/sessions has no new folder.
 func TestFindAILive(t *testing.T) {
-	q := os.Getenv("KACHING_LIVE_FIND")
+	q := os.Getenv("AGENT_TERMINAL_LIVE_FIND")
 	if q == "" {
-		t.Skip("KACHING_LIVE_FIND=<question> runs it")
+		t.Skip("AGENT_TERMINAL_LIVE_FIND=<question> runs it")
 	}
 	t0 := time.Now()
 	sessions := listSessions()
@@ -1112,7 +1112,7 @@ func TestLoadAgentsHidesPrintCalls(t *testing.T) {
 	sess := filepath.Join(home, ".claude", "sessions")
 	os.MkdirAll(sess, 0o755)
 	pid := fmt.Sprint(os.Getpid())
-	os.WriteFile(filepath.Join(sess, "1.json"), []byte(`{"pid":`+pid+`,"sessionId":"aaaa-1","cwd":"/tmp/kaching-find","kind":"interactive","entrypoint":"sdk-cli","name":"kaching-find-f4","status":"busy"}`), 0o644)
+	os.WriteFile(filepath.Join(sess, "1.json"), []byte(`{"pid":`+pid+`,"sessionId":"aaaa-1","cwd":"/tmp/agent-terminal-find","kind":"interactive","entrypoint":"sdk-cli","name":"agent-terminal-find-f4","status":"busy"}`), 0o644)
 	os.WriteFile(filepath.Join(sess, "2.json"), []byte(`{"pid":`+pid+`,"sessionId":"aaaa-2","cwd":"/tmp","kind":"interactive","entrypoint":"cli","name":"real","status":"idle"}`), 0o644)
 	ags := loadAgents(map[string]tabPos{}, nil)
 	if len(ags) != 1 || ags[0].SID != "aaaa-2" {
@@ -1148,15 +1148,15 @@ func TestFindTypedCommand(t *testing.T) {
 }
 
 // Timing on the real ~/.claude/projects (read only): the names and text tiers for some queries. Runs only with
-// KACHING_FIND_TIMING=1.
+// AGENT_TERMINAL_FIND_TIMING=1.
 func TestFindTimingReal(t *testing.T) {
-	if os.Getenv("KACHING_FIND_TIMING") == "" {
-		t.Skip("KACHING_FIND_TIMING=1 runs it on the real transcripts")
+	if os.Getenv("AGENT_TERMINAL_FIND_TIMING") == "" {
+		t.Skip("AGENT_TERMINAL_FIND_TIMING=1 runs it on the real transcripts")
 	}
 	t0 := time.Now()
 	sessions := listSessions()
 	t.Logf("%d sessions listed in %v", len(sessions), time.Since(t0))
-	for _, q := range []string{"kaching", "kaching resume terminal", "paperclip approve", "café", "<div>", "zzzqqxx nothing", "the"} {
+	for _, q := range []string{"agent-terminal", "agent-terminal resume terminal", "paperclip approve", "café", "<div>", "zzzqqxx nothing", "the"} {
 		terms := parseQuery(q)
 		t1 := time.Now()
 		names := searchNames(context.Background(), terms, nil, sessions)

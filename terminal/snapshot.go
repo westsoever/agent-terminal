@@ -14,13 +14,13 @@ import (
 )
 
 // Agent is one live interactive Claude Code session, joined from Claude Code's own session file
-// (~/.claude/sessions/<pid>.json: name, status), Kaching's record (~/.agent/sessions/<id>/meta: state, branch,
+// (~/.claude/sessions/<pid>.json: name, status), Agent Terminal's record (~/.agent/sessions/<id>/meta: state, branch,
 // transcript) and the process's tty.
 type Agent struct {
 	SID, Name, Cwd, Branch string
 	PID                    int
 	Busy                   bool   // Claude Code says busy
-	State                  string // Kaching's state: working idle done input blocked ready
+	State                  string // Agent Terminal's state: working idle done input blocked ready
 	Since                  time.Time
 	TTY                    string // ttys005, '' when none
 	InTerminal             bool   // the tty is a Terminal.app tab, so the terminal can type into it
@@ -31,13 +31,13 @@ type Agent struct {
 	Lead                   string // the session id of the lead agent when this one is a sub-session, else ''
 	Subs                   int    // how many sub-sessions this lead has
 	Ask                    string // what a "needs input" turn asks the owner (meta ask=), '' when none
-	Bg                     bool   // a background session (claude --bg): no window, kaching types into it by attaching
+	Bg                     bool   // a background session (claude --bg): no window, agterm types into it by attaching
 	Job                    string // a background session's short id (claude attach <job>)
 	Closed                 bool   // its turn ended as done and nothing is left: no next action, no blocker, no NEXT.md
 	CLI                    string // the CLI when it is not Claude Code ("opencode", see opencode.go), else ''
 }
 
-// canSend: kaching can type into it: a Terminal tab, or a background session.
+// canSend: agterm can type into it: a Terminal tab, or a background session.
 func (a Agent) canSend() bool { return a.InTerminal || a.Bg }
 
 // Group is where an agent sits in the queue.
@@ -235,7 +235,7 @@ func linkFamilies(a []Agent, groups [][]string) {
 }
 
 // nothingLeft: the session's checkpoint names no next action and no blocker, and its NEXT.md is empty or
-// missing; the same test kaching-watch.sh uses to leave a finished session alone. The state folder is the repo's
+// missing; the same test agent-terminal-watch.sh uses to leave a finished session alone. The state folder is the repo's
 // .agent when it has a GOAL.md, else the session's own folder under ~/.agent.
 func nothingLeft(root, sid string) bool {
 	dir := filepath.Join(agentHome(), "sessions", sid)

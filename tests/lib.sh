@@ -21,10 +21,10 @@ export NOTIFY_DRY_RUN=1
 export NOTIFY_TERMINAL_NOTIFIER="$WORK/no-such-terminal-notifier"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
-export KACHING_TEST_MODELS=""   # tests never call a real model; t_escalate.sh sets its own fake
-unset TMPDIR KACHING_ALLOW_PUSH KACHING_STOP_CHECK_RUNNING KACHING_ESCALATING   # recursion markers inherited from a live stop-check.sh run
-unset CLAUDE_CODE_ENTRYPOINT KACHING_NO_CHECKPOINT   # the session running the tests must not switch the checkpoint gate off
-unset KACHING_LEARNER   # learner mode makes the session hooks exit at once and the guard deny; a test sets it where it means it
+export AGENT_TERMINAL_TEST_MODELS=""   # tests never call a real model; t_escalate.sh sets its own fake
+unset TMPDIR AGENT_TERMINAL_ALLOW_PUSH AGENT_TERMINAL_STOP_CHECK_RUNNING AGENT_TERMINAL_ESCALATING   # recursion markers inherited from a live stop-check.sh run
+unset CLAUDE_CODE_ENTRYPOINT AGENT_TERMINAL_NO_CHECKPOINT   # the session running the tests must not switch the checkpoint gate off
+unset AGENT_TERMINAL_LEARNER   # learner mode makes the session hooks exit at once and the guard deny; a test sets it where it means it
 mkdir -p "$AGENT_HOME" "$CLAUDE_DIR"
 
 # install.sh calls $LAUNCHCTL: a test must never reach the real launchd
@@ -139,4 +139,4 @@ tallow() {
   if [ -z "$out" ]; then pass "allow: $1"; else fail "allow: $1" "  input: $4"$'\n'"  guard said: $out"; fi
 }
 
-link_kit() { ln -sfn "$KIT" "$CLAUDE_DIR/kaching"; }   # hooks and pre-push hooks call $CLAUDE_DIR/kaching/bin
+link_kit() { ln -sfn "$KIT" "$CLAUDE_DIR/agent-terminal"; }   # hooks and pre-push hooks call $CLAUDE_DIR/agent-terminal/bin

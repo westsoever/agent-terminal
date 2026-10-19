@@ -64,10 +64,10 @@ phrase() {
 }
 
 # ---------------- the fixture ----------------
-# Five live sessions. The focused tab is kaching, not miso, so case 4 shows whether the unnamed instruction
+# Five live sessions. The focused tab is agent-terminal, not miso, so case 4 shows whether the unnamed instruction
 # really followed the focus. pico has no notes; miso and miso-workspace both start with "miso".
-MISO_TO="miso-Sessions"; FOCUS_TO="kaching-dispatcher-v2"
-SPOKEN_IDS="clyde-33 miso-Sessions PicoNew kaching-dispatcher-v2 5ab03fd1"   # message_to values and ids never said aloud
+MISO_TO="miso-Sessions"; FOCUS_TO="agent-terminal-dispatcher-v2"
+SPOKEN_IDS="clyde-33 miso-Sessions PicoNew agent-terminal-dispatcher-v2 5ab03fd1"   # message_to values and ids never said aloud
 
 state_md() { # status blocker done-items...
   local status=$1 blocker=$2; shift 2
@@ -81,14 +81,14 @@ state_md() { # status blocker done-items...
 mk_fixture() { # case dir
   local C=$1 FX=$1/fixture
   mkdir -p "$FX/bin" "$FX/agent-home/sessions/5ab03fd1" "$FX/repos/miso/.agent" "$FX/repos/miso-workspace/.agent" \
-           "$FX/repos/pico/.agent" "$FX/repos/kaching/.agent"
+           "$FX/repos/pico/.agent" "$FX/repos/agent-terminal/.agent"
   FX=$(cd "$FX" && pwd -P)
   state_md input "which Stripe account the invoices should use" "Drafted the invoice email template" \
     >"$FX/agent-home/sessions/5ab03fd1/STATE.md"
   state_md working none "Moved the image upload to the new bucket" "Fixed the login redirect loop on Safari" \
     "Added the coffee rating prompt to the tasting page" >"$FX/repos/miso/.agent/STATE.md"
   state_md "done" none "Bumped the release notes for 2.4" "Merged the pricing page copy" >"$FX/repos/miso-workspace/.agent/STATE.md"
-  state_md working none "Split the queue layout into its own script" >"$FX/repos/kaching/.agent/STATE.md"
+  state_md working none "Split the queue layout into its own script" >"$FX/repos/agent-terminal/.agent/STATE.md"
   # pico: notes = no, there is no STATE.md
 
   printf 'name\tmessage_to\tstatus\tstate\tstate_dir\tnotes\tfocus\tbranch\n' >"$FX/route.tsv"
@@ -97,7 +97,7 @@ mk_fixture() { # case dir
     miso miso-Sessions idle working "$FX/repos/miso/.agent" yes - main \
     miso-workspace miso-workspace idle "done" "$FX/repos/miso-workspace/.agent" yes - main \
     pico PicoNew busy blocked "$FX/repos/pico/.agent" no - main \
-    kaching kaching-dispatcher-v2 busy working "$FX/repos/kaching/.agent" yes focused dispatcher-v2 >>"$FX/route.tsv"
+    agent-terminal agent-terminal-dispatcher-v2 busy working "$FX/repos/agent-terminal/.agent" yes focused dispatcher-v2 >>"$FX/route.tsv"
 
   cat >"$FX/bin/dash.sh" <<'EOS'
 #!/usr/bin/env bash
@@ -110,10 +110,10 @@ for a in "$@"; do case "$a" in --route|--speak|--inbox|--next) mode=${a#--} ;; e
 case "$mode" in
   route) cat "$FX/route.tsv" ;;
   speak) echo "2 need you. 5 active sessions out of 41. home needs your input. pico is blocked. 1 finished." ;;
-  inbox) printf 'NEEDS YOU\n  home: needs your input\n  pico [main]: blocked\nREADY\n  (nothing)\nFINISHED (since last look)\n  miso-workspace [main]\nPROPOSALS (decide with bin/kaching-proposals)\n  (none)\nSYNC (oldest first; snapshot 1h old)\n  miso-app: 8 commits behind origin (oldest 6d)\n'
+  inbox) printf 'NEEDS YOU\n  home: needs your input\n  pico [main]: blocked\nREADY\n  (nothing)\nFINISHED (since last look)\n  miso-workspace [main]\nPROPOSALS (decide with bin/agent-terminal-proposals)\n  (none)\nSYNC (oldest first; snapshot 1h old)\n  miso-app: 8 commits behind origin (oldest 6d)\n'
          touch "$FX/inbox-was-run" ;;
-  next) printf '1. home (input)  [score 9.00]\n2. pico [main] (blocked)  [score 9.00]\n3. kaching [dispatcher-v2] (working)  [score 7.00]\n' ;;
-  table) printf 'home 5ab03fd1        input    2m\nmiso [main]          working  1m\nmiso-workspace [main] done    9m\npico [main]          blocked  4m\nkaching [dispatcher-v2] working 0s\n' ;;
+  next) printf '1. home (input)  [score 9.00]\n2. pico [main] (blocked)  [score 9.00]\n3. agent-terminal [dispatcher-v2] (working)  [score 7.00]\n' ;;
+  table) printf 'home 5ab03fd1        input    2m\nmiso [main]          working  1m\nmiso-workspace [main] done    9m\npico [main]          blocked  4m\nagent-terminal [dispatcher-v2] working 0s\n' ;;
 esac
 EOS
   cat >"$FX/bin/relay-log.sh" <<'EOS'
@@ -140,7 +140,7 @@ EOS
   local D=$C/dispatcher-home
   mkdir -p "$D/.claude"
   jq --indent 2 --arg link "$KIT" --arg hook "$C/hook/dispatcher/tool-gate.sh" \
-    'walk(if type == "string" then gsub("@KACHING@"; $link) else . end) | .hooks.PreToolUse[0].hooks[0].command = $hook' \
+    'walk(if type == "string" then gsub("@AGENT_TERMINAL@"; $link) else . end) | .hooks.PreToolUse[0].hooks[0].command = $hook' \
     "$SELF_DIR/settings.json" >"$D/.claude/settings.json"
   echo '{"mcpServers": {}}' >"$D/mcp.json"
   cp "$POLICY" "$D/AGENTS.md"

@@ -20,7 +20,7 @@ func TestPromptText(t *testing.T) {
 		{"plain words", "plain words"},
 		{"\n\n<pasted_content id=\"bf5d\">\n1. first\n2. second\n</pasted_content id=\"bf5d\">", "1. first\n2. second"},
 		{"look at this\n<pasted_content id=\"x1\">some log</pasted_content id=\"x1\">", "look at this\nsome log"},
-		{"<command-message>rename</command-message>\n<command-name>/rename</command-name>\n<command-args>KachingUpdates</command-args>", "/rename KachingUpdates"},
+		{"<command-message>rename</command-message>\n<command-name>/rename</command-name>\n<command-args>AgentTerminalUpdates</command-args>", "/rename AgentTerminalUpdates"},
 		{"<command-name>/merge</command-name>\n<command-args></command-args>", "/merge"},
 		{"<bash-input>git status</bash-input>", "! git status"},
 		{"<local-command-stdout>Session renamed</local-command-stdout>", ""},
@@ -122,7 +122,7 @@ func TestTabAlerts(t *testing.T) {
 	}
 }
 
-// Background sessions (claude --bg) are agents kaching can write to; unclaimed spares are not listed.
+// Background sessions (claude --bg) are agents agterm can write to; unclaimed spares are not listed.
 func TestLoadAgentsBackground(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -163,10 +163,10 @@ func TestResolveDir(t *testing.T) {
 }
 
 // Live: starts a real background session, writes to it through claude attach, stops it. Runs only with
-// KACHING_LIVE_BG=1 (it uses the owner's Claude account).
+// AGENT_TERMINAL_LIVE_BG=1 (it uses the owner's Claude account).
 func TestBackgroundLive(t *testing.T) {
-	if os.Getenv("KACHING_LIVE_BG") == "" {
-		t.Skip("KACHING_LIVE_BG=1 runs it")
+	if os.Getenv("AGENT_TERMINAL_LIVE_BG") == "" {
+		t.Skip("AGENT_TERMINAL_LIVE_BG=1 runs it")
 	}
 	home := os.Getenv("HOME")
 	job, err := bgStart(nwOpts{Dir: home}, "Reply with just: pong")
@@ -276,11 +276,11 @@ func TestNWCommandOptions(t *testing.T) {
 	}
 }
 
-// Live: /model works inside a background session. Claude Code asks "Switch model?"; kaching shows that menu from the
+// Live: /model works inside a background session. Claude Code asks "Switch model?"; agterm shows that menu from the
 // session's logs, 1 confirms, and the next reply comes from the new model.
 func TestBackgroundModelCommandLive(t *testing.T) {
-	if os.Getenv("KACHING_LIVE_BG") == "" {
-		t.Skip("KACHING_LIVE_BG=1 runs it")
+	if os.Getenv("AGENT_TERMINAL_LIVE_BG") == "" {
+		t.Skip("AGENT_TERMINAL_LIVE_BG=1 runs it")
 	}
 	job, err := bgStart(nwOpts{Dir: os.Getenv("HOME"), Model: "haiku"}, "Reply with just: pong")
 	if err != nil {
@@ -312,7 +312,7 @@ func TestBackgroundModelCommandLive(t *testing.T) {
 		p = parsePrompt(bgScreen(job))
 	}
 	if len(p.Options) != 2 || !strings.HasPrefix(p.Options[0], "Yes, switch to Sonnet") {
-		t.Fatalf("the menu kaching reads from the logs: %+v", p)
+		t.Fatalf("the menu agterm reads from the logs: %+v", p)
 	}
 	if res := bgSend(job, "", []string{"1"}); res != "ok" {
 		t.Fatal(res)
@@ -330,7 +330,7 @@ func TestBackgroundModelCommandLive(t *testing.T) {
 	t.Fatalf("still on %q", readLast(a.Transcript, a.Cwd).Model)
 }
 
-// A new keys.toml starts the agents kaching starts (NW, b and t in PC) on Sonnet 5.5 at high effort.
+// A new keys.toml starts the agents agterm starts (NW, b and t in PC) on Sonnet 5.5 at high effort.
 func TestNWDefaultsSonnetHigh(t *testing.T) {
 	t.Setenv("AGENT_HOME", t.TempDir())
 	cfg, _, err := loadConfig()

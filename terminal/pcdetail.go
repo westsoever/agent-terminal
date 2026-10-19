@@ -1,7 +1,7 @@
 package main
 
 // The PC view's side panel: one issue's context (its description, the thread, what it asks the owner) and the
-// answers kaching can give from the keyboard. Endpoints, read from the server source (@paperclipai/server
+// answers agterm can give from the keyboard. Endpoints, read from the server source (@paperclipai/server
 // dist/routes/issues.js, shared dist/validators/issue.js):
 //   GET  /api/issues/:id                                    the issue, with activeRecoveryAction
 //   GET  /api/issues/:id/comments                           the thread, newest first
@@ -51,7 +51,7 @@ type PCAsk struct {
 	Title   string
 	Prompt  string
 	Details string
-	Options []PCOption // numbered answers; none: kaching can't answer this kind, the browser can
+	Options []PCOption // numbered answers; none: agterm can't answer this kind, the browser can
 	Spec    *PCSpec    // a request with a form (ticks, several questions, verdicts, tasks): pcform.go
 }
 
@@ -227,7 +227,7 @@ func pcAct(issueID string, a *PCAsk, n int, reason string) error {
 		outcome, status, _ := strings.Cut(o.Arg, "/")
 		return pcPost(base+"/recovery-actions/resolve", map[string]any{"actionId": a.ID, "outcome": outcome, "sourceIssueStatus": status})
 	}
-	return errors.New("kaching can't send this answer")
+	return errors.New("agterm can't send this answer")
 }
 
 // pcPost sends a JSON body as the board user; Paperclip's own error message comes back on a refusal.

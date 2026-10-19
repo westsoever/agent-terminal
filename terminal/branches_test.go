@@ -64,7 +64,7 @@ func gitFixture(t *testing.T) (dir string) {
 	git(other, "push", "-q", "origin", "theirs")
 	git(dir, "fetch", "-q")
 
-	os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte(".claude/\n"), 0o644) // as kaching's own .gitignore has it
+	os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte(".claude/\n"), 0o644) // as agterm's own .gitignore has it
 	git(dir, "branch", "feat")
 	wt := filepath.Join(dir, ".claude", "worktrees", "wt-feat")
 	git(dir, "worktree", "add", "-q", wt, "feat")

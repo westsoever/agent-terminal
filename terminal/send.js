@@ -67,7 +67,7 @@ function press(t, win, tab, keys) {
   tab.selected = true;
   win.index = 1;
   // A key event goes to Terminal's front window: wait until that is really this window, and send nothing
-  // when it never gets there (a key must never land in another session or in kaching itself).
+  // when it never gets there (a key must never land in another session or in agent-terminal itself).
   if (!frontIs(win.id())) {
     if (prev !== null && prev !== win.id()) { try { t.windows.byId(prev).index = 1; } catch (e) {} }
     return 'error: could not bring its window to the front, no key sent';

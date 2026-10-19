@@ -1,14 +1,14 @@
-// Hotkeys.swift - global hotkeys for KachingBar (D39), so they work without Raycast.
+// Hotkeys.swift - global hotkeys for AgentTerminalBar (D39), so they work without Raycast.
 //
 // Each binding runs one of the Raycast script commands in ui/raycast (the same scripts Raycast would run), with
 // stdin and stdout closed off from any terminal; the last line it prints flashes next to the dot for 3 seconds.
 // Registered with Carbon's RegisterEventHotKey, which needs no Accessibility or Input Monitoring permission.
 //
 // Bindings: $AGENT_HOME/hotkeys (default ~/.agent/hotkeys) when it exists, else the defaults below. One binding
-// per line, `#` starts a comment:   ctrl+option+n   ui/raycast/kaching-next.sh
+// per line, `#` starts a comment:   ctrl+option+n   ui/raycast/agent-terminal-next.sh
 // Modifiers: ctrl (control), option (opt, alt), cmd (command), shift. Key: a letter, a digit or space.
-// The script path is relative to the Kaching folder (~/.claude/kaching) unless it starts with / or ~.
-// KACHING_BAR_HOTKEYS=off turns them all off.
+// The script path is relative to the Agent Terminal folder (~/.claude/agent-terminal) unless it starts with / or ~.
+// AGENT_TERMINAL_BAR_HOTKEYS=off turns them all off.
 
 import AppKit
 import Carbon.HIToolbox
@@ -20,9 +20,9 @@ struct HotkeyBinding: Equatable, Sendable {
     let spec: String
 
     static let defaults = """
-    ctrl+option+n  ui/raycast/kaching-next.sh
-    ctrl+option+t  ui/raycast/kaching-tile.sh
-    ctrl+option+k  ui/raycast/kaching-open.sh
+    ctrl+option+n  ui/raycast/agent-terminal-next.sh
+    ctrl+option+t  ui/raycast/agent-terminal-tile.sh
+    ctrl+option+k  ui/raycast/agent-terminal-open.sh
     """
 
     private static let keys: [String: Int] = [
@@ -40,7 +40,7 @@ struct HotkeyBinding: Equatable, Sendable {
         (try? String(contentsOf: agentHome.appendingPathComponent("hotkeys"), encoding: .utf8)) ?? defaults
     }
 
-    /// For `KachingBar --hotkeys-check`: "key=<code> mods=<carbon mask> script=<path>" per binding, "bad=<text>" per
+    /// For `AgentTerminalBar --hotkeys-check`: "key=<code> mods=<carbon mask> script=<path>" per binding, "bad=<text>" per
     /// line that does not parse.
     static func check(agentHome: URL) -> String {
         let p = parse(text(agentHome: agentHome))
@@ -76,12 +76,12 @@ struct HotkeyBinding: Equatable, Sendable {
 @MainActor
 final class Hotkeys {
     private static var current: Hotkeys?
-    private let paths: KachingPaths
+    private let paths: AgentTerminalPaths
     private let flash: @MainActor @Sendable (String) -> Void
     private var bindings: [UInt32: HotkeyBinding] = [:]
     private var refs: [EventHotKeyRef] = []
 
-    init(paths: KachingPaths, flash: @escaping @MainActor @Sendable (String) -> Void) { self.paths = paths; self.flash = flash }
+    init(paths: AgentTerminalPaths, flash: @escaping @MainActor @Sendable (String) -> Void) { self.paths = paths; self.flash = flash }
 
     func start() {
         let parsed = HotkeyBinding.parse(HotkeyBinding.text(agentHome: paths.agentHome))
@@ -109,10 +109,14 @@ final class Hotkeys {
     private func fire(_ id: UInt32) {
         VoiceKeys.cancelChord()   // a hotkey's key press never reaches the voice shortcut's monitors (VoiceShortcut.swift)
         guard let b = bindings[id] else { return }
-        let path: String
+        var path: String
         if b.script.hasPrefix("/") { path = b.script }
         else if b.script.hasPrefix("~/") { path = NSHomeDirectory() + String(b.script.dropFirst(1)) }
-        else { path = paths.kachingDir.appendingPathComponent(b.script).path }
+        else { path = paths.agentTerminalDir.appendingPathComponent(b.script).path }
+        // a hotkeys file written before D65 names ui/raycast/kaching-*.sh: the same script is agent-terminal-*.sh now
+        if !FileManager.default.fileExists(atPath: path), let r = path.range(of: "/kaching-", options: .backwards) {
+            path.replaceSubrange(r, with: "/agent-terminal-")
+        }
         let flash = self.flash
         let home = paths.agentHome.path
         DispatchQueue.global(qos: .userInitiated).async {

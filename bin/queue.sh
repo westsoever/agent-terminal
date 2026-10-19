@@ -6,13 +6,13 @@
 # nothing there but your own windows means every agent is busy. `next` (bind it to a hotkey) brings the waiting
 # windows to the front one at a time, oldest first, with the waiting tab selected.
 #   park    a session waits (called by notify.sh for done, input, blocked, ready, idle): remember its tab.
-#           When kaching is closed and the kind is not idle, its window comes over: the window's frame is saved
+#           When agent-terminal is closed and the kind is not idle, its window comes over: the window's frame is saved
 #           and it moves to the main display into the park frame (queue_park_frame; all parked windows share it,
 #           a stack). Only the window whose own event fired comes over, never a backlog (D38). A window on the
-#           main display is never moved (it is one of yours). With kaching open nothing moves (D37).
+#           main display is never moved (it is one of yours). With agent-terminal open nothing moves (D37).
 #   back    the session was prompted (session-start.sh touch): forget its tab; when no other tab of a parked
 #           window still waits, move the window back to exactly the saved frame. That includes a window you
-#           brought over by hand (show / h, or a drag) and holds while kaching is open (D43).
+#           brought over by hand (show / h, or a drag) and holds while agent-terminal is open (D43).
 #   forget  the session ended (session-start.sh end): forget its tab and, when nothing else waits there, the
 #           parked window too, without moving it.
 #   next    raise the next waiting tab's window wherever it is (after the one shown last, wrapping, oldest
@@ -22,8 +22,8 @@
 #           its session is prompted (D43). Back onto the other display: into exactly its reserved cell. Any
 #           other window put on the other display joins the grid (D38).
 #   show    put that agent's window on the main display now, as if dragged there.
-#   return  kaching sent that agent an answer: a window the queue moved to the main display (by its event, show
-#           or a drag) goes back to its cell, also while kaching is open; not while another tab of it waits (D42).
+#   return  agent-terminal sent that agent an answer: a window the queue moved to the main display (by its event, show
+#           or a drag) goes back to its cell, also while agent-terminal is open; not while another tab of it waits (D42).
 #   retile  a session started (session-start.sh): lay out the grid again, in the background.
 #   tile    the same now, for a hotkey; prints how many windows moved.
 #   status  the waiting tabs and the parked windows.
@@ -47,7 +47,7 @@ set -euo pipefail
 # so every command is a no-op for it. The session's tab is its controlling tty, found by walking up from this
 # process to the first ancestor that has one; a run with no tty (the watcher, launchd, claude -p) does nothing.
 # park/back/forget find the tty at once, then do the window work in the background so a hook never waits on it.
-[ "${KACHING_LEARNER:-${CHING_LEARNER:-}}" != 1 ] || exit 0
+[ "${AGENT_TERMINAL_LEARNER:-${KACHING_LEARNER:-${CHING_LEARNER:-}}}" != 1 ] || exit 0
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
@@ -209,7 +209,7 @@ waiting_windows() { # ids of the windows with a waiting tab, oldest wait first, 
   done
 }
 
-# kaching, the agent terminal, is open: $AGENT_HOME/terminal/open holds pid= (alive) and tty= (the agent selected)
+# agterm, the agent terminal, is open: $AGENT_HOME/terminal/open holds pid= (alive) and tty= (the agent selected)
 open_get() { sed -n "s/^$1=//p" "$AGENT_HOME/terminal/open" 2>/dev/null | head -n 1; }
 single_mode() {
   local pid
@@ -219,8 +219,8 @@ single_mode() {
 }
 
 # reconcile: move windows so the main display holds what it should now, then flush (the grid comes along).
-#   kaching open (D37): nothing moves. kaching's list is the inbox.
-#   kaching closed: the windows with a waiting tab whose own park event asked to come (come/<tty>) are parked;
+#   agent-terminal open (D37): nothing moves. agent-terminal's list is the inbox.
+#   agent-terminal closed: the windows with a waiting tab whose own park event asked to come (come/<tty>) are parked;
 #           a window parked that way goes back to its cell once none of its tabs wants it. A window you dragged
 #           over (hand) is not sent back here: only a drag back or a prompt of its session (send_back) moves it.
 # A window that is wanted and not parked is parked; an auto-parked window that is not wanted goes back.
@@ -270,7 +270,7 @@ park_window() { # id auto|hand [x y w h: the cell to keep, default where it is n
 }
 
 # send_back TTY HOW: the session of TTY was prompted or answered, so its window, when the queue moved it to the
-# main display (its own event, show / h, or a drag), goes back to exactly its cell, also while kaching is open:
+# main display (its own event, show / h, or a drag), goes back to exactly its cell, also while agent-terminal is open:
 # it is the owner's own action (D42, D43). Not while another tab of that window still waits. Prints what it did.
 send_back() {
   local win id
@@ -315,7 +315,7 @@ do_dragged() {
   flush >/dev/null
 }
 
-# register TTY: tabs/<session id> = "tty window_id tab_index name" for every Terminal session (kaching reads it).
+# register TTY: tabs/<session id> = "tty window_id tab_index name" for every Terminal session (agent-terminal reads it).
 register() {
   [ -n "${QUEUE_SID:-}" ] || return 0
   local win idx tmp
@@ -365,12 +365,12 @@ case "$CMD" in
     case "${QUEUE_SID:-}" in .*|*[!A-Za-z0-9._-]*) QUEUE_SID="" ;; esac
     case "$CMD" in
       park)   job() { mark_waiting "$TTY"
-                      # its own event, kaching closed, not the idle reminder: this window may come over (D38)
+                      # its own event, agent-terminal closed, not the idle reminder: this window may come over (D38)
                       if ! single_mode && [ "${QUEUE_KIND:-done}" != idle ]; then : >"$COME/$TTY"; fi
                       lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
       back)   job() { rm -f "$WAITING/$TTY" "$COME/$TTY"; lock || return 0; load_windows; register "$TTY"
                       send_back "$TTY" prompted >/dev/null; reconcile
-                      # kaching open: reconcile moves nothing and does not flush; apply the send_back move alone
+                      # agent-terminal open: reconcile moves nothing and does not flush; apply the send_back move alone
                       if single_mode && [ -n "${MOVES// /}" ]; then flush >/dev/null; fi; } ;;
       retile) job() { lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
       forget) job() { # the session ended: its tab leaves the queue; a parked window with nothing else waiting
@@ -385,8 +385,8 @@ case "$CMD" in
     if [ "${QUEUE_SYNC:-}" = 1 ]; then job; else (job) </dev/null >/dev/null 2>&1 & fi
     exit 0 ;;
   return)
-    # return SESSION_ID: kaching answered the agent; its parked window goes back to its cell (D42). Moving it is
-    # the owner's own action, so kaching being open does not stop it.
+    # return SESSION_ID: agent-terminal answered the agent; its parked window goes back to its cell (D42). Moving it is
+    # the owner's own action, so agent-terminal being open does not stop it.
     [ -n "$NAME_ARG" ] || { echo "usage: queue.sh return SESSION_ID" >&2; exit 2; }
     tty=$(tty_of_sid "$NAME_ARG")
     if [ -z "$tty" ]; then echo "Unknown session: $NAME_ARG"; exit 0; fi
@@ -397,7 +397,7 @@ case "$CMD" in
   show|dismiss)
     # show SESSION_ID: put that agent's window on the main display now, as if you dragged it there.
     # dismiss SESSION_ID: take the agent out of the queue without an answer; a window the queue brought over
-    #   goes back to its cell (kaching closed).
+    #   goes back to its cell (agent-terminal closed).
     SID_ARG=$NAME_ARG
     if [ -z "$SID_ARG" ]; then echo "usage: queue.sh $CMD SESSION_ID" >&2; exit 2; fi
     tty=$(tty_of_sid "$SID_ARG")

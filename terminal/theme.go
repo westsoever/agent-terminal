@@ -1,6 +1,6 @@
 package main
 
-// The accent color and /THEME, the picker for it. The accent is the one color kaching adds to its greys: cOrange
+// The accent color and /THEME, the picker for it. The accent is the one color agterm adds to its greys: cOrange
 // (text) and cSel (the selected row) in render.go. They are variables, so a theme is a reassignment of those two:
 // no drawing code names a color. The choice is the "theme" line of keys.toml.
 
@@ -18,7 +18,7 @@ import (
 // vTheme is the /THEME picker. It has no tab, like FIND.
 const vTheme view = 1001
 
-// theme is one accent. Color is what is drawn: the terminal's 256-color number for the first (the orange kaching
+// theme is one accent. Color is what is drawn: the terminal's 256-color number for the first (the orange agterm
 // always had), a hex value for the rest. Hex is the same color written out, for the picker.
 type theme struct {
 	ID, Name, Hex, Color string
@@ -154,7 +154,7 @@ func (m model) themeSave(id string) (tea.Model, tea.Cmd) {
 	m.ed.restyle()
 	m.cfg.Theme = curTheme
 	if err := saveTheme(curTheme); err != nil {
-		m.setErr("keys.toml: " + err.Error() + " (the theme holds until kaching stops)")
+		m.setErr("keys.toml: " + err.Error() + " (the theme holds until agterm stops)")
 		return m, nil
 	}
 	if st, err := os.Stat(configPath()); err == nil { // our own write isn't a reload to announce

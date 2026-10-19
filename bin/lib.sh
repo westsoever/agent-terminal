@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2034
-# lib.sh - helpers shared by the kaching hooks. Sourced, never executed.
+# lib.sh - helpers shared by the agent-terminal hooks. Sourced, never executed.
 #
 # Machine-wide model: every session has a record under $AGENT_HOME/sessions/<session id>/ (meta, and
 # STATE.md/NEXT.md when the cwd is not a repo that opted in). A repo opts in to per-repo state by having
@@ -10,13 +10,16 @@
 AGENT_HOME=${AGENT_HOME:-$HOME/.agent}
 CLAUDE_DIR=${CLAUDE_DIR:-$HOME/.claude}
 
-# D35: Ching is now Kaching. A variable set under its old CHING_* name still counts when the KACHING_* one is unset
-# (launchd jobs, shells and notes from before the rename). Scripts that check a variable before sourcing this file
-# spell the fallback out themselves.
-for _kv in $(compgen -e); do
-  case "$_kv" in CHING_*) _kn="KA$_kv"; [ -n "${!_kn+x}" ] || export "$_kn=${!_kv}" ;; esac
+# D35, D65: the kit was Ching, then Kaching, and is now Agent Terminal. A variable set under an older name (KACHING_*,
+# or CHING_* from before D35) still counts when the AGENT_TERMINAL_* one is unset (launchd jobs, shells and notes from
+# before the rename); KACHING_* wins over CHING_*. Scripts that check a variable before sourcing this file spell the
+# fallback out themselves.
+for _kp in KACHING_ CHING_; do
+  for _kv in $(compgen -e); do
+    case "$_kv" in "$_kp"*) _kn="AGENT_TERMINAL_${_kv#"$_kp"}"; [ -n "${!_kn+x}" ] || export "$_kn=${!_kv}" ;; esac
+  done
 done
-unset _kv _kn
+unset _kp _kv _kn
 
 jget() { # field of the hook JSON in $INPUT ('' when absent / not JSON)
   if [ -n "${INPUT:-}" ]; then printf '%s' "$INPUT" | jq -r --arg f "$1" '.[$f] // empty' 2>/dev/null || true; fi
@@ -136,9 +139,9 @@ checkpoint_get() { # file key -> value of the first `key:` line inside the ching
 
 # is_sandbox_path PATH: true for throwaway locations (test and probe sandboxes) that reports must not count:
 # /tmp, /private/tmp, macOS per-user temp (/var/folders, /private/var/folders) and any task*-repo folder.
-# KACHING_INCLUDE_SANDBOX=1 turns the exclusion off (tests whose fixtures live under /tmp, "--all" flags).
+# AGENT_TERMINAL_INCLUDE_SANDBOX=1 turns the exclusion off (tests whose fixtures live under /tmp, "--all" flags).
 is_sandbox_path() {
-  [ -z "${KACHING_INCLUDE_SANDBOX:-}" ] || return 1
+  [ -z "${AGENT_TERMINAL_INCLUDE_SANDBOX:-}" ] || return 1
   case "$1" in
     /tmp|/tmp/*|/private/tmp|/private/tmp/*|/var/folders/*|/private/var/folders/*) return 0 ;;
     */task*-repo|*/task*-repo/*) return 0 ;;
@@ -528,16 +531,16 @@ _learn_tokens_add() {
 }
 
 # learn_model_call MODEL < PROMPT: the learner's one way to call a model (spec 5.6). Runs
-#   "${KACHING_CLAUDE_BIN:-claude}" -p --model MODEL --tools "" --output-format json --strict-mcp-config
+#   "${AGENT_TERMINAL_CLAUDE_BIN:-claude}" -p --model MODEL --tools "" --output-format json --strict-mcp-config
 #     --disable-slash-commands --no-session-persistence --setting-sources "" --settings <LEARN_CALL_SETTINGS>
-# with the prompt on stdin, in $(learn_work_dir), with KACHING_LEARNER=1 (guard learner mode) and
+# with the prompt on stdin, in $(learn_work_dir), with AGENT_TERMINAL_LEARNER=1 (guard learner mode) and
 # CLAUDE_MEM_INTERNAL=1 (claude-mem does not observe the run, D27), cut after LEARN_CALL_TIMEOUT seconds. Prints
 # the model's answer: the one JSON document in the envelope's .result, compact, a ```json fence removed.
 # Isolation, checked live on 2026-10-17 (claude 2.1.302, stream-json init message):
 #   --tools "" only removes the built-in tools: the run still had every MCP server (Gmail send, Drive share, ...)
 #   and its prompt cost 211k cache-creation tokens. --strict-mcp-config (no MCP servers) and
 #   --disable-slash-commands (no skills) leave tools [] and mcp_servers [].
-#   The owner's hooks still ran on every call (Kaching's session-start/stop-check/notify, a "Session finished" popup,
+#   The owner's hooks still ran on every call (Agent Terminal's session-start/stop-check/notify, a "Session finished" popup,
 #   the remember plugin's SessionEnd summarizer). --setting-sources "" loads no user, project or local settings, so
 #   no user hooks and no plugins (only the built-in cc-plugin-* ones; no hook fired); auth is unchanged (OAuth from
 #   the keychain, HOME stays real). --settings then adds back one hook, guard.sh in learner mode for every tool, so
@@ -572,8 +575,8 @@ learn_model_call() {
   fi
   settings=$(jq -nc --arg g "$(printf '%q' "$LIB_DIR/guard.sh")" \
     '{autoMemoryEnabled: false, hooks: {PreToolUse: [{matcher: "*", hooks: [{type: "command", command: $g, timeout: 15}]}]}}')
-  out=$(cd "$work" && KACHING_LEARNER=1 CLAUDE_MEM_INTERNAL=1 _learn_limited "$lim" \
-        "${KACHING_CLAUDE_BIN:-claude}" -p --model "$model" --tools "" --output-format json \
+  out=$(cd "$work" && AGENT_TERMINAL_LEARNER=1 CLAUDE_MEM_INTERNAL=1 _learn_limited "$lim" \
+        "${AGENT_TERMINAL_CLAUDE_BIN:-claude}" -p --model "$model" --tools "" --output-format json \
         --strict-mcp-config --disable-slash-commands --no-session-persistence \
         --setting-sources "" --settings "$settings" <"$pf" 2>>"$logf"); rc=$?
   rm -f "$pf"

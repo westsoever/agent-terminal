@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # dash.sh [--speak | --inbox | --next | --counts | --route] [--hours N] [--all]
 # Machine-wide view: one line per Claude session on this computer.
-# Sources: (1) ~/.agent/sessions/*/meta written by the hooks and kaching-watch.sh, (2) transcripts in
+# Sources: (1) ~/.agent/sessions/*/meta written by the hooks and agent-terminal-watch.sh, (2) transcripts in
 # ~/.claude/projects/*/*.jsonl modified recently (sessions that predate the hooks), (3) worktrees
 # (`git worktree list`) of every repo found, shown when they hold repo state but have no live session,
 # plus the optional extra list in ~/.agent-repos.
@@ -11,7 +11,7 @@
 #   --inbox    NEEDS YOU (blocked/input), READY (release gate passed for the current HEAD, waiting for --approve),
 #              FINISHED (done since the last --inbox), PROPOSALS (the learner's open proposals in $AGENT_HOME/proposals,
 #              "kind id: first sentence (sessions/days)", most sessions first; snoozed and decided ones are hidden;
-#              decide them with bin/kaching-proposals). --inbox marks FINISHED as seen: it writes the time to
+#              decide them with bin/agent-terminal-proposals). --inbox marks FINISHED as seen: it writes the time to
 #              $AGENT_HOME/inbox.seen, so the next --inbox does not list those again. One entry per session.
 #   --next     top 5 by urgency x importance x recency (blocked and input sessions stay above working ones),
 #              each with its checkpoint next_action
@@ -57,7 +57,7 @@ ACTIVE_SECS=$(( ${DASH_ACTIVE_MINS:-30} * 60 ))
 REPOS_FILE=${AGENT_REPOS_FILE:-$HOME/.agent-repos}
 TOKDAY="$AGENT_HOME/tokens/$(date -u -r "$NOW" +%Y-%m-%d)"
 
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/kaching-dash.XXXXXX")
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/agent-terminal-dash.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 ROWS="$TMP/rows"; : >"$ROWS"
 # fields (0x1f separated): updated sid cwd name branch state note src ctx tok stalled imp next_action
@@ -152,11 +152,11 @@ meta_load() {
 #   name       the display name used elsewhere (name_for: repo/worktree dir, else the folder), "home" for the home folder
 #   message_to the json name: what ListAgents shows and SendMessage takes; when two live sessions share it,
 #              "uds:<messagingSocketPath>" instead (SendMessage takes that address; the bare name would be ambiguous)
-#   status     json busy|idle;  state: Kaching's meta state= (working/input/blocked/done/...)
+#   status     json busy|idle;  state: Agent Terminal's meta state= (working/input/blocked/done/...)
 #   state_dir  $AGENT_HOME/sessions/<sid> if it holds STATE.md, else <root>/.agent if that does (root: meta root=,
 #              else the git toplevel of cwd), else $AGENT_HOME/sessions/<sid>;  notes: yes when state_dir has STATE.md
 #   focus      "focused" for the session whose tty is named in $AGENT_HOME/dispatcher/focus ("<tty> <epoch>", written
-#              by KachingBar on the voice shortcut; a /dev/ prefix is fine) while that epoch (else the file's mtime) is
+#              by AgentTerminalBar on the voice shortcut; a /dev/ prefix is fine) while that epoch (else the file's mtime) is
 #              at most DASH_FOCUS_MAX_AGE (600) seconds old
 #   branch     meta branch=, else `git symbolic-ref --short -q HEAD` in cwd
 # A missing value is "-", so no field is ever empty. Sorted focused first, then busy, idle, other, then name and
@@ -528,7 +528,7 @@ case "$MODE" in
     lane "NEEDS YOU" "$TMP/needs"
     lane "READY" "$TMP/ready"
     lane "FINISHED (since last look)" "$TMP/fin"
-    echo "PROPOSALS (decide with bin/kaching-proposals)"
+    echo "PROPOSALS (decide with bin/agent-terminal-proposals)"
     proposal_rows >"$TMP/props"
     if [ -s "$TMP/props" ]; then sed 's/^/  /' "$TMP/props"; else echo "  (nothing)"; fi
     sync_lane

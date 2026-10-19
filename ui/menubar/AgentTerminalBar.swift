@@ -1,69 +1,72 @@
-// KachingBar.swift - the Kaching menu bar dot. A status-bar-only app (LSUIElement, no Dock icon).
+// AgentTerminalBar.swift - the Agent Terminal menu bar dot. A status-bar-only app (LSUIElement, no Dock icon).
 //
-//   green  Kaching is running: the org.kaching.watch plist is installed and the watcher's heartbeat is fresh
-//   amber  Kaching is running and at least one session needs the owner (blocked or waiting for input, as dash.sh decides)
-//   grey   hollow: Kaching is not running, or its heartbeat is stale
+//   green  Agent Terminal is running: the org.agent-terminal.watch plist is installed and the watcher's heartbeat is fresh
+//   amber  Agent Terminal is running and at least one session needs the owner (blocked or waiting for input, as dash.sh decides)
+//   grey   hollow: Agent Terminal is not running, or its heartbeat is stale
 //
 // Layers, so transcripts and notifications can be added later without touching the drawing code:
-//   KachingPaths        where everything lives (environment overrides, for tests and a non-default install)
-//   KachingSnapshot     the model: one computed reading of Kaching's state, plus the menu it implies (MenuEntry list)
-//   KachingStatusProvider  reads the files and runs `dash.sh --counts` (cheap, read-only); no UI code
+//   AgentTerminalPaths        where everything lives (environment overrides, for tests and a non-default install)
+//   AgentTerminalSnapshot     the model: one computed reading of Agent Terminal's state, plus the menu it implies (MenuEntry list)
+//   AgentTerminalStatusProvider  reads the files and runs `dash.sh --counts` (cheap, read-only); no UI code
 //   StatusBarController  draws the dot and the menu from a snapshot; actions open Terminal
 //
-// Menu: Open Kaching (ui/raycast/kaching-open.sh: brings kaching forward, or starts it); one submenu per open
+// Menu: Open Agent Terminal (ui/raycast/agent-terminal-open.sh: brings agent-terminal forward, or starts it); one submenu per open
 // proposal (Show and Approve open Terminal, approve asks for its typed code there; Reject and Snooze 7 days run
 // here); Recaps: the latest recap (Claude Code's "while you were away" summary, an away_summary line in the
 // transcript) of each live session, newest first.
 //
 // Signals (no launchctl calls):
-//   running  $LAUNCH_AGENTS_DIR/org.kaching.watch.plist exists AND the newest mtime of $AGENT_HOME/watch.heartbeat
-//            (rewritten by every kaching-watch.sh tick, every 300 s) or $AGENT_HOME/watch.log is at most
-//            KACHING_BAR_STALE_SECS old (default 660: two ticks plus a minute).
+//   running  $LAUNCH_AGENTS_DIR/org.agent-terminal.watch.plist exists AND the newest mtime of $AGENT_HOME/watch.heartbeat
+//            (rewritten by every agent-terminal-watch.sh tick, every 300 s) or $AGENT_HOME/watch.log is at most
+//            AGENT_TERMINAL_BAR_STALE_SECS old (default 660: two ticks plus a minute).
 //   needs    `dash.sh --counts` (needs = blocked + input over the session registry), run with a 5 s ceiling.
 //
 // Drags (D38): DragWatcher reads the Terminal windows' frames from the window server twice a second (no
 // permission needed for frames). When a window has landed on another display by hand (mouse button up, frame
 // still for one tick), it runs `queue.sh dragged ID X Y W H` with the frame it had before; queue.sh decides
 // (park frame on the main display, its reserved cell or the grid on the other). Windows the queue moves itself
-// are reported too; queue.sh leaves those alone. KACHING_BAR_DRAGS=off turns the watcher off.
+// are reported too; queue.sh leaves those alone. AGENT_TERMINAL_BAR_DRAGS=off turns the watcher off.
 //
 // Voice shortcut (dispatcher v2): Right Control + Left Option wakes the voice dispatcher; VoiceShortcut.swift has it
 // all (chord, Accessibility, the wake, --wake-once and --chord-test). Here: one menu line, its action, the hooks.
 //
-// CLI: KachingBar --status-once  prints the computed state as key=value lines and exits (used by tests/t_menubar.sh).
-// Env: AGENT_HOME (~/.agent) KACHING_DIR (~/.claude/kaching) LAUNCH_AGENTS_DIR (~/Library/LaunchAgents) CLAUDE_DIR (~/.claude)
-//      KACHING_BAR_STALE_SECS (660) KACHING_BAR_POLL_SECS (12); the CHING_* names from before D35 still count.
-//      The watcher counts as installed under its old label org.ching.watch too, until install.sh replaces it.
+// CLI: AgentTerminalBar --status-once  prints the computed state as key=value lines and exits (used by tests/t_menubar.sh).
+// Env: AGENT_HOME (~/.agent) AGENT_TERMINAL_DIR (~/.claude/agent-terminal) LAUNCH_AGENTS_DIR (~/Library/LaunchAgents) CLAUDE_DIR (~/.claude)
+//      AGENT_TERMINAL_BAR_STALE_SECS (660) AGENT_TERMINAL_BAR_POLL_SECS (12); the KACHING_* names (before D65) and the
+//      CHING_* names (before D35) still count. The watcher counts as installed under its old labels org.kaching.watch and
+//      org.ching.watch too, until install.sh replaces them.
 
 import AppKit
 import Foundation
 
 // MARK: - Paths
 
-struct KachingPaths: Sendable {
+struct AgentTerminalPaths: Sendable {
     let agentHome: URL
-    let kachingDir: URL
+    let agentTerminalDir: URL
     let launchAgentsDir: URL
     var claudeDir: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude", isDirectory: true)
 
     var heartbeat: URL { agentHome.appendingPathComponent("watch.heartbeat") }
     var watchLog: URL { agentHome.appendingPathComponent("watch.log") }
-    var watchPlist: URL { launchAgentsDir.appendingPathComponent("org.kaching.watch.plist") }
-    var oldWatchPlist: URL { launchAgentsDir.appendingPathComponent("org.ching.watch.plist") }   // before D35
-    var dash: URL { kachingDir.appendingPathComponent("bin/dash.sh") }
-    var queue: URL { kachingDir.appendingPathComponent("bin/queue.sh") }
-    var proposalsTool: URL { kachingDir.appendingPathComponent("bin/kaching-proposals") }
-    var openKaching: URL { kachingDir.appendingPathComponent("ui/raycast/kaching-open.sh") }
+    var watchPlist: URL { launchAgentsDir.appendingPathComponent("org.agent-terminal.watch.plist") }
+    var oldWatchPlists: [URL] {   // before D65 and before D35
+        ["org.kaching.watch.plist", "org.ching.watch.plist"].map { launchAgentsDir.appendingPathComponent($0) }
+    }
+    var dash: URL { agentTerminalDir.appendingPathComponent("bin/dash.sh") }
+    var queue: URL { agentTerminalDir.appendingPathComponent("bin/queue.sh") }
+    var proposalsTool: URL { agentTerminalDir.appendingPathComponent("bin/agent-terminal-proposals") }
+    var openAgentTerminal: URL { agentTerminalDir.appendingPathComponent("ui/raycast/agent-terminal-open.sh") }
     var claudeSessions: URL { claudeDir.appendingPathComponent("sessions") }
 
-    static func fromEnvironment(_ env: [String: String] = ProcessInfo.processInfo.environment) -> KachingPaths {
+    static func fromEnvironment(_ env: [String: String] = ProcessInfo.processInfo.environment) -> AgentTerminalPaths {
         let home = FileManager.default.homeDirectoryForCurrentUser
         func dir(_ key: String, _ fallback: String) -> URL {
             if let v = env[key], !v.isEmpty { return URL(fileURLWithPath: v, isDirectory: true) }
             return home.appendingPathComponent(fallback, isDirectory: true)
         }
-        return KachingPaths(agentHome: dir("AGENT_HOME", ".agent"),
-                          kachingDir: dir("KACHING_DIR", ".claude/kaching"),
+        return AgentTerminalPaths(agentHome: dir("AGENT_HOME", ".agent"),
+                          agentTerminalDir: dir("AGENT_TERMINAL_DIR", ".claude/agent-terminal"),
                           launchAgentsDir: dir("LAUNCH_AGENTS_DIR", "Library/LaunchAgents"),
                           claudeDir: dir("CLAUDE_DIR", ".claude"))
     }
@@ -73,12 +76,12 @@ struct KachingPaths: Sendable {
 
 enum DotState: String, Sendable { case green, amber, grey }
 
-struct KachingCounts: Sendable, Equatable {
+struct AgentTerminalCounts: Sendable, Equatable {
     var sessions = 0, active = 0, blocked = 0, input = 0, needs = 0, proposals = 0
 
     /// Parses dash.sh --counts output (key=value lines). nil when no known key is present.
-    static func parse(_ text: String) -> KachingCounts? {
-        var c = KachingCounts(), seen = false
+    static func parse(_ text: String) -> AgentTerminalCounts? {
+        var c = AgentTerminalCounts(), seen = false
         for line in text.split(whereSeparator: \.isNewline) {
             let kv = line.split(separator: "=", maxSplits: 1)
             guard kv.count == 2, let n = Int(kv[1].trimmingCharacters(in: .whitespaces)) else { continue }
@@ -111,7 +114,7 @@ enum MenuEntry: Sendable, Equatable {
     case separator
 }
 
-/// One open proposal, from a `kaching-proposals list` line: "  skill skill-x: Writes ... (4 sessions/4 days)".
+/// One open proposal, from a `agent-terminal-proposals list` line: "  skill skill-x: Writes ... (4 sessions/4 days)".
 struct Proposal: Sendable, Equatable {
     let id: String
     let summary: String
@@ -133,11 +136,11 @@ struct Recap: Sendable, Equatable {
     let at: Date
 }
 
-struct KachingSnapshot: Sendable {
+struct AgentTerminalSnapshot: Sendable {
     let watcherInstalled: Bool
     let heartbeatAge: Int?                 // seconds since the watcher last wrote; nil = never
     let staleAfter: Int
-    let counts: KachingCounts?               // nil when dash.sh failed or timed out
+    let counts: AgentTerminalCounts?               // nil when dash.sh failed or timed out
     var proposals: [Proposal] = []
     var recaps: [Recap] = []               // newest first
     var now = Date()
@@ -150,7 +153,7 @@ struct KachingSnapshot: Sendable {
     }
 
     var statusLine: String {
-        let head = running ? "Kaching running" : "Kaching not running"
+        let head = running ? "Agent Terminal running" : "Agent Terminal not running"
         guard let c = counts else { return "\(head) · counts unavailable" }
         let s = c.sessions == 1 ? "1 session" : "\(c.sessions) sessions"
         let n = c.needs == 1 ? "1 needs you" : "\(c.needs) need you"
@@ -158,14 +161,14 @@ struct KachingSnapshot: Sendable {
     }
 
     var detailLine: String {
-        if !watcherInstalled { return "Watcher not installed (org.kaching.watch)" }
+        if !watcherInstalled { return "Watcher not installed (org.agent-terminal.watch)" }
         guard let age = heartbeatAge else { return "No watcher heartbeat yet" }
         let when = Self.ago(age)
         return running ? "Watcher last ran \(when)" : "Watcher silent since \(when)"
     }
 
     var menu: [MenuEntry] {
-        var m: [MenuEntry] = [.info(statusLine), .info(detailLine), .separator, .action("Open Kaching", .openInbox)]
+        var m: [MenuEntry] = [.info(statusLine), .info(detailLine), .separator, .action("Open Agent Terminal", .openInbox)]
         if let p = counts?.proposals, p > 0 {
             m.append(.submenu("Proposals waiting: \(p)", proposals.map { pr in
                 .submenu(pr.id, [.actionOn(Self.wrap(pr.summary, 60), .showProposal, pr.id),
@@ -188,7 +191,7 @@ struct KachingSnapshot: Sendable {
             m.append(.submenu("Recaps (\(recaps.count))", sub))
         }
         m.append(VoiceShortcut.menuEntry)
-        m += [.separator, .action("Quit KachingBar", .quit)]
+        m += [.separator, .action("Quit AgentTerminalBar", .quit)]
         return m
     }
 
@@ -246,23 +249,23 @@ struct KachingSnapshot: Sendable {
 // MARK: - Provider
 
 protocol StatusProvider: Sendable {
-    func snapshot() -> KachingSnapshot
+    func snapshot() -> AgentTerminalSnapshot
 }
 
-final class KachingStatusProvider: StatusProvider {
-    let paths: KachingPaths
+final class AgentTerminalStatusProvider: StatusProvider {
+    let paths: AgentTerminalPaths
     let staleAfter: Int
     let dashTimeout: TimeInterval
 
-    init(paths: KachingPaths, staleAfter: Int, dashTimeout: TimeInterval = 5) {
+    init(paths: AgentTerminalPaths, staleAfter: Int, dashTimeout: TimeInterval = 5) {
         self.paths = paths; self.staleAfter = staleAfter; self.dashTimeout = dashTimeout
     }
 
-    func snapshot() -> KachingSnapshot {
+    func snapshot() -> AgentTerminalSnapshot {
         let fm = FileManager.default
         let counts = readCounts()
-        return KachingSnapshot(watcherInstalled: fm.fileExists(atPath: paths.watchPlist.path)
-                                 || fm.fileExists(atPath: paths.oldWatchPlist.path),
+        return AgentTerminalSnapshot(watcherInstalled: fm.fileExists(atPath: paths.watchPlist.path)
+                                 || paths.oldWatchPlists.contains { fm.fileExists(atPath: $0.path) },
                              heartbeatAge: heartbeatAge(now: Date()),
                              staleAfter: staleAfter,
                              counts: counts,
@@ -295,7 +298,7 @@ final class KachingStatusProvider: StatusProvider {
         return out.sorted { $0.at > $1.at }
     }
 
-    /// Kaching's meta names the transcript; else Claude Code's project folder: the cwd with every
+    /// Agent Terminal's meta names the transcript; else Claude Code's project folder: the cwd with every
     /// non-alphanumeric character as '-'.
     func transcript(sid: String, cwd: String) -> URL {
         let meta = (try? String(contentsOf: paths.agentHome.appendingPathComponent("sessions/\(sid)/meta"), encoding: .utf8)) ?? ""
@@ -339,8 +342,8 @@ final class KachingStatusProvider: StatusProvider {
     }
 
     /// `dash.sh --counts`; nil when it fails or times out.
-    func readCounts() -> KachingCounts? {
-        run(paths.dash, ["--counts"]).flatMap(KachingCounts.parse)
+    func readCounts() -> AgentTerminalCounts? {
+        run(paths.dash, ["--counts"]).flatMap(AgentTerminalCounts.parse)
     }
 
     /// Runs a kit script with bash and AGENT_HOME pinned to ours; its stdout, or nil on any failure or after dashTimeout.
@@ -371,10 +374,10 @@ final class KachingStatusProvider: StatusProvider {
 enum TerminalLauncher {
     /// Opens a Terminal window running a script (a .command file: no Apple Events permission needed).
     static func run(name: String, body: String) {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kaching-bar", isDirectory: true)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("agent-terminal-bar", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = dir.appendingPathComponent("\(name).command")
-        let script = "#!/bin/bash\nclear\n\(body)\necho\necho '(KachingBar: you can close this window)'\n"
+        let script = "#!/bin/bash\nclear\n\(body)\necho\necho '(AgentTerminalBar: you can close this window)'\n"
         do {
             try script.write(to: file, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
@@ -393,12 +396,12 @@ enum TerminalLauncher {
 @MainActor
 final class DragWatcher {
     private struct Seen { var frame: CGRect; var display: Int }
-    private let paths: KachingPaths
+    private let paths: AgentTerminalPaths
     private var timer: Timer?
     private var settled: [Int: Seen] = [:]   // window number -> where it last stood still
     private var last: [Int: CGRect] = [:]    // window number -> frame at the previous tick
 
-    init(paths: KachingPaths) { self.paths = paths }
+    init(paths: AgentTerminalPaths) { self.paths = paths }
 
     func start() {
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -468,14 +471,14 @@ final class DragWatcher {
 
 @MainActor
 final class StatusBarController: NSObject {
-    private let provider: KachingStatusProvider
+    private let provider: AgentTerminalStatusProvider
     private let pollSecs: TimeInterval
     private var statusItem: NSStatusItem?
     private var timer: Timer?
     private var inFlight = false
-    private var snapshot: KachingSnapshot?
+    private var snapshot: AgentTerminalSnapshot?
 
-    init(provider: KachingStatusProvider, pollSecs: TimeInterval) {
+    init(provider: AgentTerminalStatusProvider, pollSecs: TimeInterval) {
         self.provider = provider; self.pollSecs = pollSecs
     }
 
@@ -483,7 +486,7 @@ final class StatusBarController: NSObject {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
         item.button?.image = Self.dot(.grey)
-        item.button?.toolTip = "Kaching: checking..."
+        item.button?.toolTip = "Agent Terminal: checking..."
         item.menu = NSMenu()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: pollSecs, repeats: true) { [weak self] _ in
@@ -520,7 +523,7 @@ final class StatusBarController: NSObject {
         }
     }
 
-    private func apply(_ snap: KachingSnapshot) {
+    private func apply(_ snap: AgentTerminalSnapshot) {
         inFlight = false
         snapshot = snap
         guard let item = statusItem else { return }
@@ -579,10 +582,10 @@ final class StatusBarController: NSObject {
         let tool = TerminalLauncher.quote(paths.proposalsTool.path)
         switch a {
         case .openInbox:
-            openKaching()
+            openAgentTerminal()
         case .showProposal:
             TerminalLauncher.run(name: "proposal", body: "\(env)\n\(tool) show \(TerminalLauncher.quote(id))")
-        case .approveProposal:   // only a person approves: kaching-proposals asks for its typed code in this window
+        case .approveProposal:   // only a person approves: agent-terminal-proposals asks for its typed code in this window
             TerminalLauncher.run(name: "approve", body: "\(env)\n\(tool) approve \(TerminalLauncher.quote(id))")
             DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in self?.refresh() }
         case .rejectProposal, .snoozeProposal:
@@ -603,16 +606,16 @@ final class StatusBarController: NSObject {
         }
     }
 
-    /// kaching-open.sh brings kaching forward or starts it; it talks to Terminal with Apple Events. When that fails
-    /// (no Automation permission yet, or the script is missing), kaching starts in a plain new Terminal window.
-    private func openKaching() {
+    /// agent-terminal-open.sh brings agent-terminal forward or starts it; it talks to Terminal with Apple Events. When that fails
+    /// (no Automation permission yet, or the script is missing), agent-terminal starts in a plain new Terminal window.
+    private func openAgentTerminal() {
         let paths = provider.paths
         Task.detached(priority: .userInitiated) {
             var ok = false
-            if FileManager.default.fileExists(atPath: paths.openKaching.path) {
+            if FileManager.default.fileExists(atPath: paths.openAgentTerminal.path) {
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: "/bin/bash")
-                p.arguments = [paths.openKaching.path]
+                p.arguments = [paths.openAgentTerminal.path]
                 var env = ProcessInfo.processInfo.environment
                 env["AGENT_HOME"] = paths.agentHome.path
                 p.environment = env
@@ -622,8 +625,10 @@ final class StatusBarController: NSObject {
                 if (try? p.run()) != nil { p.waitUntilExit(); ok = p.terminationStatus == 0 }
             }
             if !ok {
-                let bin = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/kaching").path
-                TerminalLauncher.run(name: "kaching", body: "export AGENT_HOME=\(TerminalLauncher.quote(paths.agentHome.path))\nexec \(TerminalLauncher.quote(bin))")
+                let binDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin")
+                var bin = binDir.appendingPathComponent("agterm").path
+                if !FileManager.default.fileExists(atPath: bin) { bin = binDir.appendingPathComponent("kaching").path }   // before D65
+                TerminalLauncher.run(name: "agterm", body: "export AGENT_HOME=\(TerminalLauncher.quote(paths.agentHome.path))\nexec \(TerminalLauncher.quote(bin))")
             }
         }
     }
@@ -646,7 +651,7 @@ final class StatusBarController: NSObject {
             return true
         }
         img.isTemplate = (state == .grey)
-        img.accessibilityDescription = "Kaching \(state.rawValue)"
+        img.accessibilityDescription = "Agent Terminal \(state.rawValue)"
         return img
     }
 }
@@ -671,28 +676,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.start()
         drags?.start()
         hotkeys?.start()
-        VoiceKeys.start(env: kachingEnvironment())
+        VoiceKeys.start(env: agentTerminalEnvironment())
     }
 }
 
 // MARK: - Entry
 
-/// The environment, with a variable under its pre-D35 CHING_* name counting when the KACHING_* one is unset.
-func kachingEnvironment() -> [String: String] {
+/// The environment, with a variable under an older name (KACHING_*, before D65; CHING_*, before D35) counting when the
+/// AGENT_TERMINAL_* one is unset. KACHING_* wins over CHING_*.
+func agentTerminalEnvironment() -> [String: String] {
     var env = ProcessInfo.processInfo.environment
-    for (k, v) in env where k.hasPrefix("CHING_") && env["KA" + k] == nil { env["KA" + k] = v }
+    for prefix in ["KACHING_", "CHING_"] {
+        for (k, v) in env where k.hasPrefix(prefix) {
+            let name = "AGENT_TERMINAL_" + k.dropFirst(prefix.count)
+            if env[name] == nil { env[name] = v }
+        }
+    }
     return env
 }
 
 @main
-struct KachingBarMain {
+struct AgentTerminalBarMain {
     static func main() {
-        let env = kachingEnvironment()
+        let env = agentTerminalEnvironment()
         func num(_ key: String, _ fallback: Int) -> Int {
             if let v = env[key], let n = Int(v), n > 0 { return n }
             return fallback
         }
-        let provider = KachingStatusProvider(paths: .fromEnvironment(env), staleAfter: num("KACHING_BAR_STALE_SECS", 660))
+        let provider = AgentTerminalStatusProvider(paths: .fromEnvironment(env), staleAfter: num("AGENT_TERMINAL_BAR_STALE_SECS", 660))
         let args = CommandLine.arguments.dropFirst()
         if let code = MainActor.assumeIsolated({ VoiceShortcut.cli(Array(args), env: env) }) { exit(code) }
         if args.contains("--status-once") {
@@ -700,18 +711,18 @@ struct KachingBarMain {
             exit(0)
         }
         if args.contains("--hotkeys-check") {   // how $AGENT_HOME/hotkeys (or the defaults) parse: one line per binding
-            print(HotkeyBinding.check(agentHome: KachingPaths.fromEnvironment(env).agentHome))
+            print(HotkeyBinding.check(agentHome: AgentTerminalPaths.fromEnvironment(env).agentHome))
             exit(0)
         }
         if let bad = args.first(where: { !$0.hasPrefix("-psn_") }) {
-            FileHandle.standardError.write(Data("KachingBar: unknown argument \(bad) (only --status-once, --hotkeys-check)\n".utf8))
+            FileHandle.standardError.write(Data("AgentTerminalBar: unknown argument \(bad) (only --status-once, --hotkeys-check)\n".utf8))
             exit(64)
         }
         MainActor.assumeIsolated {
             let app = NSApplication.shared
-            let drags = (env["KACHING_BAR_DRAGS"] ?? "").lowercased() == "off" ? nil : DragWatcher(paths: .fromEnvironment(env))
-            let controller = StatusBarController(provider: provider, pollSecs: TimeInterval(num("KACHING_BAR_POLL_SECS", 12)))
-            let hotkeys = (env["KACHING_BAR_HOTKEYS"] ?? "").lowercased() == "off" ? nil
+            let drags = (env["AGENT_TERMINAL_BAR_DRAGS"] ?? "").lowercased() == "off" ? nil : DragWatcher(paths: .fromEnvironment(env))
+            let controller = StatusBarController(provider: provider, pollSecs: TimeInterval(num("AGENT_TERMINAL_BAR_POLL_SECS", 12)))
+            let hotkeys = (env["AGENT_TERMINAL_BAR_HOTKEYS"] ?? "").lowercased() == "off" ? nil
                 : Hotkeys(paths: .fromEnvironment(env), flash: { [weak controller] in controller?.flash($0) })
             let delegate = AppDelegate(controller: controller, drags: drags, hotkeys: hotkeys)
             app.delegate = delegate

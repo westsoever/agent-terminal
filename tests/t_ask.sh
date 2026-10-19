@@ -31,7 +31,7 @@ assert_eq "the question before the options" "Which one should I do first?" "$(as
 for m in "Let me know if you want X." \
          "If it doesn't snap, tell me and I'll check the logs." \
          "Not yet tested on your real screens, so I left the live check to you." \
-         "You'll need to allow KachingBar under Accessibility." \
+         "You'll need to allow AgentTerminalBar under Accessibility." \
          "Please confirm the folder shows up in Raycast." \
          "Your call: merge now or wait for the voice work." \
          "I need your approval before pushing." \

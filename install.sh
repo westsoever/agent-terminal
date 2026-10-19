@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh - wire the kaching kit into Claude Code, machine-wide. Idempotent; only ADDS hook entries.
+# install.sh - wire the agent-terminal kit into Claude Code, machine-wide. Idempotent; only ADDS hook entries.
 #
 #   install.sh [--dry-run] [--yes] [--replace-popup]
 #   install.sh --uninstall [--dry-run] [--yes]
@@ -11,23 +11,23 @@
 #   $SETTINGS_FILE (default ~/.claude/settings.json): merges hook entries with jq (backup first, unified
 #       diff shown before applying; nothing is written when the result is identical), and appends the two
 #       VoiceMode converse tool names to permissions.allow when they are missing (--uninstall leaves them).
-#   $CLAUDE_DIR/kaching  -> symlink to this directory;  $CLAUDE_DIR/commands/<name>.md -> symlink for every
-#       file in commands/ (handoff, next, dash); $CLAUDE_DIR/ching, the pre-D35 name, stays a second link here.
-#   From Ching (D35): hooks under ching/bin/ and the org.ching.* jobs are replaced by kaching/bin/ and org.kaching.*.
+#   $CLAUDE_DIR/agent-terminal  -> symlink to this directory;  $CLAUDE_DIR/commands/<name>.md -> symlink for every
+#       file in commands/ (handoff, next, dash).
+#   From Kaching (D65) or Ching (D35): hooks under kaching/ or ching/ and the org.kaching.* / org.ching.* jobs are replaced; both links stay.
 #   ~/.agent-repos: created empty with a comment if absent (optional extra list for dash.sh).
-#   $LAUNCH_AGENTS_DIR/org.kaching.watch.plist (default ~/Library/LaunchAgents): runs bin/kaching-watch.sh every 300 s.
-#   $LAUNCH_AGENTS_DIR/org.kaching.learn.plist: runs bin/learn.sh every day at 05:30 local (the learner, Phase 6; the
-#       weekly part runs on the first run of each ISO week, normally Monday), with KACHING_LEARNER=1 and
+#   $LAUNCH_AGENTS_DIR/org.agent-terminal.watch.plist (default ~/Library/LaunchAgents): runs bin/agent-terminal-watch.sh every 300 s.
+#   $LAUNCH_AGENTS_DIR/org.agent-terminal.learn.plist: runs bin/learn.sh every day at 05:30 local (the learner, Phase 6; the
+#       weekly part runs on the first run of each ISO week, normally Monday), with AGENT_TERMINAL_LEARNER=1 and
 #       CLAUDE_MEM_INTERNAL=1; launchd's own output goes to $AGENT_HOME/learn.log.
-#   $CLAUDE_MEM_SETTINGS (default ~/.claude-mem/settings.json), only when it exists (D27; kaching never needs
+#   $CLAUDE_MEM_SETTINGS (default ~/.claude-mem/settings.json), only when it exists (D27; agent-terminal never needs
 #       claude-mem): adds $AGENT_HOME/proposals/.work to CLAUDE_MEM_EXCLUDED_PROJECTS (comma-separated globs), so
 #       claude-mem never observes the learner's own runs. Backup first, diff shown; --uninstall takes it out again.
 # --install-dispatcher only prepares the voice dispatcher's own folder, $AGENT_HOME/dispatcher (default ~/.agent/dispatcher):
 #   .claude/settings.json (its permissions and the tool-gate hook), mcp.json (VoiceMode, converse only) and AGENTS.md /
 #   CLAUDE.md links to dispatcher/AGENTS.md. It never touches the settings file above. Start it with
-#   $CLAUDE_DIR/kaching/dispatcher/launch.sh. To remove it: rm -r the folder (it holds two generated files and two links).
-# --install-menubar builds $KACHING_APPS_DIR/KachingBar.app (default ~/Applications; ui/menubar/build.sh, swiftc from $SWIFTC
-#   or /usr/bin) only when its source hash differs, and installs $LAUNCH_AGENTS_DIR/org.kaching.menubar.plist (RunAtLoad;
+#   $CLAUDE_DIR/agent-terminal/dispatcher/launch.sh. To remove it: rm -r the folder (it holds two generated files and two links).
+# --install-menubar builds $AGENT_TERMINAL_APPS_DIR/AgentTerminalBar.app (default ~/Applications; ui/menubar/build.sh, swiftc from $SWIFTC
+#   or /usr/bin) only when its source hash differs, and installs $LAUNCH_AGENTS_DIR/org.agent-terminal.menubar.plist (RunAtLoad;
 #   KeepAlive unless it quit cleanly). --uninstall also removes both (the app only when its bundle id is ours).
 # The preview shows the settings diff and the plist diff. Nothing is applied (settings, symlinks, plist,
 # launchctl) without --yes or a "y" at a terminal; with no terminal and no --yes it prints what it would
@@ -36,19 +36,19 @@
 # "Session finished" popup is removed ONLY with --replace-popup.
 #
 # Overrides (for tests): SETTINGS_FILE, CLAUDE_DIR (default: dirname of SETTINGS_FILE when that is set,
-# else ~/.claude), AGENT_REPOS_FILE, AGENT_HOME, CLAUDE_MEM_SETTINGS, KACHING_APPS_DIR, SWIFTC, LAUNCHCTL, LAUNCH_AGENTS_DIR.
+# else ~/.claude), AGENT_REPOS_FILE, AGENT_HOME, CLAUDE_MEM_SETTINGS, AGENT_TERMINAL_APPS_DIR, SWIFTC, LAUNCHCTL, LAUNCH_AGENTS_DIR.
 set -euo pipefail
 
-KACHING_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+AGENT_TERMINAL_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 if [ -n "${SETTINGS_FILE:-}" ] && [ -z "${CLAUDE_DIR:-}" ]; then CLAUDE_DIR=$(dirname "$SETTINGS_FILE"); fi
 CLAUDE_DIR=${CLAUDE_DIR:-$HOME/.claude}
 SETTINGS_FILE=${SETTINGS_FILE:-$CLAUDE_DIR/settings.json}
 if [ -z "${AGENT_REPOS_FILE:-}" ]; then
   if [ "$CLAUDE_DIR" = "$HOME/.claude" ]; then AGENT_REPOS_FILE=$HOME/.agent-repos; else AGENT_REPOS_FILE=$(dirname "$CLAUDE_DIR")/.agent-repos; fi
 fi
-LINK="$CLAUDE_DIR/kaching"
-OLD_LINK="$CLAUDE_DIR/ching"   # D35: the link's name before the rename, kept as a second link to this directory
-KACHING_APPS_DIR=${KACHING_APPS_DIR:-${CHING_APPS_DIR:-}}
+LINK="$CLAUDE_DIR/agent-terminal"
+OLD_LINKS=("$CLAUDE_DIR/kaching" "$CLAUDE_DIR/ching")   # D65, D35: the link's names before the renames, kept as more links to this directory
+AGENT_TERMINAL_APPS_DIR=${AGENT_TERMINAL_APPS_DIR:-${KACHING_APPS_DIR:-${CHING_APPS_DIR:-}}}
 
 DRY=0; YES=0; POPUP=0; UNINSTALL=0; PREPUSH=""; DISPATCHER=0; MENUBAR=0
 while [ $# -gt 0 ]; do
@@ -71,20 +71,48 @@ say() { printf '%s\n' "$*"; }
 act() { if [ "$DRY" -eq 1 ]; then say "would: $*"; else say "did:   $*"; fi; }
 would() { say "would: $*"; }
 TMPD=""
-tmpd() { if [ -z "$TMPD" ]; then TMPD=$(mktemp -d "${TMPDIR:-/tmp}/kaching-install.XXXXXX"); trap 'rm -rf "$TMPD"' EXIT; fi; }
+tmpd() { if [ -z "$TMPD" ]; then TMPD=$(mktemp -d "${TMPDIR:-/tmp}/agent-terminal-install.XXXXXX"); trap 'rm -rf "$TMPD"' EXIT; fi; }
 # values go into XML text: & < > in a path would otherwise break the plist (launchd then refuses to load it)
 xml_esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 LAUNCH_AGENTS_DIR=${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}
 LAUNCHCTL=${LAUNCHCTL:-launchctl}
 AH=${AGENT_HOME:-$HOME/.agent}
 # the menu bar dot (ui/menubar): its app bundle and its launchd job
-MB_APP="${KACHING_APPS_DIR:-$HOME/Applications}/KachingBar.app"
-MB_PLIST="$LAUNCH_AGENTS_DIR/org.kaching.menubar.plist"
-MB_ID=org.kaching.menubar
-OLD_MB_APP="${KACHING_APPS_DIR:-$HOME/Applications}/ChingBar.app"   # the dot before D35
-OLD_MB_PLIST="$LAUNCH_AGENTS_DIR/org.ching.menubar.plist"
-OLD_MB_ID=org.ching.menubar
-old_mb_app_id() { /usr/bin/plutil -extract CFBundleIdentifier raw "$OLD_MB_APP/Contents/Info.plist" 2>/dev/null || true; }
+MB_APP="${AGENT_TERMINAL_APPS_DIR:-$HOME/Applications}/AgentTerminalBar.app"
+MB_PLIST="$LAUNCH_AGENTS_DIR/org.agent-terminal.menubar.plist"
+MB_ID=org.agent-terminal.menubar
+# the dot before D65 (KachingBar) and before D35 (ChingBar): app name and bundle id / job label, one per line
+OLD_MBS="KachingBar|org.kaching.menubar
+ChingBar|org.ching.menubar"
+old_mb_app() { printf '%s' "${AGENT_TERMINAL_APPS_DIR:-$HOME/Applications}/$1.app"; }
+old_mb_plist() { printf '%s' "$LAUNCH_AGENTS_DIR/$1.plist"; }
+old_mb_app_id() { /usr/bin/plutil -extract CFBundleIdentifier raw "$(old_mb_app "$1")/Contents/Info.plist" 2>/dev/null || true; }
+OLD_MB_JOBS=""; OLD_MB_APPS_RM=""
+old_mb_scan() { # fills OLD_MB_JOBS ("plist|label" lines) and OLD_MB_APPS_RM (paths) with the old dots that are installed
+  OLD_MB_JOBS=""; OLD_MB_APPS_RM=""
+  local n id
+  while IFS='|' read -r n id; do
+    [ -n "$n" ] || continue
+    [ ! -f "$(old_mb_plist "$id")" ] || OLD_MB_JOBS="$OLD_MB_JOBS$(old_mb_plist "$id")|$id"$'\n'
+    if [ -e "$(old_mb_app "$n")" ] && [ "$(old_mb_app_id "$n")" = "$id" ]; then OLD_MB_APPS_RM="$OLD_MB_APPS_RM$(old_mb_app "$n")"$'\n'; fi
+  done <<<"$OLD_MBS"
+}
+old_mb_plan() {
+  local plist id app
+  while IFS='|' read -r plist id; do [ -z "$plist" ] || would "launchctl bootout $id and remove $plist (the dot before the rename)"; done <<<"$OLD_MB_JOBS"
+  while IFS= read -r app; do [ -z "$app" ] || would "remove $app"; done <<<"$OLD_MB_APPS_RM"
+}
+old_mb_remove() {
+  local plist id app
+  while IFS='|' read -r plist id; do
+    [ -n "$plist" ] || continue
+    "$LAUNCHCTL" bootout "gui/$(id -u)/$id" >/dev/null 2>&1 || true
+    rm -f "$plist"; act "removed $plist ($id, the dot before the rename)"
+  done <<<"$OLD_MB_JOBS"
+  while IFS= read -r app; do
+    [ -z "$app" ] || { rm -rf "$app"; act "removed $app"; }
+  done <<<"$OLD_MB_APPS_RM"
+}
 mb_app_id() { /usr/bin/plutil -extract CFBundleIdentifier raw "$MB_APP/Contents/Info.plist" 2>/dev/null || true; }
 
 # ---------------- pre-push hook for one repo ----------------
@@ -93,10 +121,10 @@ if [ -n "$PREPUSH" ]; then
   hooks_dir=$(git -C "$PREPUSH" rev-parse --git-path hooks)
   case "$hooks_dir" in /*) ;; *) hooks_dir="$(cd "$PREPUSH" && pwd -P)/$hooks_dir" ;; esac
   target="$hooks_dir/pre-push"
-  rendered=$(sed "s#@KACHING_BIN@#$LINK/bin#" "$KACHING_ROOT/templates/pre-push")
+  rendered=$(sed "s#@AGENT_TERMINAL_BIN@#$LINK/bin#" "$AGENT_TERMINAL_ROOT/templates/pre-push")
   if [ -f "$target" ] && ! grep -q 'ching-prepush-marker' "$target"; then
-    target="$hooks_dir/pre-push.kaching"
-    say "note: $hooks_dir/pre-push already exists and is not ours; writing pre-push.kaching instead."
+    target="$hooks_dir/pre-push.agent-terminal"
+    say "note: $hooks_dir/pre-push already exists and is not ours; writing pre-push.agent-terminal instead."
     say "      Chain it from your hook:  \"$target\" \"\$@\" || exit 1   (stdin must be passed through)"
   fi
   if [ -f "$target" ] && [ "$(cat "$target")" = "$rendered" ]; then say "pre-push hook already installed: $target"; exit 0; fi
@@ -111,7 +139,7 @@ phys() { # path -> its physical path (symlinked folders resolved); '' when its f
   printf '%s/%s' "$d" "$(basename "$1")"
 }
 same_target() { # link target -> 0 when the link already leads to target, also when its text names the folder by an
-  # older path that is now a symlink to it (~/bbq/ching after the move to ~/bbq/kaching)
+  # older path that is now a symlink to it (~/bbq/ching after the move to ~/bbq/agent-terminal)
   local t; t=$(readlink "$1")
   [ "$t" = "$2" ] && return 0
   case "$t" in /*) ;; *) return 1 ;; esac
@@ -142,11 +170,11 @@ if [ "$DISPATCHER" -eq 1 ]; then
   VM=$(command -v voicemode 2>/dev/null || echo voicemode)
   render() { # template -> the template with its @placeholders@ filled in (jq: any character in a path is safe)
     jq --indent 2 --arg link "$LINK" --arg vm "$VM" \
-      'walk(if type == "string" then gsub("@KACHING@"; $link) | gsub("@VOICEMODE@"; $vm) else . end)' "$1"
+      'walk(if type == "string" then gsub("@AGENT_TERMINAL@"; $link) | gsub("@VOICEMODE@"; $vm) else . end)' "$1"
   }
   tmpd
-  gen_files="$DDIR/.claude/settings.json|$KACHING_ROOT/dispatcher/settings.json
-$DDIR/mcp.json|$KACHING_ROOT/dispatcher/mcp.json"
+  gen_files="$DDIR/.claude/settings.json|$AGENT_TERMINAL_ROOT/dispatcher/settings.json
+$DDIR/mcp.json|$AGENT_TERMINAL_ROOT/dispatcher/mcp.json"
   write_plan=""
   while IFS='|' read -r dest tmpl; do
     [ -n "$dest" ] || continue
@@ -161,7 +189,7 @@ $DDIR/mcp.json|$KACHING_ROOT/dispatcher/mcp.json"
     cp "$TMPD/render.new" "$TMPD/w.$(printf '%s' "$dest" | shasum | cut -c1-12)"
     write_plan="$write_plan$dest|$TMPD/w.$(printf '%s' "$dest" | shasum | cut -c1-12)"$'\n'
   done <<<"$gen_files"
-  if ! { [ -L "$LINK" ] && same_target "$LINK" "$KACHING_ROOT"; }; then
+  if ! { [ -L "$LINK" ] && same_target "$LINK" "$AGENT_TERMINAL_ROOT"; }; then
     say "warning: $LINK is not the kit's symlink yet. The dispatcher's paths go through it: run install.sh first."
   fi
   plan_link "$LINK/dispatcher/AGENTS.md" "$DDIR/AGENTS.md"
@@ -194,17 +222,17 @@ $DDIR/mcp.json|$KACHING_ROOT/dispatcher/mcp.json"
   exit 0
 fi
 
-# ---------------- the menu bar dot (ui/menubar): KachingBar.app and its launchd job ----------------
+# ---------------- the menu bar dot (ui/menubar): AgentTerminalBar.app and its launchd job ----------------
 if [ "$MENUBAR" -eq 1 ]; then
   [ "$UNINSTALL" -eq 0 ] || { echo "install: --uninstall removes the menu bar dot too; run it without --install-menubar" >&2; exit 64; }
   if [ -e "$MB_APP" ] && [ "$(mb_app_id)" != "$MB_ID" ]; then
-    echo "install: $MB_APP exists and is not KachingBar ($MB_ID); leaving it alone" >&2; exit 1
+    echo "install: $MB_APP exists and is not AgentTerminalBar ($MB_ID); leaving it alone" >&2; exit 1
   fi
-  BUILD="$KACHING_ROOT/ui/menubar/build.sh"
+  BUILD="$AGENT_TERMINAL_ROOT/ui/menubar/build.sh"
   if ! want_hash=$("$BUILD" --hash 2>&1); then echo "install: $want_hash" >&2; exit 1; fi
-  have_hash=$(/usr/bin/plutil -extract KachingSourceHash raw "$MB_APP/Contents/Info.plist" 2>/dev/null || true)
-  NEED_APP=0; [ "$have_hash" = "$want_hash" ] && [ -x "$MB_APP/Contents/MacOS/KachingBar" ] || NEED_APP=1
-  X_EXE=$(xml_esc "$MB_APP/Contents/MacOS/KachingBar"); X_AH=$(xml_esc "$AH"); X_LINK=$(xml_esc "$LINK")
+  have_hash=$(/usr/bin/plutil -extract AgentTerminalSourceHash raw "$MB_APP/Contents/Info.plist" 2>/dev/null || true)
+  NEED_APP=0; [ "$have_hash" = "$want_hash" ] && [ -x "$MB_APP/Contents/MacOS/AgentTerminalBar" ] || NEED_APP=1
+  X_EXE=$(xml_esc "$MB_APP/Contents/MacOS/AgentTerminalBar"); X_AH=$(xml_esc "$AH"); X_LINK=$(xml_esc "$LINK")
   MB_BODY=$(cat <<EOP
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -219,7 +247,7 @@ if [ "$MENUBAR" -eq 1 ]; then
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>AGENT_HOME</key><string>$X_AH</string>
-    <key>KACHING_DIR</key><string>$X_LINK</string>
+    <key>AGENT_TERMINAL_DIR</key><string>$X_LINK</string>
   </dict>
   <key>StandardOutPath</key><string>$X_AH/menubar.log</string>
   <key>StandardErrorPath</key><string>$X_AH/menubar.log</string>
@@ -228,12 +256,11 @@ if [ "$MENUBAR" -eq 1 ]; then
 EOP
 )
   NEED_MB_PLIST=0; [ -f "$MB_PLIST" ] && [ "$(cat "$MB_PLIST")" = "$MB_BODY" ] || NEED_MB_PLIST=1
-  if ! { [ -L "$LINK" ] && same_target "$LINK" "$KACHING_ROOT"; }; then
+  if ! { [ -L "$LINK" ] && same_target "$LINK" "$AGENT_TERMINAL_ROOT"; }; then
     say "warning: $LINK is not the kit's symlink yet. The dot reads dash.sh through it: run install.sh first."
   fi
-  OLD_MB=0; [ ! -f "$OLD_MB_PLIST" ] || OLD_MB=1
-  OLD_MB_APP_RM=0; if [ -e "$OLD_MB_APP" ] && [ "$(old_mb_app_id)" = "$OLD_MB_ID" ]; then OLD_MB_APP_RM=1; fi
-  if [ "$NEED_APP" -eq 0 ] && [ "$NEED_MB_PLIST" -eq 0 ] && [ "$OLD_MB" -eq 0 ] && [ "$OLD_MB_APP_RM" -eq 0 ]; then say "nothing to do"; exit 0; fi
+  old_mb_scan
+  if [ "$NEED_APP" -eq 0 ] && [ "$NEED_MB_PLIST" -eq 0 ] && [ -z "$OLD_MB_JOBS" ] && [ -z "$OLD_MB_APPS_RM" ]; then say "nothing to do"; exit 0; fi
   if [ "$NEED_APP" -eq 1 ]; then
     say "== app: $MB_APP"
     say "source hash ${want_hash}; installed: ${have_hash:-none}"
@@ -251,8 +278,7 @@ EOP
     [ "$NEED_APP" -eq 0 ] || would "build $MB_APP (ui/menubar/build.sh)"
     if [ "$NEED_MB_PLIST" -eq 1 ]; then would "write $MB_PLIST and launchctl bootstrap it"
     else would "launchctl kickstart -k gui/$(id -u)/$MB_ID (restart the rebuilt app)"; fi
-    [ "$OLD_MB" -eq 0 ] || would "launchctl bootout $OLD_MB_ID and remove $OLD_MB_PLIST (ChingBar, the dot before the rename)"
-    [ "$OLD_MB_APP_RM" -eq 0 ] || would "remove $OLD_MB_APP"
+    old_mb_plan
   }
   if [ "$DRY" -eq 1 ]; then mb_plan; exit 0; fi
   if [ "$YES" -eq 0 ]; then
@@ -282,11 +308,7 @@ EOP
     "$LAUNCHCTL" kickstart -k "gui/$(id -u)/$MB_ID" >/dev/null 2>&1 || true
     act "restarted $MB_ID"
   fi
-  if [ "$OLD_MB" -eq 1 ]; then
-    "$LAUNCHCTL" bootout "gui/$(id -u)/$OLD_MB_ID" >/dev/null 2>&1 || true
-    rm -f "$OLD_MB_PLIST"; act "removed $OLD_MB_PLIST ($OLD_MB_ID, the dot before the rename)"
-  fi
-  if [ "$OLD_MB_APP_RM" -eq 1 ]; then rm -rf "$OLD_MB_APP"; act "removed $OLD_MB_APP"; fi
+  old_mb_remove
   exit 0
 fi
 
@@ -311,6 +333,7 @@ HOOKS=$(
   hook_line PreToolUse "$GUARD_MATCHER" "$LINK/bin/guard.sh" 15
   hook_line Notification "idle_prompt" "$LINK/bin/notify.sh idle" 10
 )
+OLD_BINS_JSON=$(for l in "${OLD_LINKS[@]}"; do printf '%s\n' "$l/bin/"; done | jq -R . | jq -s -c .)
 HOOKS_JSON=$(printf '%s\n' "$HOOKS" | jq -R -s '
   split("\n") | map(select(length > 0) | split("\t")
     | {event: .[0], matcher: .[1], command: .[2], timeout: (.[3] | tonumber)})')
@@ -318,18 +341,18 @@ HOOKS_JSON=$(printf '%s\n' "$HOOKS" | jq -R -s '
 if [ "$UNINSTALL" -eq 1 ]; then
   NEW=$(printf '%s' "$CURRENT" | jq --indent 2 '
     if .hooks then
-      .hooks |= (with_entries(.value |= (map(.hooks |= map(select((.command // "") | (contains("/kaching/bin/") or contains("/ching/bin/")) | not)))
+      .hooks |= (with_entries(.value |= (map(.hooks |= map(select((.command // "") | (contains("/agent-terminal/bin/") or contains("/kaching/bin/") or contains("/ching/bin/")) | not)))
                                           | map(select((.hooks | length) > 0))))
                  | with_entries(select((.value | length) > 0)))
       | if (.hooks | length) == 0 then del(.hooks) else . end
     else . end')
 else
   NEW=$(printf '%s' "$CURRENT" | jq --indent 2 --argjson add "$HOOKS_JSON" --argjson popup "$POPUP" --argjson voice "$VOICE_ALLOW" \
-        --arg old "$OLD_LINK/bin/" '
+        --argjson olds "$OLD_BINS_JSON" '
     def has_cmd($g; $c): ([$g[]? | .hooks[]? | .command] | index($c)) != null;
     .hooks = (.hooks // {})
-    # D35: our entries under the old link make way for the same entries under the new one (no hook runs twice)
-    | .hooks |= (with_entries(.value |= (map(.hooks |= map(select((.command // "") | startswith($old) | not)))
+    # D35, D65: our entries under the old links make way for the same entries under the new one (no hook runs twice)
+    | .hooks |= (with_entries(.value |= (map(.hooks |= map(select(((.command // "") as $c | any($olds[]; . as $p | $c | startswith($p))) | not)))
                                         | map(select((.hooks | length) > 0))))
                  | with_entries(select((.value | length) > 0)))
     | reduce $add[] as $h (.;
@@ -364,9 +387,10 @@ fi
 
 # ---------------- symlinks and files ----------------
 if [ "$UNINSTALL" -eq 0 ]; then
-  plan_link "$KACHING_ROOT" "$LINK"
-  plan_compat_link "$KACHING_ROOT" "$OLD_LINK"
-  for c in "$KACHING_ROOT"/commands/*.md; do
+  plan_link "$AGENT_TERMINAL_ROOT" "$LINK"
+  # an old link is kept leading here, never made on a machine that has not had it (a new install has none)
+  for l in "${OLD_LINKS[@]}"; do if [ -L "$l" ] || [ -e "$l" ]; then plan_compat_link "$AGENT_TERMINAL_ROOT" "$l"; fi; done
+  for c in "$AGENT_TERMINAL_ROOT"/commands/*.md; do
     [ -f "$c" ] || continue
     plan_link "$c" "$CLAUDE_DIR/commands/$(basename "$c")"
   done
@@ -374,16 +398,16 @@ fi
 NEED_REPOS=0
 if [ "$UNINSTALL" -eq 0 ] && [ ! -e "$AGENT_REPOS_FILE" ]; then NEED_REPOS=1; fi
 
-# ---------------- launchd watcher (kaching-watch.sh every 5 minutes) ----------------
-PLIST="$LAUNCH_AGENTS_DIR/org.kaching.watch.plist"
+# ---------------- launchd watcher (agent-terminal-watch.sh every 5 minutes) ----------------
+PLIST="$LAUNCH_AGENTS_DIR/org.agent-terminal.watch.plist"
 X_LINK=$(xml_esc "$LINK"); X_AH=$(xml_esc "$AH")
 PLIST_BODY=$(cat <<EOP
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>org.kaching.watch</string>
-  <key>ProgramArguments</key><array><string>/bin/bash</string><string>$X_LINK/bin/kaching-watch.sh</string></array>
+  <key>Label</key><string>org.agent-terminal.watch</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>$X_LINK/bin/agent-terminal-watch.sh</string></array>
   <key>StartInterval</key><integer>300</integer>
   <key>RunAtLoad</key><true/>
   <key>EnvironmentVariables</key><dict>
@@ -402,21 +426,21 @@ need_plist() { # file body -> 0 when this run must write (install) or remove (un
 NEED_PLIST=0; if need_plist "$PLIST" "$PLIST_BODY"; then NEED_PLIST=1; fi
 
 # ---------------- launchd learner (learn.sh every day at 05:30; Phase 6, D26) ----------------
-LPLIST="$LAUNCH_AGENTS_DIR/org.kaching.learn.plist"
+LPLIST="$LAUNCH_AGENTS_DIR/org.agent-terminal.learn.plist"
 X_PATH=$(xml_esc "/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin")   # claude lives in ~/.local/bin
 LPLIST_BODY=$(cat <<EOP
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>org.kaching.learn</string>
+  <key>Label</key><string>org.agent-terminal.learn</string>
   <key>ProgramArguments</key><array><string>/bin/bash</string><string>$X_LINK/bin/learn.sh</string></array>
   <key>StartCalendarInterval</key><dict><key>Hour</key><integer>5</integer><key>Minute</key><integer>30</integer></dict>
   <key>ProcessType</key><string>Background</string>
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>$X_PATH</string>
     <key>AGENT_HOME</key><string>$X_AH</string>
-    <key>KACHING_LEARNER</key><string>1</string>
+    <key>AGENT_TERMINAL_LEARNER</key><string>1</string>
     <key>CLAUDE_MEM_INTERNAL</key><string>1</string>
   </dict>
   <key>StandardOutPath</key><string>$X_AH/learn.log</string>
@@ -427,11 +451,11 @@ EOP
 )
 NEED_LPLIST=0; if need_plist "$LPLIST" "$LPLIST_BODY"; then NEED_LPLIST=1; fi
 
-# ---------------- the jobs under their names before D35: replaced by org.kaching.* (install) or removed (uninstall) ----------------
-OLD_PLIST="$LAUNCH_AGENTS_DIR/org.ching.watch.plist"
-OLD_LPLIST="$LAUNCH_AGENTS_DIR/org.ching.learn.plist"
-NEED_OLD_PLIST=0; [ ! -f "$OLD_PLIST" ] || NEED_OLD_PLIST=1
-NEED_OLD_LPLIST=0; [ ! -f "$OLD_LPLIST" ] || NEED_OLD_LPLIST=1
+# ---------------- the jobs under their names before D65 and D35: replaced by org.agent-terminal.* (install) or removed (uninstall) ----------------
+OLD_JOBS=""   # "plist|label" lines for the old jobs whose plist exists
+for _j in org.kaching.watch org.kaching.learn org.ching.watch org.ching.learn; do
+  [ ! -f "$LAUNCH_AGENTS_DIR/$_j.plist" ] || OLD_JOBS="$OLD_JOBS$LAUNCH_AGENTS_DIR/$_j.plist|$_j"$'\n'
+done
 
 # ---------------- claude-mem exclusion (D27): keep claude-mem from observing the learner ----------------
 # claude-mem 13.40.0 (scripts/worker-service.cjs) skips a session whose cwd matches one of the comma-separated globs in
@@ -457,21 +481,23 @@ if [ -f "$CM_FILE" ]; then
 fi
 
 # ---------------- the menu bar dot: only --uninstall touches it here (--install-menubar is its own step above) ----------------
-NEED_MB_RM=0; NEED_MB_APP_RM=0; NEED_OLD_MB_RM=0; NEED_OLD_MB_APP_RM=0
+NEED_MB_RM=0; NEED_MB_APP_RM=0
+old_mb_scan
 if [ "$UNINSTALL" -eq 1 ]; then
   [ ! -f "$MB_PLIST" ] || NEED_MB_RM=1
   if [ -e "$MB_APP" ]; then
-    if [ "$(mb_app_id)" = "$MB_ID" ]; then NEED_MB_APP_RM=1; else say "warning: $MB_APP is not KachingBar ($MB_ID); leaving it alone"; fi
+    if [ "$(mb_app_id)" = "$MB_ID" ]; then NEED_MB_APP_RM=1; else say "warning: $MB_APP is not AgentTerminalBar ($MB_ID); leaving it alone"; fi
   fi
-  [ ! -f "$OLD_MB_PLIST" ] || NEED_OLD_MB_RM=1
-  if [ -e "$OLD_MB_APP" ] && [ "$(old_mb_app_id)" = "$OLD_MB_ID" ]; then NEED_OLD_MB_APP_RM=1; fi
-elif [ -f "$OLD_MB_PLIST" ]; then
-  say "note: the menu bar dot still runs as ChingBar ($OLD_MB_ID). Run install.sh --install-menubar to replace it with KachingBar."
+else
+  if [ -n "$OLD_MB_JOBS" ]; then
+    say "note: the menu bar dot still runs under an old name ($(printf '%s' "$OLD_MB_JOBS" | cut -d'|' -f2 | tr '\n' ' ')). Run install.sh --install-menubar to replace it with AgentTerminalBar."
+  fi
+  OLD_MB_JOBS=""; OLD_MB_APPS_RM=""   # only --install-menubar and --uninstall remove an old dot
 fi
 
 if [ "$CHANGED" -eq 0 ] && [ -z "$link_plan" ] && [ -z "$relink_plan" ] && [ "$NEED_REPOS" -eq 0 ] && [ "$NEED_PLIST" -eq 0 ] \
    && [ "$NEED_LPLIST" -eq 0 ] && [ "$CM_CHANGED" -eq 0 ] && [ "$NEED_MB_RM" -eq 0 ] && [ "$NEED_MB_APP_RM" -eq 0 ] \
-   && [ "$NEED_OLD_PLIST" -eq 0 ] && [ "$NEED_OLD_LPLIST" -eq 0 ] && [ "$NEED_OLD_MB_RM" -eq 0 ] && [ "$NEED_OLD_MB_APP_RM" -eq 0 ]; then
+   && [ -z "$OLD_JOBS" ] && [ -z "$OLD_MB_JOBS" ] && [ -z "$OLD_MB_APPS_RM" ]; then
   say "nothing to do"; exit 0
 fi
 
@@ -493,13 +519,11 @@ show_plist_diff() { # file body
 [ "$NEED_PLIST" -eq 0 ] || show_plist_diff "$PLIST" "$PLIST_BODY"
 [ "$NEED_LPLIST" -eq 0 ] || show_plist_diff "$LPLIST" "$LPLIST_BODY"
 [ "$NEED_MB_RM" -eq 0 ] || show_plist_diff "$MB_PLIST" ""
-show_old_plist() { # the job under its pre-D35 name, which this run removes
+show_old_plist() { # the job under its pre-D65 or pre-D35 name, which this run removes
   say "== launchd: $1 (the name before the rename)"
   diff -u --label "$1 (current)" --label "$1 (removed)" "$1" /dev/null || true
 }
-[ "$NEED_OLD_PLIST" -eq 0 ] || show_old_plist "$OLD_PLIST"
-[ "$NEED_OLD_LPLIST" -eq 0 ] || show_old_plist "$OLD_LPLIST"
-[ "$NEED_OLD_MB_RM" -eq 0 ] || show_old_plist "$OLD_MB_PLIST"
+while IFS='|' read -r _p _; do [ -z "$_p" ] || show_old_plist "$_p"; done <<<"$OLD_JOBS$OLD_MB_JOBS"
 if [ "$CM_CHANGED" -eq 1 ]; then
   say "== claude-mem: $CM_FILE"
   tmpd
@@ -515,10 +539,8 @@ plan_lines() { # everything this run would do, whether or not settings.json chan
   [ "$NEED_LPLIST" -eq 0 ] || { if [ "$UNINSTALL" -eq 1 ]; then would "launchctl bootout and remove $LPLIST"; else would "write $LPLIST and launchctl bootstrap it"; fi; }
   [ "$NEED_MB_RM" -eq 0 ] || would "launchctl bootout and remove $MB_PLIST"
   [ "$NEED_MB_APP_RM" -eq 0 ] || would "remove $MB_APP"
-  [ "$NEED_OLD_PLIST" -eq 0 ] || would "launchctl bootout org.ching.watch and remove $OLD_PLIST"
-  [ "$NEED_OLD_LPLIST" -eq 0 ] || would "launchctl bootout org.ching.learn and remove $OLD_LPLIST"
-  [ "$NEED_OLD_MB_RM" -eq 0 ] || would "launchctl bootout $OLD_MB_ID and remove $OLD_MB_PLIST"
-  [ "$NEED_OLD_MB_APP_RM" -eq 0 ] || would "remove $OLD_MB_APP"
+  while IFS='|' read -r _p _l; do [ -z "$_p" ] || would "launchctl bootout $_l and remove $_p"; done <<<"$OLD_JOBS"
+  old_mb_plan
   [ "$CM_CHANGED" -eq 0 ] || { if [ "$UNINSTALL" -eq 1 ]; then would "back up $CM_FILE and take $CM_PATH out of CLAUDE_MEM_EXCLUDED_PROJECTS"; else would "back up $CM_FILE and add $CM_PATH to CLAUDE_MEM_EXCLUDED_PROJECTS"; fi; }
 }
 if [ "$DRY" -eq 1 ]; then plan_lines; exit 0; fi
@@ -538,7 +560,7 @@ fi
 if [ "$CHANGED" -eq 1 ]; then
   mkdir -p "$(dirname "$SETTINGS_FILE")"
   if [ -f "$SETTINGS_FILE" ]; then
-    BACKUP="$SETTINGS_FILE.bak.kaching.$(date +%Y%m%d-%H%M%S)"
+    BACKUP="$SETTINGS_FILE.bak.agent-terminal.$(date +%Y%m%d-%H%M%S)"
     cp -p "$SETTINGS_FILE" "$BACKUP"; act "backup -> $BACKUP"
   fi
   tmp=$(mktemp "$(dirname "$SETTINGS_FILE")/.settings.XXXXXX")
@@ -557,12 +579,12 @@ while IFS='|' read -r t l; do
   act "pointed $l at $t"
 done <<<"$relink_plan"
 if [ "$NEED_REPOS" -eq 1 ]; then
-  cp "$KACHING_ROOT/templates/agent-repos.example" "$AGENT_REPOS_FILE.tmp"
+  cp "$AGENT_TERMINAL_ROOT/templates/agent-repos.example" "$AGENT_REPOS_FILE.tmp"
   sed -i.bak 's/^~/# ~/' "$AGENT_REPOS_FILE.tmp"; rm -f "$AGENT_REPOS_FILE.tmp.bak"
   mv "$AGENT_REPOS_FILE.tmp" "$AGENT_REPOS_FILE"; act "create $AGENT_REPOS_FILE"
 fi
 if [ "$CM_CHANGED" -eq 1 ]; then
-  CM_BACKUP="$CM_FILE.bak.kaching.$(date +%Y%m%d-%H%M%S)"
+  CM_BACKUP="$CM_FILE.bak.agent-terminal.$(date +%Y%m%d-%H%M%S)"
   cp -p "$CM_FILE" "$CM_BACKUP"; act "backup -> $CM_BACKUP"
   tmp=$(mktemp "$(dirname "$CM_FILE")/.settings.XXXXXX")
   printf '%s\n' "$CM_NEW" >"$tmp"
@@ -587,18 +609,16 @@ apply_plist() { # file body label what
     act "loaded $1 ($4)"
   fi
 }
-[ "$NEED_PLIST" -eq 0 ] || apply_plist "$PLIST" "$PLIST_BODY" org.kaching.watch "kaching-watch every 5 minutes"
-[ "$NEED_LPLIST" -eq 0 ] || apply_plist "$LPLIST" "$LPLIST_BODY" org.kaching.learn "learn.sh every day at 05:30"
+[ "$NEED_PLIST" -eq 0 ] || apply_plist "$PLIST" "$PLIST_BODY" org.agent-terminal.watch "agent-terminal-watch every 5 minutes"
+[ "$NEED_LPLIST" -eq 0 ] || apply_plist "$LPLIST" "$LPLIST_BODY" org.agent-terminal.learn "learn.sh every day at 05:30"
 [ "$NEED_MB_RM" -eq 0 ] || apply_plist "$MB_PLIST" "" "$MB_ID" "the menu bar dot"
 if [ "$NEED_MB_APP_RM" -eq 1 ]; then rm -rf "$MB_APP"; act "removed $MB_APP"; fi
-# the pre-D35 jobs go only after their replacements loaded (a failed bootstrap above exits first)
+# the pre-D65 and pre-D35 jobs go only after their replacements loaded (a failed bootstrap above exits first)
 remove_old_job() { # plist label
   "$LAUNCHCTL" bootout "gui/$(id -u)/$2" >/dev/null 2>&1 || true
   rm -f "$1"; act "removed $1 ($2, the name before the rename)"
 }
-[ "$NEED_OLD_PLIST" -eq 0 ] || remove_old_job "$OLD_PLIST" org.ching.watch
-[ "$NEED_OLD_LPLIST" -eq 0 ] || remove_old_job "$OLD_LPLIST" org.ching.learn
-[ "$NEED_OLD_MB_RM" -eq 0 ] || remove_old_job "$OLD_MB_PLIST" "$OLD_MB_ID"
-if [ "$NEED_OLD_MB_APP_RM" -eq 1 ]; then rm -rf "$OLD_MB_APP"; act "removed $OLD_MB_APP"; fi
+while IFS='|' read -r _p _l; do [ -z "$_p" ] || remove_old_job "$_p" "$_l"; done <<<"$OLD_JOBS"
+old_mb_remove
 if [ "$UNINSTALL" -eq 1 ]; then say "note: --uninstall removes hook entries, the watcher, the learner job and the menu bar dot; symlinks, a removed popup and the converse entries in permissions.allow (they may predate the install) are left as they are."; fi
 exit 0

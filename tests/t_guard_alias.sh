@@ -185,7 +185,7 @@ defalias co checkout
 # ---------- what the guard cannot resolve is allowed, as it was before ----------
 P="$WORK/plain"; mkdir -p "$P"
 gallow "a plain folder: an unknown git word" "$P" 'git p'
-gallow "an unreadable directory (-C a missing folder)" "$AR" 'git -C /nonexistent-kaching-dir p'
+gallow "an unreadable directory (-C a missing folder)" "$AR" 'git -C /nonexistent-agent-terminal-dir p'
 printf '[alias\nbroken = \n' >"$WORK/broken.cfg"
 out=$(printf '%s' "$(bash_json "$AR" 'git p2')" | GIT_CONFIG_GLOBAL="$WORK/broken.cfg" "$BIN/guard.sh" 2>&1)
 assert_eq "a global config that does not parse: an unknown word is allowed (as before)" "" "$out"

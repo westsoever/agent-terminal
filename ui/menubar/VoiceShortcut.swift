@@ -1,16 +1,16 @@
-// VoiceShortcut.swift - the global shortcut that wakes the voice dispatcher (dispatcher v2). Part of KachingBar.
+// VoiceShortcut.swift - the global shortcut that wakes the voice dispatcher (dispatcher v2). Part of AgentTerminalBar.
 //
-// Right Control + Left Option tapped together (pressed and let go, no other key): KachingBar plays a short cue (Tink), notes which Terminal tab the
+// Right Control + Left Option tapped together (pressed and let go, no other key): AgentTerminalBar plays a short cue (Tink), notes which Terminal tab the
 // owner is looking at, and wakes the dispatcher session (dispatcher/launch.sh: claude --name dispatcher, cwd
 // $AGENT_HOME/dispatcher, talking through VoiceMode's converse tool) so it listens and hands what it hears on.
 //
-// Layers, next to KachingBar.swift's (no drawing code here):
+// Layers, next to AgentTerminalBar.swift's (no drawing code here):
 //   ChordTap       the chord as a pure state machine over flagsChanged and keyDown events (testable, no AppKit state)
 //   VoiceShortcut  the Accessibility check, the menu entry, the CLI flags
 //   VoiceWake      one wake: focus file, find the dispatcher, decide start | wake | cue, run it, log it; no UI code
 //   VoiceKeys      the NSEvent monitors and the trust poll inside the running app (main thread)
 //
-// The chord is a tap, so Ctrl+Option+letter hotkeys (Carbon, in KachingBar) can share the two keys. Read from the
+// The chord is a tap, so Ctrl+Option+letter hotkeys (Carbon, in AgentTerminalBar) can share the two keys. Read from the
 // device-dependent bits of NSEvent.modifierFlags.rawValue: right control NX_DEVICERCTLKEYMASK 0x2000, left option
 // NX_DEVICELALTKEYMASK 0x20.
 //   arm     on the flagsChanged event that makes both held, when no other modifier is down (shift, command, left
@@ -19,13 +19,13 @@
 //           Carbon hotkey firing (VoiceKeys.cancelChord(): a registered hotkey's keyDown never reaches the monitors)
 //   fire    when both are released and it is still armed, at most ChordTap.maxHold (1.5 s) after arming
 // Monitors for flagsChanged and keyDown: a global one for other apps (needs Accessibility, keyDown included) and a
-// local one for while KachingBar's menu is open.
+// local one for while AgentTerminalBar's menu is open.
 //
 // Accessibility: checked at launch (AXIsProcessTrusted); when missing, macOS is asked once to show its prompt and the
-// menu says "Voice shortcut off: re-add KachingBar in Accessibility (needed after each rebuild)" (opens that Settings
+// menu says "Voice shortcut off: re-add AgentTerminalBar in Accessibility (needed after each rebuild)" (opens that Settings
 // pane). The app is ad-hoc signed, so every rebuild (build.sh, install.sh after a source change) gives it a new
-// signature and macOS drops the grant: remove KachingBar from the Accessibility list and add it again. Trust is checked
-// again every KACHING_BAR_AX_POLL_SECS (5) and whenever the menu opens; the global monitor is installed as soon as
+// signature and macOS drops the grant: remove AgentTerminalBar from the Accessibility list and add it again. Trust is checked
+// again every AGENT_TERMINAL_BAR_AX_POLL_SECS (5) and whenever the menu opens; the global monitor is installed as soon as
 // it is granted, without a restart. When on, the menu says "Voice: Right Ctrl + Left Option".
 //
 // One wake (VoiceWake):
@@ -34,31 +34,31 @@
 //           nothing is written (an older file stays; its reader ignores stale ones).
 //   find    $CLAUDE_DIR/sessions/*.json (CLAUDE_DIR default ~/.claude) with name "dispatcher" or cwd
 //           $AGENT_HOME/dispatcher and a live pid (kill(pid, 0) == 0); its tty from `ps -o tty= -p <pid>`.
-//   act     absent -> start: a new Terminal window runs $KACHING_DIR/dispatcher/launch.sh "[shortcut] listen" and
+//   act     absent -> start: a new Terminal window runs $AGENT_TERMINAL_DIR/dispatcher/launch.sh "[shortcut] listen" and
 //                    Terminal comes to the front; $AGENT_HOME/dispatcher/starting gets the time. Logged "started
 //                    start requested": do script cannot tell whether launch.sh got claude going.
 //           starting -> cue only (logged "starting"): no session yet, but a start was requested under 20 s ago or a
 //                    launch.sh / `claude --name dispatcher` process is running (pgrep -f), so no second window opens
-//           idle   -> wake:  osascript -l JavaScript $KACHING_DIR/terminal/send.js text <tty> "[shortcut] listen"
+//           idle   -> wake:  osascript -l JavaScript $AGENT_TERMINAL_DIR/terminal/send.js text <tty> "[shortcut] listen"
 //           busy (any status but idle: already listening or working), or no tty -> cue only, nothing typed
 //   log     one line per chord in $AGENT_HOME/dispatcher/shortcut.log:
 //           `<ISO time> started|starting|woke|busy|error <details>`; a focus file that cannot be written is noted, the
 //           wake goes on
-// Needs, besides Accessibility: Automation (KachingBar -> Terminal), asked by macOS the first time osascript runs.
+// Needs, besides Accessibility: Automation (AgentTerminalBar -> Terminal), asked by macOS the first time osascript runs.
 //
-// CLI: KachingBar --wake-once [--dry-run]   one wake now, printed as key=value lines (focus_tty, focus_line,
+// CLI: AgentTerminalBar --wake-once [--dry-run]   one wake now, printed as key=value lines (focus_tty, focus_line,
 //                                           dispatcher=absent|starting|idle|busy, action=start|wake|cue,
 //                                           command=..., result);
 //                                           --dry-run runs nothing and writes nothing (no osascript, no files)
-//      KachingBar --chord-test EVENT...     fire=<times the chord fired> over a sequence of events: FLAGS (raw
+//      AgentTerminalBar --chord-test EVENT...     fire=<times the chord fired> over a sequence of events: FLAGS (raw
 //                                           modifier flags, decimal or 0x hex) or `key` (a keyDown), each with an
 //                                           optional @SECONDS time stamp (default: the previous event's)
-// Env: KACHING_BAR_FRONT_TTY   when set, the tab in front (instead of asking Terminal); empty = Terminal not in front
-//      KACHING_BAR_DISPATCHER_TTY  when set, the dispatcher's tty (instead of ps); empty = none   (tests)
-//      KACHING_BAR_AX_TRUSTED  1|0: report Accessibility as granted or not (tests)
-//      KACHING_BAR_PGREP       pgrep to look for a dispatcher being started (default /usr/bin/pgrep; tests)
-//      KACHING_BAR_NO_CUE=1    no sound (tests)        KACHING_BAR_AX_POLL_SECS (5)
-//      CLAUDE_DIR (~/.claude); AGENT_HOME, KACHING_DIR as in KachingBar.swift; CHING_* names still count.
+// Env: AGENT_TERMINAL_BAR_FRONT_TTY   when set, the tab in front (instead of asking Terminal); empty = Terminal not in front
+//      AGENT_TERMINAL_BAR_DISPATCHER_TTY  when set, the dispatcher's tty (instead of ps); empty = none   (tests)
+//      AGENT_TERMINAL_BAR_AX_TRUSTED  1|0: report Accessibility as granted or not (tests)
+//      AGENT_TERMINAL_BAR_PGREP       pgrep to look for a dispatcher being started (default /usr/bin/pgrep; tests)
+//      AGENT_TERMINAL_BAR_NO_CUE=1    no sound (tests)        AGENT_TERMINAL_BAR_AX_POLL_SECS (5)
+//      CLAUDE_DIR (~/.claude); AGENT_HOME, AGENT_TERMINAL_DIR as in AgentTerminalBar.swift; KACHING_* and CHING_* names still count.
 
 import AppKit
 import ApplicationServices
@@ -117,11 +117,11 @@ struct ChordTap: Sendable, Equatable {
 
 enum VoiceShortcut {
     static let menuOn = "Voice: Right Ctrl + Left Option"
-    static let menuOff = "Voice shortcut off: re-add KachingBar in Accessibility (needed after each rebuild)"
+    static let menuOff = "Voice shortcut off: re-add AgentTerminalBar in Accessibility (needed after each rebuild)"
     static let settingsURL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 
     static let trustOverride: Bool? = {
-        switch kachingEnvironment()["KACHING_BAR_AX_TRUSTED"] {
+        switch agentTerminalEnvironment()["AGENT_TERMINAL_BAR_AX_TRUSTED"] {
         case "1"?: return true
         case "0"?: return false
         default: return nil
@@ -145,7 +145,7 @@ enum VoiceShortcut {
     }
 
     @MainActor static func cue() {
-        guard kachingEnvironment()["KACHING_BAR_NO_CUE"] != "1" else { return }
+        guard agentTerminalEnvironment()["AGENT_TERMINAL_BAR_NO_CUE"] != "1" else { return }
         NSSound(named: "Tink")?.play()
     }
 
@@ -154,9 +154,9 @@ enum VoiceShortcut {
         return t.hasPrefix("0x") ? UInt(t.dropFirst(2), radix: 16) : UInt(t)
     }
 
-    /// The CLI flags of this file; nil when the arguments are not ours (KachingBar handles them).
+    /// The CLI flags of this file; nil when the arguments are not ours (AgentTerminalBar handles them).
     @MainActor static func cli(_ args: [String], env: [String: String]) -> Int32? {
-        func usage(_ s: String) -> Int32 { FileHandle.standardError.write(Data("KachingBar: \(s)\n".utf8)); return 64 }
+        func usage(_ s: String) -> Int32 { FileHandle.standardError.write(Data("AgentTerminalBar: \(s)\n".utf8)); return 64 }
         switch args.first {
         case "--chord-test":
             var tap = ChordTap(), at = 0.0, fired = 0
@@ -174,10 +174,10 @@ enum VoiceShortcut {
             let rest = args.dropFirst()
             guard rest.allSatisfy({ $0 == "--dry-run" }) else { return usage("usage: --wake-once [--dry-run]") }
             let dry = rest.contains("--dry-run")
-            let front = env["KACHING_BAR_FRONT_TTY"] == nil ? NSWorkspace.shared.frontmostApplication?.bundleIdentifier : nil
+            let front = env["AGENT_TERMINAL_BAR_FRONT_TTY"] == nil ? NSWorkspace.shared.frontmostApplication?.bundleIdentifier : nil
             if !dry { cue() }
             print(VoiceWake(env: env).run(frontBundle: front, dryRun: dry))
-            if !dry && env["KACHING_BAR_NO_CUE"] != "1" { usleep(400_000) }   // let the cue finish before exit
+            if !dry && env["AGENT_TERMINAL_BAR_NO_CUE"] != "1" { usleep(400_000) }   // let the cue finish before exit
             return 0
         default:
             return nil
@@ -226,7 +226,7 @@ struct VoiceWake: Sendable {
     static let wakeText = "[shortcut] listen"
     static let terminalBundle = "com.apple.Terminal"
 
-    let paths: KachingPaths
+    let paths: AgentTerminalPaths
     let claudeDir: URL
     let env: [String: String]
 
@@ -240,8 +240,8 @@ struct VoiceWake: Sendable {
     var dispatcherDir: URL { paths.agentHome.appendingPathComponent("dispatcher", isDirectory: true) }
     var focusFile: URL { dispatcherDir.appendingPathComponent("focus") }
     var logFile: URL { dispatcherDir.appendingPathComponent("shortcut.log") }
-    var launchScript: URL { paths.kachingDir.appendingPathComponent("dispatcher/launch.sh") }
-    var sendScript: URL { paths.kachingDir.appendingPathComponent("terminal/send.js") }
+    var launchScript: URL { paths.agentTerminalDir.appendingPathComponent("dispatcher/launch.sh") }
+    var sendScript: URL { paths.agentTerminalDir.appendingPathComponent("terminal/send.js") }
     var startMarker: URL { dispatcherDir.appendingPathComponent("starting") }   // epoch of the last start request
     static let startCooldown = 20                                                // seconds a start counts as under way
 
@@ -258,7 +258,7 @@ struct VoiceWake: Sendable {
     func plan(frontBundle: String?, dryRun: Bool, now: Date) -> WakePlan {
         var focus = "none"
         var tty: String?
-        if let forced = env["KACHING_BAR_FRONT_TTY"] {
+        if let forced = env["AGENT_TERMINAL_BAR_FRONT_TTY"] {
             tty = forced.isEmpty ? nil : Self.stripDev(forced)
         } else if frontBundle == Self.terminalBundle {
             if dryRun { focus = "unasked" } else { tty = frontTerminalTTY() }
@@ -331,14 +331,14 @@ struct VoiceWake: Sendable {
 
     /// Why a start is already under way, so a second chord must not open a second window: a start requested less
     /// than startCooldown seconds ago, or a launch.sh / `claude --name dispatcher` process that has no session file
-    /// yet (pgrep -f; KACHING_BAR_PGREP replaces /usr/bin/pgrep in tests). nil when none.
+    /// yet (pgrep -f; AGENT_TERMINAL_BAR_PGREP replaces /usr/bin/pgrep in tests). nil when none.
     func startUnderWay(now: Date) -> String? {
         if let s = try? String(contentsOf: startMarker, encoding: .utf8),
            let t = Int(s.trimmingCharacters(in: .whitespacesAndNewlines)) {
             let age = Int(now.timeIntervalSince1970) - t
             if age >= 0 && age < Self.startCooldown { return "start requested \(age)s ago" }
         }
-        let pgrep = env["KACHING_BAR_PGREP"].flatMap { $0.isEmpty ? nil : $0 } ?? "/usr/bin/pgrep"
+        let pgrep = env["AGENT_TERMINAL_BAR_PGREP"].flatMap { $0.isEmpty ? nil : $0 } ?? "/usr/bin/pgrep"
         if let r = Self.exec([pgrep, "-f", "dispatcher/launch\\.sh|claude.* --name dispatcher( |$)"], timeout: 5), r.status == 0 {
             return "a dispatcher process is starting"
         }
@@ -375,7 +375,7 @@ struct VoiceWake: Sendable {
     }
 
     func tty(of pid: Int32) -> String? {
-        if let forced = env["KACHING_BAR_DISPATCHER_TTY"] { return forced.isEmpty ? nil : Self.stripDev(forced) }
+        if let forced = env["AGENT_TERMINAL_BAR_DISPATCHER_TTY"] { return forced.isEmpty ? nil : Self.stripDev(forced) }
         guard let r = Self.exec(["/bin/ps", "-o", "tty=", "-p", String(pid)], timeout: 5), r.status == 0 else { return nil }
         let t = Self.stripDev(r.out)
         return t.isEmpty || t.hasPrefix("?") ? nil : t
@@ -453,7 +453,7 @@ final class VoiceKeys: NSObject {
 
     private init(env: [String: String]) {
         wake = VoiceWake(env: env)
-        pollSecs = TimeInterval(Int(env["KACHING_BAR_AX_POLL_SECS"] ?? "").flatMap { $0 > 0 ? $0 : nil } ?? 5)
+        pollSecs = TimeInterval(Int(env["AGENT_TERMINAL_BAR_AX_POLL_SECS"] ?? "").flatMap { $0 > 0 ? $0 : nil } ?? 5)
     }
 
     /// Call from a Carbon hotkey handler (Ctrl+Option+letter): its keyDown never reaches the monitors, so without

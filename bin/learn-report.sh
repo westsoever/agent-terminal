@@ -82,7 +82,7 @@ WD=$ROOT/.work
 EVW=$WD/events.jsonl
 [ -f "$EVW" ] || EVW=/dev/null
 
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/kaching-learn-report.XXXXXX")
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/agent-terminal-learn-report.XXXXXX")
 trap 'rm -rf "$TMP"; rm -f "$ROOT"/.report-*.tmp."$$"' EXIT
 
 # ---------- the inputs, cut to what the report needs ----------

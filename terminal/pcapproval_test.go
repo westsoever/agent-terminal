@@ -223,7 +223,7 @@ func TestApprovalKeys(t *testing.T) {
 	}
 }
 
-// Paperclip's inbox gives a request to the board no approve button (it carries a tool action to review): kaching
+// Paperclip's inbox gives a request to the board no approve button (it carries a tool action to review): agterm
 // shows it and sends the owner to the browser. No key posts.
 func TestApprovalBoardRequestIsNotAnswered(t *testing.T) {
 	srv, posts := fakeApprovals(t)
@@ -247,7 +247,7 @@ func TestApprovalBoardRequestIsNotAnswered(t *testing.T) {
 	}
 	v := plainView(m)
 	for _, want := range []string{"does not let you decide this one inline", "Recommended action: Approve only if the reviewed arguments match.", "- The tool sends mail.", "- It cannot be undone.",
-		"kaching can't answer a board approval: enter opens it in Paperclip"} {
+		"agterm can't answer a board approval: enter opens it in Paperclip"} {
 		if !strings.Contains(squash(panelOf(v, 160)), squash(want)) {
 			t.Errorf("panel lacks %q:\n%s", want, v)
 		}

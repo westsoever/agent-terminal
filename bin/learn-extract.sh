@@ -43,7 +43,7 @@ done
 PROMPTS=$WD/prompts.jsonl TOOLSEQ=$WD/toolseq.jsonl EVOUT=$WD/events.jsonl STATE=$WD/extract-state.json
 LEARN_WORK=$(learn_work_dir)
 
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/kaching-learn-extract.XXXXXX")
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/agent-terminal-learn-extract.XXXXXX")
 trap 'rm -rf "$TMP"; rm -f "$WD"/.extract-new.*' EXIT
 die() { echo "learn-extract: $1" >&2; exit 1; }
 

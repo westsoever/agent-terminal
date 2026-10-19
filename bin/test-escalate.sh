@@ -4,7 +4,7 @@
 #   0. run the test command with no model at all; pass -> exit 0
 #   1. fail -> ask each model in the ladder, cheapest first, to fix it; re-run the tests after each try
 #   2. a model's fix makes the tests pass -> stop (the stronger models are never called)
-#   3. the whole ladder fails -> notify "blocked" (unless KACHING_TEST_NOTIFY=0), exit with the tests' exit code
+#   3. the whole ladder fails -> notify "blocked" (unless AGENT_TERMINAL_TEST_NOTIFY=0), exit with the tests' exit code
 # Every test run and every model call runs in a session (process group) of its own with no terminal, stdin
 # /dev/null; when its time is up the whole group is killed (TERM, then KILL) and the exit code is 142. No
 # model call starts once the caller ($PPID, e.g. stop-check.sh) is gone: nobody would wait for its edits.
@@ -13,12 +13,12 @@
 #   --deadline EPOCH  everything ends by then (stop-check.sh passes its hook deadline). A test run is cut at the
 #                     deadline; a model call starts only while 30 s for itself plus the last run's time (for the
 #                     re-check) are left, else the ladder ends ("ladder-skip ... reason=deadline" in the log).
-# Env: KACHING_TEST_MODELS (default "claude-haiku-4-5-20251001 claude-sonnet-5-5", cheapest first)
-#      KACHING_TEST_BUDGET_USD (per model call, default 0.50) KACHING_CLAUDE_BIN (default claude)
-#      KACHING_TEST_CALL_TIMEOUT (per model call, default 300 s) KACHING_TEST_MAX_TURNS (per model call, default 30)
-#      KACHING_TEST_NOTIFY (1) KACHING_TEST_LOG (default $AGENT_HOME/test-escalation.log; a log that cannot be
+# Env: AGENT_TERMINAL_TEST_MODELS (default "claude-haiku-4-5-20251001 claude-sonnet-5-5", cheapest first)
+#      AGENT_TERMINAL_TEST_BUDGET_USD (per model call, default 0.50) AGENT_TERMINAL_CLAUDE_BIN (default claude)
+#      AGENT_TERMINAL_TEST_CALL_TIMEOUT (per model call, default 300 s) AGENT_TERMINAL_TEST_MAX_TURNS (per model call, default 30)
+#      AGENT_TERMINAL_TEST_NOTIFY (1) AGENT_TERMINAL_TEST_LOG (default $AGENT_HOME/test-escalation.log; a log that cannot be
 #      written loses its lines, never the verdict) AGENT_HOME
-#      KACHING_TEST_LADDER_DAILY (default 6; digits only, 0 = no model at all): the most model calls this script
+#      AGENT_TERMINAL_TEST_LADDER_DAILY (default 6; digits only, 0 = no model at all): the most model calls this script
 #      starts per UTC day on the whole machine. The count is $AGENT_HOME/ladder/<YYYY-MM-DD>, checked and
 #      incremented before every call. At the limit (or when the count cannot be written) no model is called and
 #      the run ends as if no model were configured: the tests' exit code, a ladder-cap line in the log.
@@ -45,15 +45,15 @@ if [ $# -gt 0 ]; then TEST_CMD=("$@")
 elif [ -x "$DIR/tests/run.sh" ]; then TEST_CMD=(tests/run.sh)
 else echo "test-escalate: no test command given and no tests/run.sh in $DIR" >&2; exit 2; fi
 
-MODELS=${KACHING_TEST_MODELS-claude-haiku-4-5-20251001 claude-sonnet-5-5}   # set but empty = no model
+MODELS=${AGENT_TERMINAL_TEST_MODELS-claude-haiku-4-5-20251001 claude-sonnet-5-5}   # set but empty = no model
 # Recursion guard: a model started below loads the same Stop hook, which would run this script again and
-# start more models without end. Children carry KACHING_ESCALATING=1 and never start models of their own.
-[ -z "${KACHING_ESCALATING:-}" ] || MODELS=""
-BUDGET=${KACHING_TEST_BUDGET_USD:-0.50}
-CLAUDE=${KACHING_CLAUDE_BIN:-claude}
-CALL_TIMEOUT=$(digits "${KACHING_TEST_CALL_TIMEOUT:-}" 300 6); [ "$CALL_TIMEOUT" -ge 1 ] || CALL_TIMEOUT=1
-TURNS=$(digits "${KACHING_TEST_MAX_TURNS:-}" 30 4); [ "$TURNS" -ge 1 ] || TURNS=1
-LOG=${KACHING_TEST_LOG:-$AGENT_HOME/test-escalation.log}
+# start more models without end. Children carry AGENT_TERMINAL_ESCALATING=1 and never start models of their own.
+[ -z "${AGENT_TERMINAL_ESCALATING:-}" ] || MODELS=""
+BUDGET=${AGENT_TERMINAL_TEST_BUDGET_USD:-0.50}
+CLAUDE=${AGENT_TERMINAL_CLAUDE_BIN:-claude}
+CALL_TIMEOUT=$(digits "${AGENT_TERMINAL_TEST_CALL_TIMEOUT:-}" 300 6); [ "$CALL_TIMEOUT" -ge 1 ] || CALL_TIMEOUT=1
+TURNS=$(digits "${AGENT_TERMINAL_TEST_MAX_TURNS:-}" 30 4); [ "$TURNS" -ge 1 ] || TURNS=1
+LOG=${AGENT_TERMINAL_TEST_LOG:-$AGENT_HOME/test-escalation.log}
 # The log is for people. One that cannot be written must not end this script: under set -e that turned a
 # green check into a failed one (a false block in stop-check.sh). Say so once on stderr and go on.
 mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
@@ -66,7 +66,7 @@ log() {
 
 # Daily ceiling on model calls, machine-wide (every session, every repo). Without it a repo whose tests fail
 # for any reason (a missing service) pays for the whole ladder on every blocked stop of every session.
-LIMIT=${KACHING_TEST_LADDER_DAILY:-6}
+LIMIT=${AGENT_TERMINAL_TEST_LADDER_DAILY:-6}
 case "$LIMIT" in ''|*[!0-9]*) LIMIT=6 ;; esac
 [ "${#LIMIT}" -le 9 ] || LIMIT=999999999
 LADDER_DIR=$AGENT_HOME/ladder
@@ -130,7 +130,7 @@ left() { # seconds until the deadline (a large number when there is none)
   if [ "$DEADLINE" -gt 0 ]; then echo $((DEADLINE - $(date +%s))); else echo 999999; fi
 }
 
-OUT=$(mktemp /tmp/kaching-test-escalate.XXXXXX)
+OUT=$(mktemp /tmp/agent-terminal-test-escalate.XXXXXX)
 TRIED=""
 # --report FILE gets the models really called (one line, empty when none), whatever the outcome
 trap 'rm -f "$OUT"; if [ -n "$REPORT" ]; then printf "%s\n" "$TRIED" >"$REPORT" 2>/dev/null || true; fi' EXIT
@@ -170,7 +170,7 @@ for m in $MODELS; do
 
 $(tail -n 200 "$OUT")"
   crc=0
-  (cd "$DIR" && run_limited "$lim" env KACHING_ESCALATING=1 "$CLAUDE" -p --model "$m" --max-turns "$TURNS" \
+  (cd "$DIR" && run_limited "$lim" env AGENT_TERMINAL_ESCALATING=1 "$CLAUDE" -p --model "$m" --max-turns "$TURNS" \
     --max-budget-usd "$BUDGET" --no-session-persistence "$prompt" </dev/null >/dev/null 2>&1) || crc=$?
   if [ "$crc" -eq 142 ]; then log "model-timeout model=$m limit=${lim}s"; fi
   if run_tests recheck; then log "pass model=$m"; echo "tests pass after fix by $m"; exit 0; fi
@@ -178,7 +178,7 @@ $(tail -n 200 "$OUT")"
 done
 
 log "blocked ladder=[$TRIED]"
-if [ -n "$TRIED" ] && [ "${KACHING_TEST_NOTIFY:-1}" = 1 ]; then
+if [ -n "$TRIED" ] && [ "${AGENT_TERMINAL_TEST_NOTIFY:-1}" = 1 ]; then
   "$SELF_DIR/notify.sh" blocked "Tests still failing after: $TRIED" </dev/null >/dev/null 2>&1 || true
 fi
 echo "tests still fail (models tried: ${TRIED:-none})" >&2

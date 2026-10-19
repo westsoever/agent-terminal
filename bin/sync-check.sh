@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sync-check.sh [--quiet] [--no-fetch]   what could be lost or forgotten in the repos Kaching knows about
+# sync-check.sh [--quiet] [--no-fetch]   what could be lost or forgotten in the repos Agent Terminal knows about
 # READ-ONLY: it never pushes, pulls, merges, rebases, checks out, resets, deletes or prunes, and never writes
 # into a working tree. The one git command that changes anything is `git fetch --all --no-tags --no-prune`
 # (remote-tracking refs only), run with a timeout, GIT_TERMINAL_PROMPT=0 and gc/maintenance off. A repo without
@@ -8,7 +8,7 @@
 # event in $AGENT_HOME/events.jsonl (sync events excluded) and of every session meta, each resolved with
 # `git rev-parse --show-toplevel` and then to its main checkout (`git worktree list`), so a repo shows once with
 # its worktrees. Non-repos, bare repos, paths that are gone and sandbox paths (lib.sh is_sandbox_path: /tmp,
-# task*-repo) are skipped; KACHING_INCLUDE_SANDBOX=1 keeps sandbox paths.
+# task*-repo) are skipped; AGENT_TERMINAL_INCLUDE_SANDBOX=1 keeps sandbox paths.
 # Per repo: (a) commits not pushed: per local branch with an upstream, the ahead count; a branch with no upstream
 #   (or a gone one) counts its commits that are on no remote branch (not for a repo without any remote);
 #   (b) behind origin after the fetch: the branch checked out in each worktree, and the base branch;
@@ -26,10 +26,10 @@
 #   most one budgeted banner per local day (notify.sh kind sync, stamp $AGENT_HOME/sync-banner.day, never spoken)
 #   when some finding other than behind-origin is older than SYNC_BANNER_AGE_H (24) hours (behind-origin only with
 #   SYNC_BANNER_INCLUDE_BEHIND=1: an active repo is behind most days and nothing is lost by it). On demand it prints a one-line summary and the
-#   snapshot path (--quiet: nothing). kaching-watch.sh starts it in the background every SYNC_CHECK_INTERVAL_H (6) hours.
+#   snapshot path (--quiet: nothing). agent-terminal-watch.sh starts it in the background every SYNC_CHECK_INTERVAL_H (6) hours.
 # Env: AGENT_HOME AGENT_REPOS_FILE SYNC_NO_FETCH (non-empty = no fetch, like --no-fetch) SYNC_FETCH_TIMEOUT (45 s per
 #   repo) SYNC_FETCH_BUDGET (150 s for all fetches together; later repos are not fetched) SYNC_BANNER_AGE_H SYNC_BANNER_INCLUDE_BEHIND
-#   SYNC_NOW (epoch, tests) KACHING_INCLUDE_SANDBOX NOTIFY_* (the banner)
+#   SYNC_NOW (epoch, tests) AGENT_TERMINAL_INCLUDE_SANDBOX NOTIFY_* (the banner)
 set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
@@ -65,7 +65,7 @@ if ! mkdir "$LOCK" 2>/dev/null; then
   fi
   rm -rf "$LOCK"; mkdir "$LOCK"
 fi
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/kaching-sync.XXXXXX")
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/agent-terminal-sync.XXXXXX")
 SNAP_TMP="$AGENT_HOME/.sync-check.md.$$"
 trap 'rm -rf "$LOCK" "$TMP"; rm -f "$SNAP_TMP"' EXIT
 
