@@ -68,8 +68,8 @@ resolve_state() {
   fi
 }
 
-# meta_set key value : single-line key=value registry for the current session. The hooks and the watcher
-# write the same file, so the whole read-modify-write is one perl call holding flock on .meta.flock (perl's
+# meta_set key value [key value]... : single-line key=value registry for the current session. The hooks and the
+# watcher write the same file, so the whole read-modify-write is one perl call holding flock on .meta.flock (perl's
 # flock works on macOS, which has no flock(1)). The kernel drops the lock when its holder dies, so there are
 # no stale locks. A holder that hangs is waited for 2 s at most (UserPromptSubmit hooks get 5 s), then the
 # write goes ahead. The key is matched literally. Fails (non-zero) when the session dir cannot be written.
@@ -77,20 +77,21 @@ meta_set() {
   mkdir -p "$SESS_DIR" 2>/dev/null || return 1
   perl -e '
     use Fcntl qw(:flock);
-    my ($d, $k, $v) = @ARGV;
+    my ($d, @kv) = @ARGV;
+    my @k = @kv[grep { $_ % 2 == 0 } 0 .. $#kv];
     open(my $l, ">>", "$d/.meta.flock") or exit 1;
     for (1 .. 200) { last if flock($l, LOCK_EX | LOCK_NB); select undef, undef, undef, 0.01 }
     my @keep;
     if (open(my $in, "<", "$d/meta")) {
-      for (<$in>) { next if index($_, "$k=") == 0; $_ .= "\n" unless /\n\z/; push @keep, $_ }
+      for my $l (<$in>) { next if grep { index($l, "$_=") == 0 } @k; $l .= "\n" unless $l =~ /\n\z/; push @keep, $l }
       close $in;
     }
     my $tmp = "$d/.meta.$$";
     open(my $out, ">", $tmp) or exit 1;
-    print $out @keep, "$k=$v\n";
+    print $out @keep, map { "$kv[2 * $_]=$kv[2 * $_ + 1]\n" } 0 .. $#k;
     close $out and rename($tmp, "$d/meta") and exit 0;
     unlink $tmp; exit 1;
-  ' "$SESS_DIR" "$1" "$2" 2>/dev/null
+  ' "$SESS_DIR" "$@" 2>/dev/null
 }
 
 # lock_fd9 LOCKFILE [SECS]: take an flock on LOCKFILE through fd 9 and keep it until `exec 9>&-` or the shell exits.
