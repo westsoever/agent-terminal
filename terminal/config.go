@@ -45,6 +45,7 @@ type Config struct {
 	NWEffort string  `toml:"nw_effort"`     // its effort level
 	NWPerm   string  `toml:"nw_permission"` // its permission mode: plan, auto, bypass, accept, manual or dontask
 	Theme    string  `toml:"theme"`         // the accent color, see theme.go; /THEME writes it
+	Bg       string  `toml:"background"`    // auto (ask the terminal), dark or light, see theme.go
 	Keys     Keys    `toml:"keys"`
 	Replies  []Reply `toml:"reply"`
 }
@@ -70,6 +71,9 @@ nw_permission = ""
 
 # The accent color: orange, amber, green, cyan, blue, violet, magenta or red. /THEME picks it and writes this line.
 theme = "orange"
+
+# The terminal's background: auto (agterm asks the terminal at start), dark or light. Set it when auto guesses wrong.
+background = "auto"
 
 [keys]
 next = "l"            # next agent (down the list)
@@ -163,6 +167,7 @@ func loadConfig() (Config, time.Time, error) {
 		c.Tables = "auto"
 	}
 	c.Theme = themeID(c.Theme) // empty or unknown: orange
+	c.Bg = bgModeOf(c.Bg)      // empty or unknown: auto
 	fill := func(v *string, d string) {
 		if *v == "" {
 			*v = d

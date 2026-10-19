@@ -700,13 +700,25 @@ Agent Terminal draws the markdown tables in an agent's messages as tables.
 
 ### 7.7 Change the accent color
 
-The accent color is the color of the selected row, of the things that need you, and of the cursor. It is orange at first. You can change it to one of 8 colors: orange, amber, green, cyan, blue, violet, magenta or red. Each one is easy to read on a dark background and on a light background.
+The accent color is the color of the selected row, of the things that need you, and of the cursor. It is orange at first. You can change it to one of 8 colors: orange, amber, green, cyan, blue, violet, magenta or red.
 
 1. Push `/`, write `THEME`, push `Enter`.
 2. Push `j` or `l` (or `↑` or `↓`), or a number from `1` to `8`, to move the cursor. The whole screen shows the color under the cursor, so you can see it before you choose.
 3. Push `Enter` to keep the color. Agent Terminal writes it as `theme = "green"` in `keys.toml` and uses it again the next time that it starts. Push `Esc` to go back to the color that you had.
 
 To set a color at once, write its name after the command, for example `THEME green`. You can also write the `theme` line in `keys.toml` yourself, above `[keys]`. If the name in the file is not one of the 8, Agent Terminal uses orange.
+
+#### Light and dark terminals
+
+Agent Terminal works on a dark and on a light terminal background. When it starts, it asks the terminal which background it has. On a light background, it uses dark text, darker greys and a darker shade of the accent color, so that all text is easy to read. The `THEME` picker shows which background Agent Terminal uses now.
+
+If Agent Terminal uses the wrong colors for your background, set the background yourself:
+
+1. Open `keys.toml`.
+2. Above `[keys]`, write `background = "light"` or `background = "dark"`.
+3. Save the file. Agent Terminal uses the new colors at once.
+
+To let Agent Terminal ask the terminal again, write `background = "auto"`.
 
 ## 8. Agent Terminal and the Terminal windows
 

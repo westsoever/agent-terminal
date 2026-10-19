@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +10,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // resetTheme puts the accent back to orange when a test is done: the styles are package variables.
@@ -58,6 +61,117 @@ func TestApplyThemeChangesAccent(t *testing.T) {
 	if curTheme != "orange" || string(accentColor()) != "202" {
 		t.Fatalf("unknown theme gave %q (%q), want the original orange", curTheme, accentColor())
 	}
+}
+
+// useBg draws for a background mode and a terminal answer until the test is done.
+func useBg(t *testing.T, mode string, dark bool) {
+	t.Helper()
+	oldMode, oldDark := bgMode, termDark
+	bgMode, termDark = mode, dark
+	applyTheme(curTheme)
+	t.Cleanup(func() { bgMode, termDark = oldMode, oldDark; applyTheme("") })
+}
+
+// The background line wins over the terminal's answer; auto follows it; anything else is auto.
+func TestBackgroundMode(t *testing.T) {
+	for in, want := range map[string]string{"": "auto", "auto": "auto", "Light": "light", " dark ": "dark", "white": "auto"} {
+		if got := bgModeOf(in); got != want {
+			t.Errorf("bgModeOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for _, c := range []struct {
+		mode  string
+		dark  bool
+		light bool
+	}{{"auto", true, false}, {"auto", false, true}, {"light", true, true}, {"dark", false, false}} {
+		bgMode, termDark = c.mode, c.dark
+		if lightBg() != c.light {
+			t.Errorf("mode %s, terminal dark %v: light = %v, want %v", c.mode, c.dark, lightBg(), c.light)
+		}
+	}
+	bgMode, termDark = "auto", true
+}
+
+// On a light background every grey, the accent and the selected row take their light shades; dark gives back
+// the original ones.
+func TestLightBackgroundPalette(t *testing.T) {
+	resetTheme(t)
+	applyTheme("amber")
+	useBg(t, "light", true)
+	if string(accentColor()) != "94" || cOrange.GetForeground() != accentColor() {
+		t.Fatalf("light amber is %q, cOrange %v", accentColor(), cOrange.GetForeground())
+	}
+	if cSel.GetBackground() != accentColor() || cSel.GetForeground() != lightPalette.onAccent {
+		t.Fatalf("light selected row: %v on %v", cSel.GetForeground(), cSel.GetBackground())
+	}
+	for _, c := range []struct {
+		name      string
+		got, want any
+	}{
+		{"white", cWhite.GetForeground(), lightPalette.white},
+		{"grey", cGrey.GetForeground(), lightPalette.grey},
+		{"text", cText.GetForeground(), lightPalette.text},
+		{"band", promptBg, lightPalette.band},
+		{"usage", cUseMid.GetForeground(), lightPalette.useMid},
+	} {
+		if c.got != c.want {
+			t.Errorf("light %s = %v, want %v", c.name, c.got, c.want)
+		}
+	}
+	bgMode = "dark"
+	applyTheme("orange")
+	if string(accentColor()) != "202" || cWhite.GetForeground() != lipgloss.Color("231") || cSel.GetForeground() != lipgloss.Color("16") {
+		t.Fatalf("dark again: accent %q white %v selected text %v", accentColor(), cWhite.GetForeground(), cSel.GetForeground())
+	}
+}
+
+// contrast is the WCAG contrast ratio of two #rrggbb colors.
+func contrast(a, b string) float64 {
+	lum := func(h string) float64 {
+		var r, g, bl int
+		fmt.Sscanf(h, "#%02x%02x%02x", &r, &g, &bl)
+		f := func(c int) float64 {
+			v := float64(c) / 255
+			if v <= 0.03928 {
+				return v / 12.92
+			}
+			return math.Pow((v+0.055)/1.055, 2.4)
+		}
+		return 0.2126*f(r) + 0.7152*f(g) + 0.0722*f(bl)
+	}
+	x, y := lum(a), lum(b)
+	return (math.Max(x, y) + 0.05) / (math.Min(x, y) + 0.05)
+}
+
+// Every light shade reads on a light terminal (#eeeeee, a little darker than white) and carries the white text of
+// a selected row.
+// LightHex is the Light number written out, and no two light shades are the same.
+func TestLightShadesContrast(t *testing.T) {
+	seen := map[string]bool{}
+	for _, th := range themes {
+		var n int
+		fmt.Sscan(th.Light, &n)
+		if got := xterm256(n); got != th.LightHex {
+			t.Errorf("%s: color %s is %s, but LightHex says %s", th.ID, th.Light, got, th.LightHex)
+		}
+		if seen[th.Light] {
+			t.Errorf("%s repeats the light shade %s", th.ID, th.Light)
+		}
+		seen[th.Light] = true
+		if c := contrast(th.LightHex, "#eeeeee"); c < 4.0 {
+			t.Errorf("%s %s is %.1f:1 on #eeeeee, want 4.0 or more", th.ID, th.LightHex, c)
+		}
+		if c := contrast(th.LightHex, "#ffffff"); c < 4.5 {
+			t.Errorf("%s %s carries white text at %.1f:1, want 4.5 or more", th.ID, th.LightHex, c)
+		}
+	}
+}
+
+// xterm256 is the #rrggbb of a color of the 6x6x6 cube (16-231) of the 256-color palette.
+func xterm256(n int) string {
+	lv := []int{0, 95, 135, 175, 215, 255}
+	n -= 16
+	return fmt.Sprintf("#%02x%02x%02x", lv[n/36], lv[n/6%6], lv[n%6])
 }
 
 func TestWithTheme(t *testing.T) {
