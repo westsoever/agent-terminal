@@ -514,6 +514,9 @@ func (m model) agentPanel(w, h int) []string {
 	if a.Bg {
 		title = append(title, s(" · background "+a.Job, cGrey))
 	}
+	if a.CLI != "" {
+		title = append(title, s(" · "+a.CLI, cGrey))
+	}
 	if a.Branch != "" {
 		title = append(title, s(" · "+a.Branch, cGrey))
 	}

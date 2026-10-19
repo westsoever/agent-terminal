@@ -2,6 +2,10 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D64 (2026-10-19): opencode sessions sit in the AGENTS list next to Claude Code's
+
+Owner: show the sessions of other CLIs too, opencode first. A running `opencode` TUI (a tty, not `serve` or `run`) is an agent named `oc <session title>`; its session is the newest top-level one in `~/.local/share/opencode/opencode.db` for the process's folder, read with `sqlite3 -readonly`. Working while the session's newest message is not opencode's `idle` marker, else DONE. The right panel shows its conversation from the database and says `· opencode` in the title. Typing into it works as for any Terminal tab; the screen is not read for menus (those parsers are Claude Code's) and `bring here` only raises the tab (the monitor queue places Claude Code windows only). Known limit: two TUIs in one folder, or a TUI that resumed an older session, may be paired with the wrong session.
+
 ## D62 (2026-10-19): NW never guesses its folder; the box says where the folder came from
 
 **Decision (user):** "it often starts in the wrong folder … maybe create some more clarity there", then "go ahead with the changes that you recommended".
