@@ -150,6 +150,7 @@ type execDone struct{ err error }
 
 func newModel() model {
 	cfg, ct, err := loadConfig()
+	bgMode = cfg.Bg
 	applyTheme(cfg.Theme)
 	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, pcForms: &pcFormSet{}, prDet: map[string]PRDetail{}, prScroll: &chatScroll{}, rcScroll: &chatScroll{}, askProg: map[string]*askProg{}, bgScr: map[string]Prompt{}}
 	m.ed.drafts = loadDrafts()
@@ -196,6 +197,7 @@ func (m *model) refresh() {
 	if st, err := os.Stat(configPath()); err == nil && st.ModTime().After(m.cfgTime) {
 		cfg, ct, err := loadConfig()
 		m.cfg, m.cfgTime = cfg, ct
+		bgMode = cfg.Bg
 		if m.view != vTheme { // a picker open keeps its preview
 			applyTheme(cfg.Theme)
 			m.ed.restyle()

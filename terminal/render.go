@@ -8,6 +8,7 @@ import (
 )
 
 // The terminal.shop palette (owner's choice): near-black, mostly grey, white for what's selected, one orange.
+// These are the dark-background values; applyTheme (theme.go) sets them for the theme and the background.
 var (
 	cWhite  = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Bold(true)
 	cGrey   = lipgloss.NewStyle().Foreground(lipgloss.Color("248"))

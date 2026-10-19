@@ -10,7 +10,7 @@ One keyboard-only screen for every coding agent running on your Mac: who is work
 - **Answers from the keyboard.** `1`-`9` picks an option, `k` opens a reply box, `space space` jumps to the agent that has waited longest. Replies are typed into the agent's own Terminal tab; the terminal has no AI of its own, so the agent does the work.
 - **Looks past the agents.** `RP` lists your repos with their branches and worktrees, `PR` your open pull requests (merge or close from the keyboard), `PC` Paperclip issues, `PO` the learner's proposals, `FIND` searches every session by name or by what was said in it, `NW` starts a background agent.
 - **Other CLIs.** opencode sessions are listed next to Claude Code's, named `oc <title>`.
-- **Your colors.** `THEME` picks the accent color from 8, with a live preview.
+- **Your colors.** `THEME` picks the accent color from 8, with a live preview. Light and dark terminals both work: Agent Terminal asks the terminal for its background, and `background` in `keys.toml` overrides it.
 - **Keeps state across sessions.** Hooks write a `STATE.md` and `NEXT.md` for each session and inject them at the start, so a fresh or resumed session knows the goal and what is next. A guard hook blocks force-pushes, destructive deletes, secret reads and sessions editing their own hooks. A watcher and an optional menu bar dot tell you when something needs you.
 
 Claude Code stays the engine. Agent Terminal reads the session records and the screens of your agents and types what you chose.

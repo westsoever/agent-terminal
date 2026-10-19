@@ -78,6 +78,7 @@ func main() {
 		return
 	}
 	defer removeState()
+	termDark = lipgloss.HasDarkBackground() // ask before the screen starts: the answer comes in on stdin
 	if _, err := tea.NewProgram(newModel(), tea.WithAltScreen()).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "agterm:", err)
 		os.Exit(1)

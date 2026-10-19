@@ -2,6 +2,20 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D66 (2026-10-19): on a light terminal background every color takes a darker shade; `background` in keys.toml overrides the terminal's answer
+
+**Decision (owner):** "Anything in the light mode (clear light) terminal, doesn't have enough contrast … this needs to be fixed so it works on light and dark terminals."
+
+**Why:** the palette was made for a dark background. White (231) text, the greys (248, 253) and the light accents nearly vanished on a light one.
+
+**Built (`theme.go`):**
+- The greys, the prompt band, the text on a selected row, the reply box and the usage colours are variables now, as the accent already was. `applyTheme` sets them from one of two palettes. The dark palette is the one agterm always had, so a dark terminal looks the same as before.
+- The light palette: black (16) for white, 235 for agent text, 240 for grey, 243 for dark (as before), band 253, white text on a selected row, usage 28/94/160. Every text color is 3.9:1 or more against #eeeeee.
+- Each theme has a light shade, a 256-color number so it looks the same in a terminal without truecolor (two hex shades fell onto the same 256 color): orange 130, amber 94, green 28, cyan 24, blue 26, violet 92, magenta 127, red 160. Each is at least 4.1:1 against #eeeeee and 4.7:1 against white, and no two are the same.
+- `background = "auto" | "dark" | "light"` in keys.toml. Auto (the default, and the fallback for any other value) is the terminal's answer to the background query (`lipgloss.HasDarkBackground`), asked once before the screen starts. A terminal that doesn't answer counts as dark. The THEME picker says which background it draws for and why.
+
+**Not built:** a `THEME light` command (the keys.toml line is enough for now), and a full custom palette.
+
 ## D65 (2026-10-19): Kaching is renamed Agent Terminal; the command is `agterm`
 
 **Decision (owner):** the kit is shared as an app a friend can install, branded "The Bloomberg Terminal for agent work". It is called Agent Terminal, the command you type is `agterm` ("a bit shorter"), and the README starts with a quick install. Same approach as D35: new names everywhere, the old ones keep working, text that describes the past keeps the old name.

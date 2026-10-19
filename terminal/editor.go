@@ -49,8 +49,8 @@ func newEditor() *editor {
 	})
 	st := textarea.Style{
 		Base:        lipgloss.NewStyle(),
-		CursorLine:  lipgloss.NewStyle().Foreground(lipgloss.Color("231")),
-		Text:        lipgloss.NewStyle().Foreground(lipgloss.Color("231")),
+		CursorLine:  lipgloss.NewStyle().Foreground(curPalette().white),
+		Text:        lipgloss.NewStyle().Foreground(curPalette().white),
 		Prompt:      lipgloss.NewStyle().Foreground(accentColor()),
 		Placeholder: cDark,
 		EndOfBuffer: cDark,
