@@ -1,5 +1,5 @@
 #!/bin/bash
-# Raycast script command: bring the agent terminal (agent-terminal) forward, or open it in a new Terminal window.
+# Raycast script command: bring the agent terminal (agterm) forward, or open it in a new Terminal window.
 # AgentTerminalBar runs it from its hotkeys (ui/menubar/Hotkeys.swift, ~/.agent/hotkeys). Raycast can run it too: Settings >
 # Script Commands > Script Folders > + (this folder), then Record Hotkey on the command.
 
@@ -11,7 +11,7 @@
 # Optional parameters:
 # @raycast.icon 🟠
 # @raycast.packageName Agent Terminal
-# @raycast.description Brings the agent-terminal agent terminal to the front, or starts it.
+# @raycast.description Brings the agent terminal (agterm) to the front, or starts it.
 
 STATE="${AGENT_HOME:-$HOME/.agent}/terminal/open"
 pid=$(sed -n 's/^pid=//p' "$STATE" 2>/dev/null)

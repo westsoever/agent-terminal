@@ -1,5 +1,52 @@
 # Agent Terminal
 
+**The Bloomberg Terminal for agent work.**
+
+One keyboard-only screen for every coding agent running on your Mac: who is working, who is waiting for you, what each one asked, and a reply box that types into the agent's own Terminal tab. Claude Code first; opencode sessions show up beside it.
+
+## What it does
+
+- **Shows every agent at once.** The desk lists INPUT (asked you something or is blocked), WAITING (finished, something still open), WORKING, IDLE and DONE. The selected agent's recap, conversation, numbered options and files sit on the right. `W` shows the wall: every agent as a tile.
+- **Answers from the keyboard.** `1`-`9` picks an option, `k` opens a reply box, `space space` jumps to the agent that has waited longest. Replies are typed into the agent's own Terminal tab; the terminal has no AI of its own, so the agent does the work.
+- **Looks past the agents.** `RP` lists your repos with their branches and worktrees, `PR` your open pull requests (merge or close from the keyboard), `PC` Paperclip issues, `PO` the learner's proposals, `FIND` searches every session by name or by what was said in it, `NW` starts a background agent.
+- **Other CLIs.** opencode sessions are listed next to Claude Code's, named `oc <title>`.
+- **Your colors.** `THEME` picks the accent color from 8, with a live preview.
+- **Keeps state across sessions.** Hooks write a `STATE.md` and `NEXT.md` for each session and inject them at the start, so a fresh or resumed session knows the goal and what is next. A guard hook blocks force-pushes, destructive deletes, secret reads and sessions editing their own hooks. A watcher and an optional menu bar dot tell you when something needs you.
+
+Claude Code stays the engine. Agent Terminal reads the session records and the screens of your agents and types what you chose.
+
+## Quick install
+
+```sh
+git clone https://github.com/westsoever/ching.git ~/agent-terminal   # the repo is private: you need access, and `gh auth login` (or an SSH key) first
+cd ~/agent-terminal
+./install.sh              # hooks, links and the launchd watcher; shows the diff and asks before changing anything
+terminal/build.sh         # builds the terminal into ~/.local/bin/agterm (needs Go)
+agterm                    # open it (if the shell says "command not found": export PATH="$HOME/.local/bin:$PATH")
+```
+
+Press `?` in the terminal for every key, `HELP` for the same on the command line, and `ctrl+c` to quit. The full manual is `docs/agent-terminal-manual.md`.
+
+Optional extras: `./install.sh --install-menubar --yes` adds the menu bar dot and global hotkeys, `./install.sh --install-dispatcher --yes` the voice dispatcher. `./install.sh --uninstall` removes the hooks, the jobs and the dot. See "Install, update, remove" below.
+
+## Requirements
+
+- **macOS.** Terminal.app is where agents run and receive replies (sessions in VS Code or Claude Desktop are listed, not typed into). launchd runs the watcher.
+- **Claude Code**, installed and used at least once (`claude` on your PATH): https://claude.com/claude-code
+- **Go 1.27 or newer** to build the terminal: `brew install go`. `go.mod` states the exact version.
+- **`jq`** (ships with recent macOS; otherwise `brew install jq`) and `git`. `bash` and `perl` ship with macOS.
+- Optional: the **GitHub CLI** (`brew install gh`, then `gh auth login`) for `RP` and `PR`; **Xcode command line tools** (`xcode-select --install`) for the menu bar dot; **opencode** (and `sqlite3`, which ships with macOS) to see its sessions.
+
+## Renamed from Kaching
+
+This kit was called Ching, then Kaching, and is Agent Terminal since D65. The command is `agterm`. Old names keep working until you run `./install.sh` again (links `~/.claude/kaching` and `~/.claude/ching`, `KACHING_*` variables, the `kaching` command). See `DECISIONS.md` D65 and `MANUAL-STEPS.md`.
+
+# Reference
+
+Everything below is the longer description of each part.
+
+## What the hooks do
+
 Agent Terminal keeps track of every Claude Code session on this Mac. It runs as a set of bash hooks plus one launchd job, in any folder, repo or not. It does four jobs:
 
 - **Remembers where each session is.** Every session gets a `STATE.md` and `NEXT.md`, which are injected when the session starts. A fresh or resumed session knows the goal, what's done and what's next without you re-explaining.
@@ -14,7 +61,7 @@ Claude Code stays the only engine. Agent Terminal doesn't run models of its own,
 ## Install, update, remove
 
 ```sh
-cd ~/bbq/agent-terminal
+cd ~/agent-terminal        # wherever you cloned it
 ./install.sh --dry-run      # shows the settings.json and launchd diff, changes nothing
 ./install.sh                # asks before applying; --yes applies without asking
 ./install.sh --install-dispatcher --yes   # optional: the voice dispatcher's own folder
@@ -25,16 +72,16 @@ cd ~/bbq/agent-terminal
 `install.sh` is idempotent. It backs up `~/.claude/settings.json` before writing and only adds entries; it never removes your own hooks. A second run should say `nothing to do`.
 
 What it installs:
-- **The links:** `~/.claude/agent-terminal`, pointing to this folder, and `~/.claude/ching`, its name before D35.
+- **The links:** `~/.claude/agent-terminal`, pointing to this folder, and `~/.claude/kaching` and `~/.claude/ching`, its names before D65 and D35.
 - **The hooks:** SessionStart, UserPromptSubmit, Stop, PreCompact, Notification, SessionEnd, and the PreToolUse guard.
 - **The slash commands:** `/handoff`, `/next` and `/dash`.
 - **The launchd job:** `org.agent-terminal.watch`, which runs `bin/agent-terminal-watch.sh` every 5 minutes.
 
 After pulling new commits, run `./install.sh --dry-run` to see whether anything needs reapplying. Most changes need nothing, because the hooks point at this folder.
 
-**Second Mac:** clone this repo to `~/bbq/agent-terminal` and run `./install.sh`. State in `~/.agent/` is per machine and isn't synced.
+**Second Mac:** clone this repo and follow "Quick install". State in `~/.agent/` is per machine and isn't synced.
 
-**Upgrading from Ching (D35):** after the folder moved to `~/bbq/agent-terminal` (with `~/bbq/ching` left as a symlink to it), run `./install.sh` once, then `./install.sh --install-menubar --yes` if you use the dot. The first replaces the hook entries under `~/.claude/ching/bin/` with the same ones under `~/.claude/agent-terminal/bin/` and the `org.ching.*` jobs with `org.agent-terminal.*`; the second replaces ChingBar with AgentTerminalBar. `~/.claude/ching` stays as a second link, so sessions that started before keep working. In Raycast, re-add `~/bbq/agent-terminal/ui/raycast` if the old folder was added, and give the renamed commands their hotkeys again.
+**Upgrading from Kaching (D65) or Ching (D35):** run `./install.sh` once from the folder (also after you rename the folder), then `./install.sh --install-menubar --yes` if you use the dot, and `terminal/build.sh` for the new command `agterm`. The first replaces the hook entries under `~/.claude/kaching/bin/` or `~/.claude/ching/bin/` with the same ones under `~/.claude/agent-terminal/bin/`, and the `org.kaching.*` and `org.ching.*` jobs with `org.agent-terminal.*`; the second replaces KachingBar or ChingBar with AgentTerminalBar, which macOS treats as a new app: add it again under System Settings > Privacy & Security > Accessibility if you use the voice shortcut. `~/.claude/kaching` and `~/.claude/ching` stay as more links, so sessions that started before keep working. In Raycast, re-add the `ui/raycast` folder and give the renamed commands their hotkeys again. `MANUAL-STEPS.md` lists every step.
 
 ## Daily use
 
@@ -114,32 +161,32 @@ Click it for the menu: a status line ("Agent Terminal running · 3 sessions · 1
 
 Hand a task to an agent, put its Terminal window on your second display, and forget about it. When the session finishes its turn or needs your input, its window moves to the main display (the one with the menu bar). When you prompt it, the window goes back to where it was. So if your main display shows only your own windows, every agent is busy.
 
-- **Hotkeys** (D39, from the menu bar dot, no setup and no permission needed): **Ctrl+Option+N** brings the oldest waiting agent to the front with its tab selected, and each press after that the next one; **Ctrl+Option+T** tiles the Terminal windows; **Ctrl+Option+K** opens agent-terminal or brings it forward. The result flashes next to the dot for 3 seconds ("Ching01 (2 more waiting)"). The first press makes macOS ask whether AgentTerminalBar may control Terminal: click OK. To change the keys, write `~/.agent/hotkeys`, one `ctrl+option+n  ui/raycast/agent-terminal-next.sh` per line (modifiers ctrl, option, cmd, shift; a letter, digit or space), then quit and reopen the dot. The same scripts work as Raycast script commands (Settings > Script Commands > Script Folders > +).
+- **Hotkeys** (D39, from the menu bar dot, no setup and no permission needed): **Ctrl+Option+N** brings the oldest waiting agent to the front with its tab selected, and each press after that the next one; **Ctrl+Option+T** tiles the Terminal windows; **Ctrl+Option+K** opens agterm or brings it forward. The result flashes next to the dot for 3 seconds ("Ching01 (2 more waiting)"). The first press makes macOS ask whether AgentTerminalBar may control Terminal: click OK. To change the keys, write `~/.agent/hotkeys`, one `ctrl+option+n  ui/raycast/agent-terminal-next.sh` per line (modifiers ctrl, option, cmd, shift; a letter, digit or space), then quit and reopen the dot. The same scripts work as Raycast script commands (Settings > Script Commands > Script Folders > +).
 - **A lead agent and its workers:** open the workers as tabs of the lead's window (Cmd+T, or Window > Merge All Windows). The window moves as one: it comes over when any of its tabs waits and goes back once none does. `next` selects the tab that is waiting.
 - **Tiling:** your second display is a grid sized by the agent windows that live there: two side by side, three in columns, four as a 2x2 grid, more in a larger grid. A waiting window keeps its cell: while it is on the main display its cell stays empty, and when you answer it goes back to exactly that cell, so each project keeps its place on the screen. Going back to its cell restores the window's exact size, and the main display is never laid out. The grid only changes when a window is opened or closed, and then every window takes the free cell nearest to where it was. It re-lays out when a session starts and on demand with **Tile Terminals** (same Raycast folder; `bin/queue.sh tile`). Windows on a desktop you aren't viewing, and minimised ones, are left alone.
 - **Where a waiting window goes:** a fixed frame on the main display, 690 x 948 with its top-left corner at 320,70 from the display's top-left corner (what the screenshot crosshair shows). Every waiting window gets the same frame, a stack you go through with **Next Waiting Agent**. Change it with `queue_park_frame=X,Y,W,H` in `~/.agent/config`, or `queue_park_frame=off` to keep each window's own size.
 - **Focus:** a window that comes over never takes the focus or jumps in front of what you're typing in. Only the **Next Waiting Agent** hotkey brings one to the front.
-- **What brings a window over:** its own session finishing, asking you something, being blocked, or a release ready, while agent-terminal is closed. The idle reminder never moves a window, and nothing that started waiting while agent-terminal was open comes over later as a batch. A window already on the main display is never moved.
+- **What brings a window over:** its own session finishing, asking you something, being blocked, or a release ready, while agterm is closed. The idle reminder never moves a window, and nothing that started waiting while agterm was open comes over later as a batch. A window already on the main display is never moved.
 - **Only Terminal.app.** A session inside VS Code or Cursor has no window of its own to move, so it is left alone.
 - **Status:** `bin/queue.sh status` lists the waiting tabs. State is in `~/.agent/queue/`.
-- **With agent-terminal open** (the agent terminal, D37): no window moves on its own. agent-terminal's waiting list is the inbox; a window that is on the main display stays there until you drag it back or prompt its session, from agent-terminal or in the window itself (D43); then it goes back to its cell on the second display. Answering a menu from agent-terminal counts too (D42).
-- **Dragging by hand** (D38): drag an agent window from the second display onto the main one and it takes the park frame, with its grid cell kept empty; it stays there until you prompt its session (in the window or from agent-terminal) or drag it back, and either way it snaps into exactly that cell (D43). Any other window you drag onto the second display joins the grid. The menu bar dot watches for this (twice a second, no permission needed); `AGENT_TERMINAL_BAR_DRAGS=off` in its environment turns it off.
-- **Files agent-terminal reads:** `~/.agent/queue/tabs/<session id>` holds `tty window_id tab_index name` for every Terminal session (written at session start and on each prompt, removed at the end). `~/.agent/queue/waiting/<tty>` holds `epoch session_id kind name` (kind is done, input, blocked, ready or idle).
+- **With agterm open** (the agent terminal, D37): no window moves on its own. agterm's waiting list is the inbox; a window that is on the main display stays there until you drag it back or prompt its session, from agterm or in the window itself (D43); then it goes back to its cell on the second display. Answering a menu from agterm counts too (D42).
+- **Dragging by hand** (D38): drag an agent window from the second display onto the main one and it takes the park frame, with its grid cell kept empty; it stays there until you prompt its session (in the window or from agterm) or drag it back, and either way it snaps into exactly that cell (D43). Any other window you drag onto the second display joins the grid. The menu bar dot watches for this (twice a second, no permission needed); `AGENT_TERMINAL_BAR_DRAGS=off` in its environment turns it off.
+- **Files agterm reads:** `~/.agent/queue/tabs/<session id>` holds `tty window_id tab_index name` for every Terminal session (written at session start and on each prompt, removed at the end). `~/.agent/queue/waiting/<tty>` holds `epoch session_id kind name` (kind is done, input, blocked, ready or idle).
 - **Settings** in `~/.agent/config`: `queue=off` turns it off; `queue_tile=off` keeps the queue but not the tiling; `queue_main_display=DELL` picks the main display by part of its name instead of the menu bar display.
 
 ## Agent terminal: every agent from the keyboard
 
-`agent-terminal` is one screen for all your agents, run entirely from the keyboard (design: `docs/superpowers/specs/2026-10-17-agent-terminal-design.md`, D33). It has no AI of its own: it reads the session records and types into the agent's own Terminal tab what you chose, so the agent does the work.
+`agterm` is one screen for all your agents, run entirely from the keyboard (design: `docs/superpowers/specs/2026-10-17-agent-terminal-design.md`, D33). It has no AI of its own: it reads the session records and types into the agent's own Terminal tab what you chose, so the agent does the work.
 
-- **Install:** `terminal/build.sh` builds it into `~/.local/bin/agent-terminal` (needs Go: `brew install go`). Then add **Open Agent Terminal** (`ui/raycast/agent-terminal-open.sh`, same Raycast folder as above) and give it a hotkey: it brings agent-terminal forward, or opens it filling the main display.
+- **Install:** `terminal/build.sh` builds it into `~/.local/bin/agterm` (needs Go: `brew install go`; an old `~/.local/bin/kaching` becomes a link to it). Then add **Open Agent Terminal** (`ui/raycast/agent-terminal-open.sh`, same Raycast folder as above) and give it a hotkey: it brings agterm forward, or opens it filling the main display.
 - **The desk:** left, every live agent by name: INPUT (it asked you something or is blocked; what it asks is shown under its name), WAITING (finished, but a next action, a blocker or a NEXT.md is still open), both oldest first, then WORKING, IDLE, and DONE (finished, nothing left; newest first). All five headers always show, also when empty, so an empty INPUT tells you nothing needs an answer. Right, the selected agent: its recap with a divider under it, then its conversation (your prompts after `›`, its replies) up to its last message, its numbered options, the files it mentioned (lettered), the reply line. An orange frame means it waits for you.
-- **Keys:** right hand: `j` up, `l` down, `k` reply; the arrow keys ↑/↓ scroll the selected agent's conversation (PgUp/PgDn a page, Home its start, End the newest; another agent opens at its newest line; with the reply box open too, when the cursor is on the draft's first or last line); `space space` jumps to the INPUT agent that has waited the longest (done agents are skipped; it does not cycle; the first space waits for a second key with no time limit and esc cancels it), `1`-`9` answer its option (a menu gets the key, a list in its message gets the number and Enter), `k` opens the reply box (Enter sends; Option+Enter, ctrl+J or `\` then Enter for a new line; Option+key types your layout's character, e.g. Option+L = @; `@` suggests the agent's files and a leading `/` its commands, Tab takes one; ctrl+V pastes a clipboard image as a saved PNG path; Esc or ctrl+C keeps a draft per agent; drafts are saved as you type, in `~/.agent/terminal/drafts.json`, so a restart of agent-terminal keeps them), `o` then a letter opens a file it mentioned, `g` brings up its own Terminal window where it is, `h` brings that window to the main display and into focus to type in it (as if dragged there; prompting it, or dragging it back, returns it to its cell), `x` takes a waiting agent off the waiting list without answering, `W` shows the wall (`z` zooms one tile), `/` opens the command line, `?` shows every key (what is new comes first; the page scrolls with the arrow keys, PgUp/PgDn, Home and End).
+- **Keys:** right hand: `j` up, `l` down, `k` reply; the arrow keys ↑/↓ scroll the selected agent's conversation (PgUp/PgDn a page, Home its start, End the newest; another agent opens at its newest line; with the reply box open too, when the cursor is on the draft's first or last line); `space space` jumps to the INPUT agent that has waited the longest (done agents are skipped; it does not cycle; the first space waits for a second key with no time limit and esc cancels it), `1`-`9` answer its option (a menu gets the key, a list in its message gets the number and Enter), `k` opens the reply box (Enter sends; Option+Enter, ctrl+J or `\` then Enter for a new line; Option+key types your layout's character, e.g. Option+L = @; `@` suggests the agent's files and a leading `/` its commands, Tab takes one; ctrl+V pastes a clipboard image as a saved PNG path; Esc or ctrl+C keeps a draft per agent; drafts are saved as you type, in `~/.agent/terminal/drafts.json`, so a restart of agterm keeps them), `o` then a letter opens a file it mentioned, `g` brings up its own Terminal window where it is, `h` brings that window to the main display and into focus to type in it (as if dragged there; prompting it, or dragging it back, returns it to its cell), `x` takes a waiting agent off the waiting list without answering, `W` shows the wall (`z` zooms one tile), `/` opens the command line, `?` shows every key (what is new comes first; the page scrolls with the arrow keys, PgUp/PgDn, Home and End).
 - **Families:** agents that share a Terminal window, as Terminal tabs or macOS window tabs, are one family: the first tab is the lead, the others show indented under it (`└`), and the family sorts by its most urgent member. Recognised automatically every 10 s.
-- **Questions and approvals:** agent-terminal reads the selected agent's screen (and every agent that needs input) and shows any menu exactly as the agent shows it: AskUserQuestion with several parts and its review step, plan approvals, permission prompts. Such an agent is listed under WAITING as `asks`. Numbers pick, ←/→ change the part, Enter confirms, and `k` writes your own answer (it picks "Type something." for you).
+- **Questions and approvals:** agterm reads the selected agent's screen (and every agent that needs input) and shows any menu exactly as the agent shows it: AskUserQuestion with several parts and its review step, plan approvals, permission prompts. Such an agent is listed under WAITING as `asks`. Numbers pick, ←/→ change the part, Enter confirms, and `k` writes your own answer (it picks "Type something." for you).
 - **Pre-written replies:** `f` fix it, `d` review the code, `s` check in on the other agents, and behind the space bar `space m` `/merge`, `space c` commit, `space w` new worktree. All keys and texts live in `~/.agent/terminal/keys.toml` (written on first run); edit and save, the terminal reloads it.
 - **Command line codes:** `IN` the desk (`W` the wall), `FL` every file agents mentioned (Enter opens), `RP` the repos (the clones here and your GitHub repos: the 10 worked on last, then all the others A–Z, with the sync check's findings in orange; Enter opens the folder, `k` browses its folders, `b` lists its branches and `w` its worktrees (`1` review, `2` merge, `3` fix: each a new agent), `g` opens it on GitHub), `PR` the open GitHub pull requests that involve you (Enter opens one), `PO` the learner's proposals (Enter shows, `a` approve with its typed code, `x` reject, `z` snooze 7 days), `PC` Paperclip issues that need you and running ones with their cost (`r` posts a comment, Enter opens the issue), `THEME` the accent color: pick one of 8 (orange, amber, green, cyan, blue, violet, magenta, red) with a live preview, Enter saves it as `theme` in `keys.toml` (orange is the default and the fallback for an unknown value), `A3` the third agent, or the start of an agent's name. `QUIT` or ctrl+c leaves.
 - **Delivery:** text goes in through Terminal scripting without taking focus; Enter and menu answers are key presses, so the agent's window flashes to the front for a tenth of a second. The status line says "✓ <agent> is on it" once the session reacts. Sessions outside Terminal.app (Desktop, VS Code) are listed but can't be typed into.
-- **Windows stay where they are (D37):** opening, quitting or reloading agent-terminal never moves, resizes or closes a Terminal window. agent-terminal is the inbox, so while it runs no window needs to come over to say it waits. `~/.agent/terminal/open` only tells the rest of Agent Terminal that it runs and which agent is selected.
+- **Windows stay where they are (D37):** opening, quitting or reloading agterm never moves, resizes or closes a Terminal window. agterm is the inbox, so while it runs no window needs to come over to say it waits. `~/.agent/terminal/open` only tells the rest of Agent Terminal that it runs and which agent is selected.
 
 ## The guard
 
@@ -201,7 +248,7 @@ Status: **built and gate-tested, never heard.** No audio has been played yet. Yo
 ## Checking it works
 
 ```sh
-cd ~/bbq/agent-terminal
+cd ~/agent-terminal
 bash tests/run.sh                  # full suite (run it from here, not from a /tmp checkout)
 bash tests/live-watch.sh           # read-only: launchd job loaded, events flowing
 bash tests/live-smoke.sh           # daytime only: section 4 makes sound, 0-2 call claude -p

@@ -209,7 +209,7 @@ waiting_windows() { # ids of the windows with a waiting tab, oldest wait first, 
   done
 }
 
-# agent-terminal, the agent terminal, is open: $AGENT_HOME/terminal/open holds pid= (alive) and tty= (the agent selected)
+# agterm, the agent terminal, is open: $AGENT_HOME/terminal/open holds pid= (alive) and tty= (the agent selected)
 open_get() { sed -n "s/^$1=//p" "$AGENT_HOME/terminal/open" 2>/dev/null | head -n 1; }
 single_mode() {
   local pid
