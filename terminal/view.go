@@ -168,6 +168,9 @@ func (m model) commandLine() string {
 				target = fmt.Sprintf("a new agent on %s#%d", pr.Repo, pr.Number)
 			}
 		}
+		if name, ok := strings.CutPrefix(m.ed.target, "br:"); ok && m.branches != nil {
+			target = "a new agent on " + m.branches.repo.Name + ":" + name
+		}
 		left = []seg{s(" writing to ", cGrey), s(target, cWhite)}
 		if id, _, ok := pcHandTarget(m.ed.target); ok {
 			ref := id
@@ -1342,6 +1345,7 @@ func (m model) helpLines() []string {
 		row2("i in RP", "copy the path of the repo's folder, or of the selected file or folder"),
 		row2("DONE", "an agent that finished with nothing left sits in its own section at the end of the list, below IDLE"),
 		row2("REMOTE", "below DONE: the connected sessions on other machines (Remote Control), active ones only, read every 30 s. "+k(K.Next)+" / "+k(K.Prev)+" walk into it; "+K.Reply+" writes to the selected one (sent with claude -p --cloud), enter opens it on claude.ai/code to read the reply: its messages can't be read here"),
+		row2("b, w in RP", "b: the repo's branches, local and on origin only, each against the default branch (+ahead −behind, merged), its upstream (↑ to push, not pushed, gone) and its worktree (⌂); w: its worktrees with their branch and changed files. 1 review it, 2 merge it, 3 fix it, "+K.Reply+" your own task: each a new background agent in the branch's worktree. f fetches origin. g on GitHub is what b was"),
 		"",
 		"## Desk",
 		row2(k(K.Next)+" / "+k(K.Prev), "next / previous agent"),
@@ -1461,16 +1465,29 @@ func (m model) footer() []string {
 		}
 	case vRepos:
 		add(&r1, K.Next+" "+K.Prev, "move")
-		if m.tree != nil {
+		if m.branches != nil {
+			add(&r1, "1-3", "review / merge / fix")
+			add(&r1, K.Reply, "task → new agent")
+			add(&r1, "f", "fetch")
+			add(&r1, "g", "on GitHub")
+			if m.branches.trees {
+				add(&r1, "b", "branches")
+			} else {
+				add(&r1, "w", "worktrees")
+			}
+			add(&r1, "esc", "close")
+		} else if m.tree != nil {
 			add(&r1, K.Reply, "open")
 			add(&r1, "h", "up")
 			add(&r1, "enter", "in Finder")
-			add(&r1, "b", "on GitHub")
+			add(&r1, "g", "on GitHub")
 			add(&r1, "esc", "close")
 		} else {
 			add(&r1, "enter", "open folder")
-			add(&r1, "b", "on GitHub")
-			add(&r1, K.Reply, "folders")
+			add(&r1, K.Reply, "files")
+			add(&r1, "b", "branches")
+			add(&r1, "w", "worktrees")
+			add(&r1, "g", "on GitHub")
 			add(&r1, "esc", "desk")
 			add(&r1, K.Command, "command")
 		}
