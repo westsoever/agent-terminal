@@ -90,6 +90,7 @@ type model struct {
 	repoLocal  []Repo       // RP: the clones on this Mac
 	repoGH     GHRepos      // RP: the owners' GitHub repos
 	repos      []Repo       // RP: both, as listed
+	repoRecent int          // RP: how many of repos are in the first part, MOST RECENT; the others follow from A to Z
 	tree       *repoTree    // RP side panel: the selected repo's folders; nil when closed
 	branches   *branchPanel // RP side panel: the selected repo's branches or worktrees; nil when closed
 	confirmURL string       // mConfirm: what yes opens

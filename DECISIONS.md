@@ -2,7 +2,7 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
-## D61 (2026-10-19): NW never guesses its folder; the box says where the folder came from
+## D62 (2026-10-19): NW never guesses its folder; the box says where the folder came from
 
 **Decision (user):** "it often starts in the wrong folder … maybe create some more clarity there", then "go ahead with the changes that you recommended".
 
@@ -15,6 +15,12 @@ Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are rec
 - The box shows `new background agent in <folder> (<branch>) · <model>`, a line `folder: <how it was found>`, and an orange `⚠` line for the home folder, a folder that is not a git repo, or a linked worktree (the selected agent's own worktree is kept, only flagged).
 
 **Not built:** a folder picker. The error for an ambiguous name lists the choices instead.
+
+## D61 (2026-10-19): the RP list is the 10 repos worked on last, then the others A–Z; the keys only in the footer
+
+**Decision (user):** "Show the top 10 most recent repositories, and then list the remaining repositories, just sorted A to Z", with a line or space that says which part is which; and the keys in the list's title are "already below the overview, so please don't show it twice".
+
+**Built:** "worked on" is the newest of the clone's `.git/logs/HEAD` and its worktrees' (`.git/worktrees/*/logs/HEAD`): commits, checkouts, merges, resets. Not `.git/index`, which a `git status` from the sync check or another session can touch. For a repo with a GitHub twin, its `pushedAt` counts too (the newer wins); a repo on GitHub only has `pushedAt` alone. The parts are headed `MOST RECENT · the 10 worked on last` and, after an empty line, `ALL REPOSITORIES · the others, A–Z`; the top 10 are not listed again below. A new column shows the age. The repos with sync-check findings are no longer first: they are in their place in the order, still orange (and `!` in the narrow list). The list's title is `REPOS` and GitHub's read state only; the keys are in the footer, which got `i copy path`.
 
 ## D60 (2026-10-19): `b` in RP lists a repo's branches, `w` its worktrees; `g` opens GitHub
 
