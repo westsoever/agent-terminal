@@ -43,12 +43,12 @@ func row(w int, segs ...seg) string {
 		if used+width(t) > w {
 			t = runewidth.Truncate(t, w-used, "…")
 			// a cut segment still ends the row
-			b.WriteString(sg.st.Render(t))
+			b.WriteString(renderSeg(sg, t, true))
 			used += width(t)
 			_ = i
 			break
 		}
-		b.WriteString(sg.st.Render(t))
+		b.WriteString(renderSeg(sg, t, false))
 		used += width(t)
 	}
 	if used < w {
@@ -141,7 +141,7 @@ func wrap(text string, w int) []string {
 		pad := strings.Repeat(" ", indent)
 		line := ""
 		for _, word := range strings.Fields(para) {
-			for width(word) > w-indent { // a word longer than a line: hard cut
+			for width(word) > w-indent && !isURL(word) { // a word longer than a line: hard cut (a URL stays whole: row cuts it with …, its link keeps all of it)
 				if line != "" {
 					out = append(out, line)
 					line = ""

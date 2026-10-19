@@ -2,6 +2,14 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D57 (2026-10-19): links in the text are OSC 8 hyperlinks; the usage bar needs the statusline writer
+
+**Decision (user):** "make links in the chat clickable with cmd+click and then open in the default browser", and "the local app doesn't show the app usage in the bottom corner (it only shows 'claude usage: no statusline reading yet')".
+
+**Why (usage):** `~/.claude/statusline-command.sh` had lost the lines that write `~/.agent/usage/<session id>.json`, so the directory did not exist and `loadUsage` found nothing. The lines are back (they write `.rate_limits` only when it changes, through a temp file and `mv`). That script is outside this repo; the manual now says what to check.
+
+**Built (links):** `row` renders every `http(s)://` URL in a seg as an OSC 8 hyperlink (`links.go`), so the terminal opens it with cmd+click in the default browser. The target is the whole URL even when the row cuts it with `…` (the `…` is inside the link), and `wrap` no longer hard-cuts a URL into two rows, which would have broken the link. Trailing `.,;:!?` and an unmatched `)` are not part of the URL. Rows keep their exact width: the escape codes add no cells. kaching sets no mouse mode, so the terminal's own cmd+click is what opens the link; the browser is whatever macOS has as default.
+
 ## D56 (2026-10-19): `3` in PR closes at once, with no agent
 
 **Decision (user):** "Currently kaching doesn't have the "close" function ... Implement the function in the kaching app so with 3 or similar, I can close a PR".

@@ -210,7 +210,9 @@ The screen has five parts, from the top to the bottom:
 4. The agent panel (right). It shows the selected agent.
 5. The key bar (bottom). The first line shows the keys for the current view. The second line shows the fixed messages. On the right, the two lines show your Claude usage: the 5-hour window above the 7-day limit. Each line shows the exact percentage, a bar, and the time until it starts again (`↻ 1h33m`, `↻ 1d08h`). When the screen is narrow, keys at the end of the lines give way.
 
-The usage comes from the statusline: `~/.claude/statusline-command.sh` writes the `rate_limits` of each session to `~/.agent/usage/<session id>.json` when they change, and Kaching shows the newest file. Before any session has updated its statusline, the bar says `no statusline reading yet`.
+The usage comes from the statusline: `~/.claude/statusline-command.sh` writes the `rate_limits` of each session to `~/.agent/usage/<session id>.json` when they change, and Kaching shows the newest file. Before any session has updated its statusline, the bar says `no statusline reading yet`. If it stays that way, check that your statusline script has the lines that write `~/.agent/usage/<session id>.json`: without them no file exists and Kaching has nothing to read.
+
+Links in the text (`http://` and `https://`) are real links. Push `Cmd` and click on one in your terminal to open it in the default browser. A link that is too long for the line shows cut with `…`, but the click opens the whole address.
 
 ### 4.2 The agent list
 
