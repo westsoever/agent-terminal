@@ -914,8 +914,8 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.quickApprove()
 	case ks == K.Dismiss && (m.view == vDesk || m.view == vWall):
 		a := m.sel()
-		if a == nil || a.Group() != 0 {
-			m.setErr("only a waiting agent can be dismissed")
+		if a == nil || a.Group() == 1 {
+			m.setErr("only a waiting or idle agent can be dismissed")
 			return m, nil
 		}
 		sid, tty, bg := a.SID, a.TTY, a.Bg

@@ -2,6 +2,12 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D67 (2026-10-19): x dismisses an idle agent too
+
+**Decision (owner):** "Currently, I can only dismiss waiting sessions, allow me to also remove idle sessions from the agent-terminal so that I can keep a clean slate if I want to."
+
+**Built:** `x` works on an agent in IDLE as it does on one in INPUT (D50): the row goes, and the agent stays out until it works again or has a newer event. A working agent still can't be dismissed. The session keeps running; `x` does not close it.
+
 ## D66 (2026-10-19): on a light terminal background every color takes a darker shade; `background` in keys.toml overrides the terminal's answer
 
 **Decision (owner):** "Anything in the light mode (clear light) terminal, doesn't have enough contrast … this needs to be fixed so it works on light and dark terminals."

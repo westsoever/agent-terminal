@@ -71,3 +71,19 @@ func TestDismissedWorkingAgentShows(t *testing.T) {
 		t.Fatal("new event: shown")
 	}
 }
+
+// An idle agent can be dismissed too (D67): hidden while idle with nothing new, shown once it works again.
+func TestDismissIdleAgent(t *testing.T) {
+	a := Agent{SID: "s1", State: "idle", Since: time.Unix(1000, 0)}
+	if a.Group() != 2 {
+		t.Fatalf("group %d, want idle", a.Group())
+	}
+	d := dismissals{"s1": 2000}
+	if !d.hides(a) {
+		t.Fatal("idle, nothing new since: hidden")
+	}
+	a.State = "working"
+	if d.hides(a) {
+		t.Fatal("working: shown")
+	}
+}

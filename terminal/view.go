@@ -1400,6 +1400,7 @@ func (m model) helpLines() []string {
 		row2("QUIT", "stop agterm (ctrl+c also stops it)"),
 		"",
 		"## New on 2026-10-19",
+		row2(K.Dismiss+" on IDLE", "an idle agent can be dismissed too, for a clean list\nit comes back when it works again"),
 		row2("REMOTE", "below DONE: the connected sessions on other machines (Remote Control), active ones only, read every 30 s\n"+
 			"this Mac's own windows are not listed: they are agents above\n"+
 			k(K.Next)+" / "+k(K.Prev)+" walk into it · "+K.Reply+" writes to the selected one (sent with claude -p --cloud)\n"+
@@ -1440,7 +1441,7 @@ func (m model) helpLines() []string {
 		row2(K.Open+" then a-i", "open that file"),
 		row2(K.Goto, "show the agent's own Terminal window, where it is\na background agent (◦) gets a new window attached to it"),
 		row2(K.Here, "bring its window to monitor 1 and into focus, to type in it\na prompt sends it back"),
-		row2(K.Dismiss, "remove a waiting agent (a background one too) from the list, no answer\nit keeps running and comes back when it has something new"),
+		row2(K.Dismiss, "remove a waiting or idle agent (a background one too) from the list, no answer\nit keeps running and comes back when it has something new"),
 		row2(K.Refresh, "read all data again"),
 		"",
 		"## Writing a message",

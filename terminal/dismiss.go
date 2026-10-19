@@ -1,7 +1,7 @@
 package main
 
-// Dismissed agents (D50): x takes a waiting agent out of the queue, in whichever section it sits, until it has
-// something new to say. ~/.agent/terminal/dismissed.json maps a session id to the time of the dismissal; the agent
+// Dismissed agents (D50, D67): x takes a waiting or idle agent out of the list, in whichever section it sits, until it
+// has something new to say. ~/.agent/terminal/dismissed.json maps a session id to the time of the dismissal; the agent
 // stays hidden while its last event is not newer than that. It works for a background agent too, which has no
 // Terminal tab and so is not in the window queue.
 
@@ -24,10 +24,10 @@ func loadDismissals() dismissals {
 	return d
 }
 
-// hides: the owner dismissed this agent and it is still waiting with nothing new since.
+// hides: the owner dismissed this agent and it is still waiting or idle with nothing new since.
 func (d dismissals) hides(a Agent) bool {
 	at, ok := d[a.SID]
-	return ok && a.Group() == 0 && a.Since.Unix() <= at
+	return ok && a.Group() != 1 && a.Since.Unix() <= at
 }
 
 // dismissAgent records that the owner dismissed a at now (at the agent's own last event when its clock is ahead).
