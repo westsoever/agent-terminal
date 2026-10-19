@@ -98,11 +98,12 @@ lock_fd9() {
   exec 9>&-; return 1
 }
 # with_lock LOCKFILE CMD...: run CMD (a function too) holding lock_fd9 on LOCKFILE; CMD's status, 1 on timeout.
+# The local has an odd name: CMD sees it (bash scoping is dynamic), and a plain `rc` hid the caller's.
 with_lock() {
-  local rc
+  local _with_lock_rc
   lock_fd9 "$1" || return 1
-  shift; "$@"; rc=$?
-  exec 9>&-; return "$rc"
+  shift; "$@"; _with_lock_rc=$?
+  exec 9>&-; return "$_with_lock_rc"
 }
 
 meta_get() { # file key

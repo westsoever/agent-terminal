@@ -98,6 +98,13 @@ nt h5 handoff
 assert_contains "handoff is delivered with the daily budget used up" "$(tail -1 "$LOG")" $'\tdry-run\t'
 nt h5 stall
 assert_contains "a stall for that session is still suppressed by the daily budget" "$(tail -1 "$LOG")" "suppressed:daily-budget"
+# the budget is booked under a lock: eight budgeted alerts at once still deliver exactly four
+rm -rf "$AGENT_HOME/notify"; : >"$LOG"; pids=""
+for s in p1 p2 p3 p4 p5 p6 p7 p8; do nt "$s" stall & pids="$pids $!"; done
+# shellcheck disable=SC2086
+wait $pids
+assert_eq "parallel budgeted alerts: exactly four delivered" "4" "$(grep -c $'\tdry-run\t.*Stalled' "$LOG")"
+assert_eq "parallel budgeted alerts: the day count is four" "4" "$(cat "$AGENT_HOME"/notify/budget-*)"
 assert_eq "handoff did not use any of the daily budget" "4" "$(cat "$AGENT_HOME/notify/budget-2026-10-05")"
 rm -rf "$AGENT_HOME/notify"
 nt h6 handoff

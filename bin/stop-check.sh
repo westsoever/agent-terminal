@@ -311,13 +311,15 @@ case "$n" in ''|*[!0-9]*) n=0 ;; esac
 # Trees the model ladder already failed on (machine-wide, the last 100 fingerprints): the same failing tree
 # gets the same answer, so it is not paid for again. Any change to the tree makes a new fingerprint.
 LADDER_FAILED="$AGENT_HOME/ladder-failed"
-remember_ladder_failed() { # fingerprint...
+add_ladder_failed() { # fingerprint...
   local tmp
   tmp=$(mktemp "$AGENT_HOME/.ladder-failed.XXXXXX" 2>/dev/null) || return 0
   if { tail -n 100 "$LADDER_FAILED" 2>/dev/null || true; printf '%s\n' "$@"; } >"$tmp" 2>/dev/null; then
     mv -f "$tmp" "$LADDER_FAILED" 2>/dev/null || rm -f "$tmp"
   else rm -f "$tmp"; fi
 }
+# under a lock: two stops finishing together each kept only their own fingerprints
+remember_ladder_failed() { with_lock "$AGENT_HOME/.ladder-failed.lock" add_ladder_failed "$@" || true; }
 
 rc=0
 # test-escalate.sh runs the check with no model first; only on failure does it call the cheapest model
@@ -392,11 +394,14 @@ if [ "$n" -ge "$MAX" ]; then
   # Cap reached: allow the stop, record it, and tell the human.
   rm -f "$COUNTER"
   mkdir -p "$STATE_DIR"
-  {
-    printf '\n- %s stop-check: gave up after %s retries (session %s); %s still failing (exit %s). Last output:\n' \
-      "$(date '+%Y-%m-%d %H:%M')" "$MAX" "$SID" "$TEST_CMD" "$rc"
-    tail -n 15 "$OUT" | sed 's/^/    /'
-  } >>"$STATE_DIR/STATE.md" 2>/dev/null || true
+  gave_up_note() {
+    {
+      printf '\n- %s stop-check: gave up after %s retries (session %s); %s still failing (exit %s). Last output:\n' \
+        "$(date '+%Y-%m-%d %H:%M')" "$MAX" "$SID" "$TEST_CMD" "$rc"
+      tail -n 15 "$OUT" | sed 's/^/    /'
+    } >>"$STATE_DIR/STATE.md" 2>/dev/null
+  }
+  with_lock "$STATE_DIR/.state.lock" gave_up_note || true   # the lock pre-compact.sh takes to rewrite STATE.md
   ev stop_blocked '{"retry":"cap","reason":"tests-cap"}'
   set_state blocked
   notify blocked "Tests still failing after $MAX retries: $TEST_CMD"

@@ -34,14 +34,19 @@ TMP=$(mktemp "$STATE_DIR/.state.XXXXXX")
 BLOCK_FILE=$(mktemp "$STATE_DIR/.block.XXXXXX")
 trap 'rm -f "$TMP" "$BLOCK_FILE"' EXIT
 printf '%s\n' "$BLOCK" >"$BLOCK_FILE"
-if [ -f "$STATE" ] && grep -qF "$BEGIN" "$STATE"; then
-  awk -v b="$BEGIN" -v e="$END" -v bf="$BLOCK_FILE" '
-    index($0, b) { while ((getline line < bf) > 0) print line; skip = 1; next }
-    skip && index($0, e) { skip = 0; next }
-    !skip { print }
-  ' "$STATE" >"$TMP"
-else
-  { if [ -f "$STATE" ]; then cat "$STATE"; echo; fi; cat "$BLOCK_FILE"; } >"$TMP"
-fi
-mv "$TMP" "$STATE"
+snapshot() {
+  if [ -f "$STATE" ] && grep -qF "$BEGIN" "$STATE"; then
+    awk -v b="$BEGIN" -v e="$END" -v bf="$BLOCK_FILE" '
+      index($0, b) { while ((getline line < bf) > 0) print line; skip = 1; next }
+      skip && index($0, e) { skip = 0; next }
+      !skip { print }
+    ' "$STATE" >"$TMP"
+  else
+    { if [ -f "$STATE" ]; then cat "$STATE"; echo; fi; cat "$BLOCK_FILE"; } >"$TMP"
+  fi
+  mv "$TMP" "$STATE"
+}
+# the sessions of a repo share its STATE.md: read and replace it under the lock its other writers take, so a
+# checkpoint written in between is not lost
+with_lock "$STATE_DIR/.state.lock" snapshot
 exit 0
