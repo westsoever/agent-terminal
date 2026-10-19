@@ -576,13 +576,28 @@ func (m model) agentPanel(w, h int) []string {
 			}
 		} else { // /NW: the first message of a new background agent
 			dir := tildify(strings.TrimPrefix(m.ed.target, "nw:"))
-			hd = "─ new background agent in " + dir + " "
+			here := m.nwDir.Dir == m.nw.Dir // nwDir describes the folder of this box
+			hd = "─ new background agent in " + dir
+			if here && m.nwDir.Branch != "" {
+				hd += " (" + m.nwDir.Branch + ")"
+			}
 			if o := m.nw.summary(); o != "" {
-				hd = "─ new background agent in " + dir + " · " + o + " "
+				hd += " · " + o
+			}
+			hd += " "
+			if here && m.nwDir.Source != "" {
+				who = append(who, trunc("folder: "+m.nwDir.Source, in))
+			}
+			if n := m.nwDir.note(); here && n != "" {
+				who = append(who, trunc("⚠ "+n, in))
 			}
 		}
 		tail = append(tail, "", row(in, s(hd, cOrange), s(strings.Repeat("─", max(0, in-width(hd))), cOrange)))
 		for _, l := range who {
+			if strings.HasPrefix(l, "⚠") { // the /NW folder warning
+				tail = append(tail, row(in, s(l, cOrange)))
+				continue
+			}
 			tail = append(tail, row(in, s(l, cGrey)))
 		}
 		tail = append(tail, m.ed.lines(in)...)
@@ -1374,6 +1389,9 @@ func (m model) helpLines() []string {
 			"this Mac's own windows are not listed: they are agents above\n"+
 			k(K.Next)+" / "+k(K.Prev)+" walk into it · "+K.Reply+" writes to the selected one (sent with claude -p --cloud)\n"+
 			"enter opens it on claude.ai/code to read the reply: its messages can't be read here"),
+		row2("NW", "never guesses its folder: with none written it uses the selected agent's (an error when none is selected, NW ~ for home)\n"+
+			"NW ./x and NW .. start at that folder; NW mis fits ~/bbq and the agents, and lists the folders if it fits several\n"+
+			"the box shows the folder, its branch and where it came from; an orange ⚠ marks home, a non-repo and a worktree"),
 		row2("RC", "recaps in full: the agents by name on the left, the selected one's recap on the right"),
 		row2("links", "cmd+click opens a link in the text"),
 		"",

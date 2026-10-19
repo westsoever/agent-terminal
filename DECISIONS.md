@@ -2,6 +2,20 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D61 (2026-10-19): NW never guesses its folder; the box says where the folder came from
+
+**Decision (user):** "it often starts in the wrong folder … maybe create some more clarity there", then "go ahead with the changes that you recommended".
+
+**Why:** `NW` took the selected agent's folder and fell back to the home folder with no word (a selected REMOTE session counts as no selection). A bare name tried `~/bbq/<name>` first, then the first agent whose name started with it, and an agent in a linked worktree gave the worktree path. A relative path (`./x`) was an error.
+
+**Built (`nwfolder.go`):**
+- `NW` with no folder and no selected agent is an error, not `~`. `NW ~` still works when the home folder is meant.
+- `.`, `..`, `./x` and `../x` start at the selected agent's folder.
+- A name is matched against the folders of `~/bbq` and the agents together. An exact `~/bbq/<name>` wins; more than one other folder is an error that lists them; an agent in a linked worktree stands for its repo's main checkout.
+- The box shows `new background agent in <folder> (<branch>) · <model>`, a line `folder: <how it was found>`, and an orange `⚠` line for the home folder, a folder that is not a git repo, or a linked worktree (the selected agent's own worktree is kept, only flagged).
+
+**Not built:** a folder picker. The error for an ambiguous name lists the choices instead.
+
 ## D59 (2026-10-19): REMOTE leaves out the sessions that run on this Mac
 
 **Decision (user):** every new Claude terminal gets a Remote Control connection, so each one showed twice, as an agent and under REMOTE: "I would like to only see the local sessions", either a check that hides it or no duplicates.

@@ -98,6 +98,7 @@ type model struct {
 	usage      Usage               // the Claude usage limits, read on every tick
 	askProg    map[string]*askProg // sid -> where a background agent's menu is (see ask.go)
 	nw         nwOpts              // what /NW is starting: its folder, model, effort and permission mode
+	nwDir      nwFolder            // where that folder came from and what is there (the box shows it)
 	bgScr      map[string]Prompt   // sid -> the menu on a background agent's screen (rebuilt from claude logs)
 	files      *fileHistory        // the FL view: the last files the agents mentioned
 	find       findState           // the FIND view: the search on the screen
@@ -1494,13 +1495,14 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 	case c == "NW": // a new background agent: the folder, then its first message in the reply box
 		_, arg, _ := strings.Cut(strings.TrimSpace(code), " ")
 		o := parseNW(arg, m.cfg)
-		dir := m.resolveDir(o.Dir)
-		if dir == "" {
-			m.setErr("NW: no folder " + strings.TrimSpace(o.Dir) + " (a path, a folder in ~/bbq, or an agent's name)")
+		f, err := m.resolveNW(o.Dir)
+		if err != nil {
+			m.setErr(err.Error())
 			return m, nil
 		}
+		dir := f.Dir
 		o.Dir = dir
-		m.nw = o
+		m.nw, m.nwDir = o, f
 		m.view, m.zoom, m.mode = vDesk, false, mTyping
 		return m, m.ed.open("nw:"+dir, dir, m.editorWidth())
 	case c == "ALL":
