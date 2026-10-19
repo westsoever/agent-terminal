@@ -2,7 +2,8 @@ package main
 
 // The RP view (D45): the repos on this Mac (git clones one level under ~/bbq and ~, the ones in ~/.agent-repos
 // and the sync check's) and the owner's GitHub repos that have no clone here, each with the sync check's note.
-// Enter opens the folder, b (or option+enter) the repo on GitHub, k its folders in a side panel, i copies a path.
+// Enter opens the folder, g (or option+enter) the repo on GitHub, k its folders in a side panel, b its branches and
+// w its worktrees (branches.go), i copies a path.
 
 import (
 	"context"
@@ -26,6 +27,7 @@ type Repo struct {
 	Dir    string   // the local clone; "" when it is on GitHub only
 	Needs  string   // the sync check's "needs:" line
 	Notes  []string // the sync check's findings ("stash: 1 entry (oldest 20d)")
+	NB, NW int      // a clone's local branches and its worktrees besides its own folder
 }
 
 func (r Repo) key() string {
@@ -156,6 +158,7 @@ func localRepos(sync []string) []Repo {
 		}
 		seen[d] = true
 		r := Repo{Name: filepath.Base(d), Dir: d, Remote: remoteRepo(gitOrigin(d))}
+		r.NB, r.NW = refCounts(d)
 		if i, ok := rank[d]; ok {
 			r.Needs, r.Notes = notes[i].needs, notes[i].notes
 		}
@@ -404,7 +407,7 @@ func (m *model) repoSel() *Repo {
 // openRepos reads the RP list again: the clones and the sync check now, GitHub in the background.
 func (m *model) openRepos() tea.Cmd {
 	m.loadSync()
-	m.repoLocal, m.tree = localRepos(m.sync), nil
+	m.repoLocal, m.tree, m.branches = localRepos(m.sync), nil, nil
 	m.setRepos()
 	return func() tea.Msg { return ghReposMsg(loadGHRepos()) }
 }
@@ -438,6 +441,13 @@ func (m model) repoMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t := m.tree; t != nil && t.repo.key() == msg.key && t.rel == msg.rel {
 			t.err = msg.err
 			t.set(msg.items)
+		}
+	case branchesMsg:
+		if p := m.branches; p != nil && p.repo.key() == msg.key {
+			p.st, p.loading, p.note = msg.st, false, msg.note
+			if p.sel >= p.n() {
+				p.sel = max(0, p.n()-1)
+			}
 		}
 	}
 	return m, nil
@@ -491,6 +501,9 @@ func (m *model) repoKey(ks string) (bool, tea.Cmd) {
 	if m.tree != nil {
 		return true, m.treeKey(ks)
 	}
+	if m.branches != nil {
+		return true, m.branchKey(ks)
+	}
 	K := m.cfg.Keys
 	r := m.repoSel()
 	switch ks {
@@ -514,8 +527,12 @@ func (m *model) repoKey(ks string) (bool, tea.Cmd) {
 		case r.Remote != "":
 			m.mode, m.confirmURL = mConfirm, r.ghURL("")
 		}
-	case "b", "alt+enter":
+	case "g", "alt+enter":
 		m.repoGitHub()
+	case "b":
+		return true, m.openBranches(r, false)
+	case "w":
+		return true, m.openBranches(r, true)
 	case "i": // copy the folder's path, or its GitHub URL when there is no clone
 		switch {
 		case r == nil:
@@ -557,8 +574,12 @@ func (m *model) treeKey(ks string) tea.Cmd {
 		t.sel = max(0, len(t.items)-1)
 	case "backspace", "left", "h":
 		return t.up()
-	case "b", "alt+enter":
+	case "g", "alt+enter":
 		m.repoGitHub()
+	case "b":
+		return m.openBranches(&t.repo, false)
+	case "w":
+		return m.openBranches(&t.repo, true)
 	case "i": // copy the selected file's or folder's path (its GitHub URL on a repo without a clone)
 		switch {
 		case e == nil:
@@ -640,7 +661,7 @@ func (m model) reposView(h int) []string {
 	case m.repoGH.At.IsZero():
 		gh = " · reading GitHub…"
 	}
-	if m.tree == nil {
+	if m.tree == nil && m.branches == nil {
 		var items [][]seg
 		var details []string
 		for _, r := range m.repos {
@@ -652,21 +673,27 @@ func (m model) reposView(h int) []string {
 				where = "github only"
 			}
 			items = append(items, []seg{s(padTo(r.Name, 20), cWhite), s(" "+padTo(remote, 28), cGrey),
-				s(" "+padTo(where, 32), wst), s(" "+r.Needs, cOrange)})
+				s(" "+padTo(where, 32), wst), s(" "+padTo(refNote(r), 12), cGrey), s(" "+r.Needs, cOrange)})
 			d := r.Notes
 			if r.Needs != "" && len(d) == 0 {
 				d = []string{"needs: " + r.Needs}
 			}
 			details = append(details, strings.Join(d, " · "))
 		}
-		title := "REPOS   enter opens the folder · b on GitHub · i copy path · " + K.Reply + " its folders" + gh
+		title := "REPOS   enter opens the folder · " + K.Reply + " its files · b branches · w worktrees · g on GitHub · i copy path" + gh
 		empty := "no repos found in ~/bbq or ~"
 		return m.listBox(title, items, h, empty, details...)
 	}
 	lw, rw := pcWidths(m.w)
 	lw = min(lw, 44)
 	rw = m.w - lw - 2
-	left, right := m.repoList(lw, h), m.repoPanel(rw, h)
+	left := m.repoList(lw, h)
+	var right []string
+	if m.branches != nil {
+		right = m.branchPanelView(rw, h)
+	} else {
+		right = m.repoPanel(rw, h)
+	}
 	out := make([]string, h)
 	for i := range out {
 		l, r := "", ""
@@ -679,6 +706,18 @@ func (m model) reposView(h int) []string {
 		out[i] = " " + l + " " + r
 	}
 	return out
+}
+
+// refNote: a clone's branches and worktrees for the list, "" for a repo on GitHub only.
+func refNote(r Repo) string {
+	if r.Dir == "" {
+		return ""
+	}
+	n := fmt.Sprintf("%d br", r.NB)
+	if r.NW > 0 {
+		n += fmt.Sprintf(" · %d wt", r.NW)
+	}
+	return n
 }
 
 // repoList: the narrow list beside the panel; ! marks a sync-check note, ◦ a repo on GitHub only.
@@ -735,7 +774,7 @@ func (m model) repoPanel(w, h int) []string {
 	case len(t.items) == 0:
 		rows = append(rows, row(in, s("empty folder", cDark)))
 	}
-	tail := []string{"", row(in, s("> ", cOrange), s(K.Reply+" opens · h up · enter in Finder · b GitHub · i copy path · esc closes", cDark))}
+	tail := []string{"", row(in, s("> ", cOrange), s(K.Reply+" opens · h up · enter in Finder · g GitHub · i copy path · b branches · w worktrees · esc closes", cDark))}
 	avail := max(1, h-2-len(head)-len(tail))
 	first := 0
 	if t.sel >= avail {

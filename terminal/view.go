@@ -168,6 +168,9 @@ func (m model) commandLine() string {
 				target = fmt.Sprintf("a new agent on %s#%d", pr.Repo, pr.Number)
 			}
 		}
+		if name, ok := strings.CutPrefix(m.ed.target, "br:"); ok && m.branches != nil {
+			target = "a new agent on " + m.branches.repo.Name + ":" + name
+		}
 		left = []seg{s(" writing to ", cGrey), s(target, cWhite)}
 		if id, _, ok := pcHandTarget(m.ed.target); ok {
 			ref := id
@@ -1394,6 +1397,10 @@ func (m model) helpLines() []string {
 			"the box shows the folder, its branch and where it came from; an orange ⚠ marks home, a non-repo and a worktree"),
 		row2("RC", "recaps in full: the agents by name on the left, the selected one's recap on the right"),
 		row2("links", "cmd+click opens a link in the text"),
+		row2("b, w in RP", "b: the repo's branches, local and on origin only, each against the default branch (+ahead −behind, merged), its upstream (↑ to push, not pushed, gone) and its worktree (⌂)\n"+
+			"w: its worktrees with their branch and changed files\n"+
+			"1 review it · 2 merge it · 3 fix it · "+K.Reply+" your own task: each a new background agent in the branch's worktree\n"+
+			"f fetches origin · g opens GitHub (what b was)"),
 		"",
 		"## New on 2026-10-18",
 		row2("2, 3 in PR", "2 merges it at once (gh pr merge, pinned to the commit shown; refuses on conflicts or failed or running checks)\n3 closes it at once (gh pr close)\nno agent, no confirm"),
@@ -1435,7 +1442,8 @@ func (m model) helpLines() []string {
 		"## Repos (RP)",
 		row2(k(K.Next)+" / "+k(K.Prev), "next / previous repo"),
 		row2("enter", "open its folder; on GitHub only: asks, then enter or y opens it on GitHub"),
-		row2("b, opt+enter", "open it on GitHub (option+enter; shift+enter too, where the terminal tells it from enter)"),
+		row2("b / w", "the repo's branches / worktrees (1 review · 2 merge · 3 fix · f fetch; more: New on 2026-10-19)"),
+		row2("g, opt+enter", "open it on GitHub (option+enter; shift+enter too, where the terminal tells it from enter)"),
 		row2(K.Reply, "its folders on the right: "+K.Reply+" goes into a folder or opens a file, h (or backspace) up, enter shows it in Finder, esc closes"),
 		row2("i", "copy the path of the repo's folder, or of the selected file or folder in the panel (its GitHub URL without a clone)"),
 		"",
@@ -1529,16 +1537,29 @@ func (m model) footer() []string {
 		}
 	case vRepos:
 		add(&r1, K.Next+" "+K.Prev, "move")
-		if m.tree != nil {
+		if m.branches != nil {
+			add(&r1, "1-3", "review / merge / fix")
+			add(&r1, K.Reply, "task → new agent")
+			add(&r1, "f", "fetch")
+			add(&r1, "g", "on GitHub")
+			if m.branches.trees {
+				add(&r1, "b", "branches")
+			} else {
+				add(&r1, "w", "worktrees")
+			}
+			add(&r1, "esc", "close")
+		} else if m.tree != nil {
 			add(&r1, K.Reply, "open")
 			add(&r1, "h", "up")
 			add(&r1, "enter", "in Finder")
-			add(&r1, "b", "on GitHub")
+			add(&r1, "g", "on GitHub")
 			add(&r1, "esc", "close")
 		} else {
 			add(&r1, "enter", "open folder")
-			add(&r1, "b", "on GitHub")
-			add(&r1, K.Reply, "folders")
+			add(&r1, K.Reply, "files")
+			add(&r1, "b", "branches")
+			add(&r1, "w", "worktrees")
+			add(&r1, "g", "on GitHub")
 			add(&r1, "esc", "desk")
 			add(&r1, K.Command, "command")
 		}

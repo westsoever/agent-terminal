@@ -16,6 +16,14 @@ Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are rec
 
 **Not built:** a folder picker. The error for an ambiguous name lists the choices instead.
 
+## D60 (2026-10-19): `b` in RP lists a repo's branches, `w` its worktrees; `g` opens GitHub
+
+**Decision (user):** "B actually opens all the branches attached to the repository. K lets me view the files of the repository, and G opens the GitHub for it", "see all local and remote branches on each repository. Once I am selecting a branch of the repository, I can, same as for the pull request, review it, merge it, or fix it", so "I always know how many branches are currently alive locally ... specifically when we have worktrees", and "on W to open the worktrees that are attached with the local repository".
+
+**Built:** `branches.go`. The RP list shows each clone's local branches and worktrees (`3 br · 2 wt`), read from `.git` without running git. `b` opens a panel with the local branches and, under `ON ORIGIN ONLY`, the branches on origin with no local branch of that name or upstream. Each row: `⌂` when it is checked out in a worktree, against the default branch (`origin/HEAD`, else main/master: `+ahead −behind`, `merged`, `default`), against its upstream (`not pushed`, `gone`, `↑` to push, `↓` to pull, `pushed`), age and last subject; the default branch first, then those with work the default branch lacks, the newest first. The title counts local, origin-only, not-in-default and worktrees. `w` shows `git worktree list` with each worktree's branch, changed files (`git status`, with `GIT_OPTIONAL_LOCKS=0` so it never takes another session's index lock), and its branch against the default. `1` review, `2` merge, `3` fix and `k` (own task) each start a background agent in the branch's worktree (the clone's folder when it has none) with the branch's state and the task, like `1` and `k` in the PR panel. `f` runs `git fetch --prune origin`; kaching does not fetch by itself. `g` (and Option+Enter) is what `b` was: the repo, or in the panel the branch, on GitHub. A repo on GitHub only lists its branch names from `gh api`; the actions need a clone.
+
+**Why merge is an agent here, not kaching itself (unlike `2` in PR, D55):** a local branch has no checks and no mergeability from GitHub, it can conflict, and the main checkout often has another session's uncommitted work. The agent gets the owner's merge rules in its task (fetch first, no force push, keep both sides on a conflict, check nothing from origin was dropped). `2` refuses the default branch and a branch with nothing the default branch lacks.
+
 ## D59 (2026-10-19): REMOTE leaves out the sessions that run on this Mac
 
 **Decision (user):** every new Claude terminal gets a Remote Control connection, so each one showed twice, as an agent and under REMOTE: "I would like to only see the local sessions", either a check that hides it or no duplicates.

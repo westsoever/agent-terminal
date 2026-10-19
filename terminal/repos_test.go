@@ -162,9 +162,9 @@ func TestRepoEnterAndGitHub(t *testing.T) {
 	if len(*got) != 3 {
 		t.Fatalf("enter, enter: %+v", *got)
 	}
-	m = pressRP(t, m, "j", "b", "alt+enter")
+	m = pressRP(t, m, "j", "g", "alt+enter")
 	if len(*got) != 5 || (*got)[3].path != "https://github.com/technobbq/miso" || (*got)[4] != (*got)[3] {
-		t.Fatalf("b, option+enter: %+v", *got)
+		t.Fatalf("g, option+enter: %+v", *got)
 	}
 	mm, _ := m.Update(fakeCSI("?CSI[49 51 59 50 117]?"))
 	if m = mm.(model); len(*got) != 6 {
@@ -216,9 +216,9 @@ func TestRepoTree(t *testing.T) {
 	if (*got)[1] != (opened{"open", filepath.Join(root, "src", "inner")}) {
 		t.Fatalf("enter on a folder: %+v", *got)
 	}
-	m = pressRP(t, m, "b")
+	m = pressRP(t, m, "g")
 	if (*got)[2].path != "https://github.com/o/r/tree/HEAD/src" {
-		t.Fatalf("b in the panel: %+v", *got)
+		t.Fatalf("g in the panel: %+v", *got)
 	}
 	m = pressRP(t, m, "j", "j", "k") // .. goes up, back on src
 	if m.tree.rel != "" || m.tree.items[m.tree.sel].Name != "src" {
