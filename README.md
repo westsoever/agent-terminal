@@ -18,7 +18,7 @@ Claude Code stays the engine. Agent Terminal reads the session records and the s
 ## Quick install
 
 ```sh
-git clone https://github.com/westsoever/ching.git ~/agent-terminal   # the repo is private: you need access, and `gh auth login` (or an SSH key) first
+git clone https://github.com/westsoever/agent-terminal.git ~/agent-terminal   # the repo is private: you need access, and `gh auth login` (or an SSH key) first
 cd ~/agent-terminal
 ./install.sh              # hooks, links and the launchd watcher; shows the diff and asks before changing anything
 terminal/build.sh         # builds the terminal into ~/.local/bin/agterm (needs Go)

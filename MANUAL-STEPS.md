@@ -228,6 +228,6 @@ Nothing here is needed to keep today's install running: every old name still wor
 3. `mv ~/bbq/kaching ~/bbq/agent-terminal`, then `ln -s agent-terminal ~/bbq/kaching` so old paths still resolve, then `git -C ~/bbq/agent-terminal worktree repair` (and `git worktree repair <path>` for any worktree outside `.claude/worktrees`).
 4. `cd ~/bbq/agent-terminal && ./install.sh --yes` once more: it points the three links at the new folder. Then `./install.sh --install-menubar --yes` so the dot's job gets the new path.
 5. Claude Code keeps its per-folder history in `~/.claude/projects/-Users-clyde-bbq-kaching`; sessions started in the new folder get a new project folder. Nothing to do unless you want `claude --resume` to list the old sessions there (copy or link the folder to `-Users-clyde-bbq-agent-terminal`).
-6. In the README "Quick install", the clone URL names `westsoever/ching` until step 1; change it to `westsoever/agent-terminal` afterwards (GitHub's redirect keeps the old one working).
+6. The README "Quick install" clones `westsoever/agent-terminal` (changed after the repo was renamed).
 
 **What stays under the old name:** `~/.agent/` and its contents, the D35 markers in STATE.md files (`ching:checkpoint`, `ching:snapshot`), `~/.agent/defaults/ching.env`, and history in this repo (DECISIONS, checkpoints, dated specs and plans).
