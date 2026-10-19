@@ -28,7 +28,12 @@ type ocProc struct {
 // opencodeProcs: the running opencode TUIs. `opencode serve` (the background server) and `opencode run`
 // (a one-shot call) have no screen to type into and are left out.
 func opencodeProcs() []ocProc {
-	out, _ := exec.Command("ps", "-A", "-o", "pid=,tty=,command=").Output()
+	// pgrep, then ps on its pids only: this runs on every tick, and `ps -A` alone takes 50 ms.
+	found, err := exec.Command("pgrep", "-x", "opencode").Output()
+	if err != nil {
+		return nil
+	}
+	out, _ := exec.Command("ps", "-o", "pid=,tty=,command=", "-p", strings.Join(strings.Fields(string(found)), ",")).Output()
 	var procs []ocProc
 	var pids []string
 	for _, l := range strings.Split(string(out), "\n") {

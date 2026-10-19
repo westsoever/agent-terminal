@@ -81,6 +81,7 @@ type model struct {
 	remoteAt   time.Time           // when they were last asked for
 	prOpen     bool                // the PR view's side panel is open (k)
 	prDet      map[string]PRDetail // pull request url -> its side panel
+	prLoading  map[string]bool     // pull request urls whose side panel is being read: held arrow keys start no second gh
 	prScroll   *chatScroll         // how far the PR side panel is scrolled back
 	rcScroll   *chatScroll         // how far the RC view's recap panel is scrolled back
 	badgeAt    time.Time           // when the proposals and Paperclip were last read for the tab bar
@@ -152,7 +153,7 @@ func newModel() model {
 	cfg, ct, err := loadConfig()
 	bgMode = cfg.Bg
 	applyTheme(cfg.Theme)
-	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, pcForms: &pcFormSet{}, prDet: map[string]PRDetail{}, prScroll: &chatScroll{}, rcScroll: &chatScroll{}, askProg: map[string]*askProg{}, bgScr: map[string]Prompt{}}
+	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, pcForms: &pcFormSet{}, prDet: map[string]PRDetail{}, prLoading: map[string]bool{}, prScroll: &chatScroll{}, rcScroll: &chatScroll{}, askProg: map[string]*askProg{}, bgScr: map[string]Prompt{}}
 	m.ed.drafts = loadDrafts()
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
@@ -180,6 +181,7 @@ func (m *model) setErr(t string)    { m.status, m.statusErr = t, true }
 
 func (m *model) refresh() {
 	m.agents = loadAgents(m.ttys, m.groups)
+	m.forgetGone()
 	m.usage = loadUsage()
 	m.applyPrompts()
 	m.noteFiles()
@@ -219,6 +221,28 @@ func (m *model) refresh() {
 		m.selSID = m.agents[0].SID
 	}
 	m.writeState()
+}
+
+// forgetGone drops what the per-agent caches hold for agents that are gone, or an agterm left open for days keeps
+// every conversation it ever showed.
+func (m *model) forgetGone() {
+	live := map[string]bool{}
+	for _, a := range m.agents {
+		live[a.SID], live[a.Transcript] = true, true
+	}
+	prune(m.lastCache, live)
+	prune(m.prompts, live)
+	prune(m.asked, live)
+	prune(m.bgScr, live)
+	prune(m.askProg, live)
+}
+
+func prune[V any](m map[string]V, keep map[string]bool) {
+	for k := range m {
+		if !keep[k] {
+			delete(m, k)
+		}
+	}
 }
 
 // selfTTY is the terminal's own tab (so a hotkey can bring it forward), ” when not in one.
@@ -539,7 +563,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if c := m.readPrompt(0); c != nil {
 			cmds = append(cmds, c)
 		}
-		if time.Time(msg).Second()%10 < 2 {
+		if m.ticks%5 == 0 { // every 10 s; a clock-second test skipped some, as each tick comes a little after 2 s
 			cmds = append(cmds, loadTTYs)
 		}
 		every := pullsEvery // the PR tab's count, read slower than what the open view shows
@@ -585,9 +609,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyPrompts()
 		return m, nil
 	case pcMsg:
+		sel := ""
+		if it := m.pcSelected(); it != nil {
+			sel = it.ID
+		}
 		m.pc = PCState(msg)
-		if m.listSel >= len(m.pc.Items) && m.view == vPaperclip {
-			m.listSel = max(0, len(m.pc.Items)-1)
+		if m.view == vPaperclip { // the selection stays on its issue when one that needs you comes in above it
+			m.listSel = min(m.listSel, max(0, len(m.pc.Items)-1))
+			for i, it := range m.pc.Items {
+				if it.ID == sel {
+					m.listSel = i
+				}
+			}
 		}
 		return m, m.pcDetailCmd(5 * time.Second)
 	case pcDetailMsg:
@@ -595,6 +628,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case prDetailMsg:
 		m.prDet[msg.URL] = PRDetail(msg)
+		delete(m.prLoading, msg.URL)
 		return m, nil
 	case prMergedMsg:
 		delete(m.prDet, msg.url)
@@ -1203,10 +1237,11 @@ func (m *model) prDetailCmd(stale time.Duration) tea.Cmd {
 	if pr == nil || !m.prOpen {
 		return nil
 	}
-	if d, ok := m.prDet[pr.URL]; ok && time.Since(d.At) < stale {
+	if d, ok := m.prDet[pr.URL]; (ok && time.Since(d.At) < stale) || m.prLoading[pr.URL] {
 		return nil
 	}
 	url := pr.URL
+	m.prLoading[url] = true
 	return func() tea.Msg { return prDetailMsg(loadPRDetail(url)) }
 }
 
