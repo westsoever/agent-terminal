@@ -6,10 +6,8 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -40,7 +38,7 @@ const (
 
 // ghPulls runs the search; a variable so tests can hand back their own JSON.
 var ghPulls = func(ctx context.Context) ([]byte, error) {
-	return exec.CommandContext(ctx, "gh", "search", "prs", "--state", "open", "--involves", "@me",
+	return cmdCtx(ctx, "gh", "search", "prs", "--state", "open", "--involves", "@me",
 		"--sort", "updated", "--order", "desc", "--json", "number,title,repository,url,author,isDraft,updatedAt",
 		"--limit", strconv.Itoa(pullsMax)).Output()
 }
@@ -51,11 +49,7 @@ func loadPulls() PullsState {
 	defer cancel()
 	out, err := ghPulls(ctx)
 	if err != nil {
-		msg := err.Error()
-		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
-			msg = string(ee.Stderr)
-		}
-		return PullsState{Err: "gh search prs: " + strings.Join(strings.Fields(msg), " ")} // one line: it shows in a row
+		return PullsState{Err: ghErr("gh search prs", err)} // one line: it shows in a row
 	}
 	var raw []struct {
 		Number     int    `json:"number"`

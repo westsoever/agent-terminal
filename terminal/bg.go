@@ -255,14 +255,7 @@ func bgStop(job string) string {
 
 // bgAttachWindow opens a new Terminal window attached to the session, for the owner to type in it.
 func bgAttachWindow(job string) string {
-	script := `tell application "Terminal"
-	activate
-	do script "` + claudeBin() + ` attach ` + job + `"
-end tell`
-	if out, err := exec.Command("osascript", "-e", script).CombinedOutput(); err != nil {
-		return "error: " + firstLine(strings.TrimSpace(string(out)))
-	}
-	return "ok"
+	return termWindow(shQuote(claudeBin()) + " attach " + shQuote(job))
 }
 
 func firstLine(t string) string {

@@ -6,7 +6,6 @@ package main
 
 import (
 	"io"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -41,24 +40,26 @@ func logSize(raw []byte) (w, h int) {
 	return
 }
 
+// logTail bounds the replay: the screen is the last redraws, and a bounded write needs no timeout goroutine.
+const logTail = 256 << 10
+
 // screenFromLog replays terminal output into an emulator and returns the screen's lines.
 func screenFromLog(raw []byte) []string {
 	w, h := logSize(raw)
+	if len(raw) > logTail {
+		raw = raw[len(raw)-logTail:]
+	}
 	em := vt.NewEmulator(w, h)
 	go io.Copy(io.Discard, em) // the emulator answers the queries in the stream; nobody needs the answers
-	defer em.Close()
-	done := make(chan struct{})
-	go func() { _, _ = em.Write(raw); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-	}
+	_, _ = em.Write(raw)
+	// end the reader by closing the answer pipe, not em.Close(): Close writes a flag the reader reads unlocked
+	_ = em.InputPipe().(io.Closer).Close()
 	return strings.Split(em.String(), "\n")
 }
 
 // bgScreen is the screen of the background agent job as text, "" when it can't be read.
 func bgScreen(job string) string {
-	out, err := exec.Command(claudeBin(), "logs", job).Output()
+	out, err := runFor(5*time.Second, false, claudeBin(), "logs", job)
 	if err != nil && len(out) == 0 {
 		return ""
 	}

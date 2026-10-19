@@ -378,17 +378,24 @@ func (m *model) findResume() tea.Cmd {
 var osascriptRun = func(script string) ([]byte, error) { return exec.Command("osascript", "-e", script).CombinedOutput() }
 
 // resumeWindow opens a new Terminal window running `cd <cwd> && claude --resume <id>`. "ok" or "error: ...".
-func resumeWindow(cwd, id string) string {
-	if out, err := osascriptRun(resumeScript(claudeBin(), cwd, id)); err != nil {
+func resumeWindow(cwd, id string) string { return termWindow(resumeCmd(claudeBin(), cwd, id)) }
+
+// resumeCmd is the shell line for resumeWindow, every word in single quotes.
+func resumeCmd(bin, cwd, id string) string {
+	return "cd " + shQuote(cwd) + " && " + shQuote(bin) + " --resume " + shQuote(id)
+}
+
+// termWindow opens a new Terminal window running the shell line cmd (its words shQuoted). "ok" or "error: ...".
+func termWindow(cmd string) string {
+	if out, err := osascriptRun(termScript(cmd)); err != nil {
 		return "error: " + firstLine(strings.TrimSpace(string(out)))
 	}
 	return "ok"
 }
 
-// resumeScript is the AppleScript for resumeWindow: the shell command has every word in single quotes, and the
-// AppleScript string around it has its backslashes and double quotes escaped.
-func resumeScript(bin, cwd, id string) string {
-	cmd := "cd " + shQuote(cwd) + " && " + shQuote(bin) + " --resume " + shQuote(id)
+// termScript is the AppleScript for termWindow: the AppleScript string around cmd has its backslashes and double
+// quotes escaped.
+func termScript(cmd string) string {
 	return "tell application \"Terminal\"\n\tactivate\n\tdo script " + asString(cmd) + "\nend tell"
 }
 

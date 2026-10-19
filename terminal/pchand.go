@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -203,38 +202,28 @@ func writeBriefing(it PCItem, text string) (string, error) {
 // termStartFn is termStart; tests replace it.
 var termStartFn = termStart
 
-func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
-
 // termCommand is the shell line that starts the session: in dir, with the name and options, then the prompt.
 func termCommand(o nwOpts, dir, prompt string) string {
 	args := ""
 	if o.Name != "" {
-		args += " -n " + shq(o.Name)
+		args += " -n " + shQuote(o.Name)
 	}
 	if o.Model != "" {
-		args += " --model " + shq(o.Model)
+		args += " --model " + shQuote(o.Model)
 	}
 	if o.Effort != "" {
-		args += " --effort " + shq(o.Effort)
+		args += " --effort " + shQuote(o.Effort)
 	}
 	if o.Perm != "" {
-		args += " --permission-mode " + shq(o.Perm)
+		args += " --permission-mode " + shQuote(o.Perm)
 	}
-	return "cd " + shq(dir) + " && " + shq(claudeBin()) + args + " -- " + shq(prompt)
+	return "cd " + shQuote(dir) + " && " + shQuote(claudeBin()) + args + " -- " + shQuote(prompt)
 }
-
-// termScript opens a Terminal window and runs the command given as the script's argument (no quoting inside AppleScript).
-const termScript = `on run argv
-	tell application "Terminal"
-		activate
-		do script (item 1 of argv)
-	end tell
-end run`
 
 // termStart opens a new Terminal window with an interactive session in dir that starts with prompt.
 func termStart(o nwOpts, dir, prompt string) error {
-	if out, err := exec.Command("osascript", "-e", termScript, termCommand(o, dir, prompt)).CombinedOutput(); err != nil {
-		return errors.New(firstLine(strings.TrimSpace(string(out))))
+	if r := termWindow(termCommand(o, dir, prompt)); r != "ok" {
+		return errors.New(strings.TrimPrefix(r, "error: "))
 	}
 	return nil
 }
