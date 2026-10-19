@@ -170,3 +170,54 @@ func TestNWBoxShowsFolder(t *testing.T) {
 		t.Errorf("no home warning:\n%s", v)
 	}
 }
+
+// A repo with no commit is still a repo, a detached HEAD says so, and a submodule or a bare repo's worktree is
+// not shown as a worktree of a folder that is no checkout.
+func TestNWFolderInfoEdges(t *testing.T) {
+	home := realPath(t, t.TempDir())
+	t.Setenv("HOME", home)
+	gitIn := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "protocol.file.allow=always"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	fresh := filepath.Join(home, "fresh")
+	os.MkdirAll(fresh, 0o755)
+	gitIn(fresh, "init", "-q", "-b", "main")
+	if f := (nwFolder{Dir: fresh}).info(); !f.Repo || f.Branch != "main" || f.note() != "" {
+		t.Errorf("a repo with no commit = %+v (note %q)", f, f.note())
+	}
+
+	repo := filepath.Join(home, "repo")
+	nwRepo(t, repo, "")
+	gitIn(repo, "checkout", "-q", "--detach")
+	if f := (nwFolder{Dir: repo}).info(); !strings.HasPrefix(f.Branch, "detached at ") {
+		t.Errorf("detached HEAD branch = %q", f.Branch)
+	}
+	gitIn(repo, "checkout", "-q", "main")
+
+	super := filepath.Join(home, "super")
+	nwRepo(t, super, "")
+	gitIn(super, "submodule", "add", "-q", repo, "sub")
+	sub := filepath.Join(super, "sub")
+	if f := (nwFolder{Dir: sub}).info(); !f.Repo || f.Main != "" || f.note() != "" {
+		t.Errorf("a submodule = %+v (note %q)", f, f.note())
+	}
+	if got := repoRoot(sub); got != sub {
+		t.Errorf("repoRoot(submodule) = %q, want itself", got)
+	}
+
+	bare := filepath.Join(home, "bare.git")
+	gitIn(home, "clone", "-q", "--bare", repo, bare)
+	bwt := filepath.Join(home, "bare-wt")
+	gitIn(bare, "worktree", "add", "-q", bwt, "main")
+	if f := (nwFolder{Dir: bwt}).info(); f.Main != bare {
+		t.Errorf("a worktree of a bare repo: Main = %q, want %q", f.Main, bare)
+	}
+	if got := repoRoot(bwt); got != bwt {
+		t.Errorf("repoRoot(bare worktree) = %q, want itself", got)
+	}
+}

@@ -33,35 +33,52 @@ func (f nwFolder) note() string {
 	return ""
 }
 
-// info adds the repo facts of the folder: one `git rev-parse`, which also works in a linked worktree.
-func (f nwFolder) info() nwFolder {
-	cmd := exec.Command("git", "-C", f.Dir, "rev-parse", "--show-toplevel", "--git-common-dir", "--abbrev-ref", "HEAD")
+// git runs git in dir and returns its output without the trailing newline.
+func git(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
 	out, err := cmd.Output()
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if err != nil || len(lines) < 3 {
+	return strings.TrimSpace(string(out)), err
+}
+
+// info adds the repo facts of the folder. The repo test needs no commit, so it is its own call: a new `git init`
+// has no HEAD to read.
+func (f nwFolder) info() nwFolder {
+	out, err := git(f.Dir, "rev-parse", "--git-dir", "--git-common-dir")
+	lines := strings.Split(out, "\n")
+	if err != nil || len(lines) < 2 {
 		return f
 	}
-	f.Repo, f.Branch = true, lines[2]
-	common := lines[1]
-	if !filepath.IsAbs(common) {
-		common = filepath.Join(f.Dir, common)
+	f.Repo = true
+	if b, err := git(f.Dir, "symbolic-ref", "--short", "-q", "HEAD"); err == nil {
+		f.Branch = b // on an unborn branch too
+	} else if h, err := git(f.Dir, "rev-parse", "--short", "HEAD"); err == nil {
+		f.Branch = "detached at " + h
 	}
-	real := func(p string) string { // the same folder can be spelled with or without a symlink (/var, /private/var)
+	abs := func(p string) string { // git prints these relative to Dir, and the same folder can be spelled with or without a symlink (/var, /private/var)
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(f.Dir, p)
+		}
 		if r, err := filepath.EvalSymlinks(p); err == nil {
 			return r
 		}
 		return filepath.Clean(p)
 	}
-	if common, top := real(common), real(lines[0]); common != filepath.Join(top, ".git") {
-		f.Main = filepath.Dir(common)
+	// A linked worktree is the one case where the git dir is not the common dir. A submodule or a repo with a
+	// separate git dir has the two the same, so it is not mistaken for a worktree.
+	if gitDir, common := abs(lines[0]), abs(lines[1]); gitDir != common {
+		f.Main = filepath.Dir(common) // the repo's checkout; a bare repo (x/repo.git) has none, so its own folder
+		if filepath.Base(common) != ".git" {
+			f.Main = common
+		}
 	}
 	return f
 }
 
-// repoRoot: the main checkout of the repo that dir belongs to (dir itself when it is not in a linked worktree).
+// repoRoot: the main checkout of the repo that dir belongs to (dir itself when it is not in a linked worktree,
+// or when the repo is bare and has no checkout).
 func repoRoot(dir string) string {
-	if f := (nwFolder{Dir: dir}).info(); f.Main != "" && dirExists(f.Main) {
+	if f := (nwFolder{Dir: dir}).info(); f.Main != "" && dirExists(filepath.Join(f.Main, ".git")) {
 		return f.Main
 	}
 	return dir
