@@ -34,6 +34,7 @@ type Agent struct {
 	Bg                     bool   // a background session (claude --bg): no window, kaching types into it by attaching
 	Job                    string // a background session's short id (claude attach <job>)
 	Closed                 bool   // its turn ended as done and nothing is left: no next action, no blocker, no NEXT.md
+	CLI                    string // the CLI when it is not Claude Code ("opencode", see opencode.go), else ''
 }
 
 // canSend: kaching can type into it: a Terminal tab, or a background session.
@@ -165,6 +166,12 @@ func loadAgents(tabs map[string]tabPos, groups [][]string) []Agent {
 		pids = append(pids, strconv.Itoa(cs.PID))
 	}
 	ttys := pidTTYs(pids)
+	for _, a := range loadOpencode() {
+		if !dismissed.hides(a) {
+			out = append(out, a)
+			ttys[a.PID] = a.TTY
+		}
+	}
 	for i := range out {
 		out[i].TTY = ttys[out[i].PID]
 		pos, ok := tabs[out[i].TTY]

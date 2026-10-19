@@ -318,6 +318,14 @@ func (m *model) selIndex() int {
 }
 
 func (m *model) last(a *Agent) Last {
+	if a != nil && a.CLI == "opencode" { // its conversation is in opencode's database, not a transcript file
+		if c, ok := m.lastCache[a.SID]; ok && c.mtime.Equal(a.Since) {
+			return c.last
+		}
+		l := readOpencodeLast(a.SID)
+		m.lastCache[a.SID] = cachedLast{0, a.Since, l}
+		return l
+	}
 	if a == nil || a.Transcript == "" {
 		return Last{}
 	}
@@ -884,6 +892,9 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		sid, tty, name := a.SID, a.TTY, a.Name
+		if a.CLI != "" { // the monitor queue only places Claude Code windows
+			return m, func() tea.Msg { return sentMsg{"", name, "bring here", raiseTab(tty)} }
+		}
 		return m, func() tea.Msg { return sentMsg{"", name, "bring here", bringHere(sid, tty)} }
 	case ks == K.Goto && m.sel() != nil && m.sel().Bg: // a background session has no window: open one attached to it
 		job, name := m.sel().Job, m.sel().Name
@@ -963,7 +974,8 @@ func (m *model) screenWanted(a Agent) bool {
 		return asked || a.State == "input" || a.State == "blocked" || (a.SID == m.selSID && m.ticks%3 == 0)
 	}
 	busy := a.Busy && m.ticks%2 == 0
-	return a.InTerminal && (a.SID == m.selSID || a.State == "input" || a.State == "blocked" || asked || busy)
+	return a.InTerminal && a.CLI == "" && // the menus it reads are Claude Code's
+		(a.SID == m.selSID || a.State == "input" || a.State == "blocked" || asked || busy)
 }
 
 // A busy agent that shows a menu has waited since the menu first showed, not since its turn began.
