@@ -31,6 +31,15 @@ name_for() { # cwd root -> short display name: repo/worktree dir, "~" for home, 
   else basename "$1"; fi
 }
 
+# sid_dir RAW: set SID_NAME to the folder under sessions/ for session id RAW. An id that could leave it ("..", "/",
+# a leading dot, odd bytes, very long) becomes sid-<hash of the raw id>, stable per id and distinct from other ids.
+# (A variable, not output: dash.sh calls it per live session.)
+sid_dir() {
+  SID_NAME=$1
+  case "$1" in .*|*..*|*[!A-Za-z0-9._-]*) SID_NAME="sid-$(printf '%s' "$1" | shasum | cut -c1-16)" ;; esac
+  [ "${#SID_NAME}" -le 128 ] || SID_NAME="sid-$(printf '%s' "$1" | shasum | cut -c1-16)"
+}
+
 # hook_init: read hook JSON from stdin (unless a tty) and set INPUT CWD SID ROOT NAME WORK_DIR.
 hook_init() {
   INPUT=""
@@ -40,10 +49,7 @@ hook_init() {
   if [ -d "$CWD" ]; then CWD=$(cd "$CWD" && pwd -P); fi
   SID=$(jget session_id)
   [ -n "$SID" ] || SID="nosession-$(printf '%s' "$CWD" | shasum | cut -c1-8)"
-  # SID names a directory under sessions/: one that could leave it ("..", "/", a leading dot, odd bytes,
-  # very long) becomes sid-<hash of the raw id>, stable per id and distinct from other ids.
-  case "$SID" in .*|*..*|*[!A-Za-z0-9._-]*) SID="sid-$(printf '%s' "$SID" | shasum | cut -c1-16)" ;; esac
-  [ "${#SID}" -le 128 ] || SID="sid-$(printf '%s' "$SID" | shasum | cut -c1-16)"
+  sid_dir "$SID"; SID=$SID_NAME
   ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null || true)
   NAME=$(name_for "$CWD" "$ROOT")
   WORK_DIR=${ROOT:-$CWD}
