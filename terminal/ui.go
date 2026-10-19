@@ -550,12 +550,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.prDetailCmd(0)
 		}
 		m.setStatus("✓ merged " + msg.ref + " (" + msg.how + ")")
-		if i := m.pulls.index(msg.url); i >= 0 { // gone at once; GitHub's search can list it a little longer
-			m.pulls.Items = append(m.pulls.Items[:i:i], m.pulls.Items[i+1:]...)
-			if m.listSel >= len(m.pulls.Items) {
-				m.listSel = max(0, len(m.pulls.Items)-1)
-			}
+		m.prDrop(msg.url)
+		return m, m.prDetailCmd(time.Minute)
+	case prClosedMsg:
+		delete(m.prDet, msg.url)
+		if msg.err != "" {
+			m.setErr("not closed: " + msg.ref + ": " + msg.err)
+			return m, m.prDetailCmd(0)
 		}
+		m.setStatus("✓ closed " + msg.ref)
+		m.prDrop(msg.url)
 		return m, m.prDetailCmd(time.Minute)
 	case pcActedMsg:
 		if msg.err != "" {
@@ -1120,6 +1124,33 @@ func (m *model) prStart(pr *PullReq, comment string) tea.Cmd {
 	}
 }
 
+// prDrop takes a merged or closed pull request off the list at once; GitHub's search can list it a little longer.
+func (m *model) prDrop(url string) {
+	if i := m.pulls.index(url); i >= 0 {
+		m.pulls.Items = append(m.pulls.Items[:i:i], m.pulls.Items[i+1:]...)
+		if m.listSel >= len(m.pulls.Items) {
+			m.listSel = max(0, len(m.pulls.Items)-1)
+		}
+	}
+}
+
+// prCloseNow closes pr right away with gh pr close, no agent (D56). Unlike a merge it needs no loaded panel and
+// has no checks to wait for: a draft, a conflicting or a failing pull request is the usual thing to close.
+func (m *model) prCloseNow(pr *PullReq) tea.Cmd {
+	if pr == nil {
+		return nil
+	}
+	p := *pr
+	ref := fmt.Sprintf("%s#%d", p.Repo, p.Number)
+	m.setStatus("closing " + ref + "…")
+	return func() tea.Msg {
+		if err := prClose(p); err != nil {
+			return prClosedMsg{p.URL, ref, err.Error()}
+		}
+		return prClosedMsg{p.URL, ref, ""}
+	}
+}
+
 // prMergeNow merges pr right away with gh pr merge, no agent (D55); it refuses, and says why, when its panel shows
 // conflicts or checks that failed or still run. A panel that has not loaded is read again.
 func (m *model) prMergeNow(pr *PullReq) tea.Cmd {
@@ -1233,8 +1264,11 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 		}
 		if len(ks) == 1 && ks[0] >= '1' && ks[0] <= '9' { // the panel's quick comments; never an agent's answer here
 			if i := int(ks[0] - '1'); m.prOpen && i < len(prQuick) {
-				if prQuick[i].text == "" {
+				switch prQuick[i].act {
+				case "merge":
 					return true, m.prMergeNow(m.prSelected())
+				case "close":
+					return true, m.prCloseNow(m.prSelected())
 				}
 				return true, m.prStart(m.prSelected(), prQuick[i].text)
 			}

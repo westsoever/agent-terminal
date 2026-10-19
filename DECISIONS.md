@@ -2,6 +2,12 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D56 (2026-10-19): `3` in PR closes at once, with no agent
+
+**Decision (user):** "Currently kaching doesn't have the "close" function ... Implement the function in the kaching app so with 3 or similar, I can close a PR".
+
+**Built:** `3` in the PR panel runs `gh pr close <url>` from kaching itself, outside any local clone, like `2` (D55). No confirm step, as for merge: the owner wants one key, and `gh pr reopen` or the GitHub button undoes it. Unlike merge, it does not wait for the panel to load and does not refuse drafts, conflicts or failed checks (those are the usual reasons to close). A gh refusal shows in the status line as `not closed: <ref>: gh pr close: …`. A closed pull request leaves the list at once. `prQuick` got an `act` field (`merge`, `close`, or empty for an agent comment) instead of reading an empty text as "merge".
+
 ## D55 (2026-10-18): `2` in PR merges at once, with no agent
 
 **Decision (user):** "Currently, if I click K and then 2 to merge it, an agent gets sent off to merge it. I would want this to become just a terminal action where I merge it right away, without an agent merging it."

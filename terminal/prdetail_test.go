@@ -247,3 +247,52 @@ func TestPRMergeNow(t *testing.T) {
 		t.Fatalf("squash/refused: calls %q status %q", calls, m.status)
 	}
 }
+
+// 3 closes at once with gh pr close, no agent and no loaded panel; the closed pull request leaves the list, and
+// gh's own refusal shows in the status line.
+func TestPRCloseNow(t *testing.T) {
+	old := ghMergeRun
+	defer func() { ghMergeRun = old }()
+	var calls []string
+	var fail bool
+	ghMergeRun = func(_ context.Context, args ...string) ([]byte, error) {
+		calls = append(calls, strings.Join(args, " "))
+		if fail {
+			return []byte("GraphQL: Pull request is already closed\n"), &exec.ExitError{}
+		}
+		return nil, nil
+	}
+	m := newModel()
+	m.w, m.h, m.view, m.prOpen = 160, 40, vPulls, true
+	pr := PullReq{Repo: "o/a", Number: 4, Title: "Add x", URL: "https://github.com/o/a/pull/4", Updated: time.Now(), Draft: true}
+	other := PullReq{Repo: "o/b", Number: 1, Title: "Other", URL: "https://github.com/o/b/pull/1", Updated: time.Now()}
+	m.pulls = PullsState{Items: []PullReq{pr, other}, At: time.Now()}
+	press := func() tea.Cmd {
+		mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+		m = mm.(model)
+		return cmd
+	}
+	if v := ansiRe.ReplaceAllString(m.View(), ""); !strings.Contains(v, "3 close it · now, with gh pr close (no agent)") {
+		t.Fatalf("panel:\n%s", v)
+	}
+	cmd := press() // a draft whose panel has not loaded: close does not need either
+	if !strings.Contains(m.status, "closing o/a#4") || cmd == nil {
+		t.Fatalf("status %q", m.status)
+	}
+	msg := cmd()
+	if want := "pr close " + pr.URL; len(calls) != 1 || calls[0] != want {
+		t.Fatalf("calls = %q, want %q", calls, want)
+	}
+	mm, _ := m.Update(msg)
+	m = mm.(model)
+	if !strings.Contains(m.status, "✓ closed o/a#4") || len(m.pulls.Items) != 1 || m.pulls.Items[0].URL != other.URL {
+		t.Fatalf("after close: status %q items %+v", m.status, m.pulls.Items)
+	}
+
+	fail, calls = true, nil
+	mm, _ = m.Update(press()())
+	m = mm.(model)
+	if !strings.Contains(m.status, "not closed: o/b#1: gh pr close: GraphQL: Pull request is already closed") || len(m.pulls.Items) != 1 {
+		t.Fatalf("refused: status %q items %+v", m.status, m.pulls.Items)
+	}
+}
