@@ -2,6 +2,12 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D59 (2026-10-19): REMOTE leaves out the sessions that run on this Mac
+
+**Decision (user):** every new Claude terminal gets a Remote Control connection, so each one showed twice, as an agent and under REMOTE: "I would like to only see the local sessions", either a check that hides it or no duplicates.
+
+**Built:** Claude Code writes `bridgeSessionId` into `~/.claude/sessions/<pid>.json` for a terminal with a Remote Control connection. `remoteLocal` (remote.go) collects those ids from the processes that are still alive (`kill -0`), and `dropLocal` removes them from the REMOTE list. Checked against the live list: all 6 active remote sessions were windows of this Mac, so REMOTE is empty here. A session on another Mac has no pid file here and stays. If a local terminal quits while its connection is still up, it shows under REMOTE until the connection drops, which is correct: there is no window left.
+
 ## D58 (2026-10-19): a REMOTE section below DONE lists the active remote sessions; messages go out through the CLI
 
 **Decision (user):** "add any remote sessions that are running and show them below the DONE in the left sidebar so I can directly interact with them from kaching"; then "it should run with auto-discover and only show active sessions so we don't lose overview"; then "Priority are the connected sessions". The owner approved one test message to `cos-worker`.

@@ -570,14 +570,17 @@ func TestLeaderWaitsForSecondKey(t *testing.T) {
 	}
 }
 
-// The help page is longer than the screen: it lists what is new first and scrolls, so the last line can be reached.
+// The help page is longer than the screen: it scrolls, so the last line can be reached.
 func TestHelpScrolls(t *testing.T) {
 	cfg, _, _ := loadConfig()
 	m := model{cfg: cfg, w: 120, h: 40, view: vHelp}
 	text := func() string { return escRe.ReplaceAllString(strings.Join(m.helpView(m.h-headerH-footerH), "\n"), "") }
 
-	if v := text(); !strings.Contains(v, "New on 2026-10-18") || !strings.Contains(v, "space space") || !strings.Contains(v, "more below") {
-		t.Fatalf("the top of the help must show what is new and say that it scrolls:\n%s", v)
+	if v := text(); !strings.Contains(v, "Views") || !strings.Contains(v, "NW folder") || !strings.Contains(v, "more below") {
+		t.Fatalf("the top of the help must show the views and commands and say that it scrolls:\n%s", v)
+	}
+	if all := strings.Join(m.helpLines(), "\n"); !strings.Contains(all, "New on 2026-10-19") || !strings.Contains(all, "space space") {
+		t.Fatalf("the help must list what is new:\n%s", all)
 	}
 	if strings.Contains(text(), "Full manual") {
 		t.Fatal("the end of the help fits at the top: the test screen is too tall")
@@ -639,5 +642,20 @@ func TestRecapPanel(t *testing.T) {
 	m, _ = press(m, "enter")
 	if m.view != vDesk || m.selSID != "a" {
 		t.Fatalf("enter goes to the agent: view %d, sel %q", m.view, m.selSID)
+	}
+}
+
+// A text longer than its line wraps under itself, in the column right of the key, and never back under the key.
+func TestHelpColumns(t *testing.T) {
+	cfg, _, _ := loadConfig()
+	m := model{cfg: cfg, w: 60, h: 40, view: vHelp}
+	body := strings.Join(m.textBody([]string{"IN\tone two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen"}), "\n")
+	for i, l := range strings.Split(body, "\n") {
+		if i > 0 && !strings.HasPrefix(l, "    ") {
+			t.Fatalf("a wrapped line must be indented under the text, line %d: %q", i, l)
+		}
+	}
+	if len(strings.Split(body, "\n")) < 2 {
+		t.Fatal("the test text must wrap")
 	}
 }
