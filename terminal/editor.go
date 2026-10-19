@@ -51,13 +51,13 @@ func newEditor() *editor {
 		Base:        lipgloss.NewStyle(),
 		CursorLine:  lipgloss.NewStyle().Foreground(lipgloss.Color("231")),
 		Text:        lipgloss.NewStyle().Foreground(lipgloss.Color("231")),
-		Prompt:      lipgloss.NewStyle().Foreground(lipgloss.Color("202")),
+		Prompt:      lipgloss.NewStyle().Foreground(accentColor()),
 		Placeholder: cDark,
 		EndOfBuffer: cDark,
 	}
 	ta.FocusedStyle, ta.BlurredStyle = st, st
 	ta.Placeholder = "write your reply"
-	ta.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("202"))
+	ta.Cursor.Style = lipgloss.NewStyle().Foreground(accentColor())
 	km := textarea.DefaultKeyMap
 	km.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"))
 	off := key.NewBinding(key.WithDisabled())
