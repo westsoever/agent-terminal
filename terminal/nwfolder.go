@@ -75,13 +75,26 @@ func (f nwFolder) info() nwFolder {
 	return f
 }
 
-// repoRoot: the main checkout of the repo that dir belongs to (dir itself when it is not in a linked worktree,
-// or when the repo is bare and has no checkout).
+// repoRoot: the folder of the repo that dir belongs to: the main checkout for a linked worktree, the top of the
+// checkout for a folder inside it. dir itself when it is in no repo or the repo is bare and has no checkout.
 func repoRoot(dir string) string {
 	if f := (nwFolder{Dir: dir}).info(); f.Main != "" && dirExists(filepath.Join(f.Main, ".git")) {
 		return f.Main
 	}
+	if top, err := git(dir, "rev-parse", "--show-toplevel"); err == nil && top != "" {
+		return top
+	}
 	return dir
+}
+
+// sameDir: the same folder, however it is spelled (a symlink, /var and /private/var).
+func sameDir(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ra, err1 := filepath.EvalSymlinks(a)
+	rb, err2 := filepath.EvalSymlinks(b)
+	return err1 == nil && err2 == nil && ra == rb
 }
 
 // resolveNW finds the folder for /NW from the words after it. It never falls back to the home folder:
@@ -100,11 +113,13 @@ func (m *model) resolveNW(arg string) (nwFolder, error) {
 	switch {
 	case arg == "" || rel:
 		a := m.sel()
-		if a == nil || !dirExists(a.Cwd) {
-			if rel {
-				return nwFolder{}, errors.New("NW " + arg + ": a relative folder starts at the selected agent's folder, and none is selected")
-			}
+		switch {
+		case a == nil && rel:
+			return nwFolder{}, errors.New("NW " + arg + ": a relative folder starts at the selected agent's folder, and none is selected")
+		case a == nil:
 			return nwFolder{}, errors.New("NW: no agent is selected, so write a folder (NW ~/bbq/soii, NW soii) or select an agent")
+		case !dirExists(a.Cwd):
+			return nwFolder{}, errors.New("NW " + arg + ": the folder of the selected agent " + a.Name + " (" + tildify(a.Cwd) + ") no longer exists, so write a folder")
 		}
 		dir := filepath.Clean(filepath.Join(a.Cwd, arg))
 		if !dirExists(dir) {
@@ -131,7 +146,7 @@ func (m *model) resolveNW(arg string) (nwFolder, error) {
 	var dirs, sources []string
 	add := func(dir, source string) {
 		for i, d := range dirs {
-			if d == dir {
+			if sameDir(d, dir) {
 				sources[i] += ", " + source
 				return
 			}

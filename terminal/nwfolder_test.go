@@ -221,3 +221,32 @@ func TestNWFolderInfoEdges(t *testing.T) {
 		t.Errorf("repoRoot(bare worktree) = %q, want itself", got)
 	}
 }
+
+// An agent in a subfolder of a repo stands for the repo's folder, so NW <name> is not ambiguous with ~/bbq/<repo>;
+// and a selected agent whose folder is gone is said so, not reported as "no agent selected".
+func TestResolveNWSubfolderAndGone(t *testing.T) {
+	home := realPath(t, t.TempDir())
+	t.Setenv("HOME", home)
+	soii := filepath.Join(home, "bbq", "soii")
+	nwRepo(t, soii, "")
+	sub := filepath.Join(soii, "terminal")
+	os.MkdirAll(sub, 0o755)
+	m := newModel()
+	m.agents = []Agent{{SID: "s1", Name: "soii-terminal", Cwd: sub}}
+	m.selSID = "s1"
+
+	if got := repoRoot(sub); got != soii {
+		t.Errorf("repoRoot(subfolder) = %q, want %q", got, soii)
+	}
+	f, err := m.resolveNW("so")
+	if err != nil || f.Dir != soii || !strings.Contains(f.Source, "soii-terminal") {
+		t.Errorf("NW so = %+v, %v", f, err)
+	}
+
+	os.RemoveAll(sub)
+	for _, arg := range []string{"", ".", "./x"} {
+		if _, err := m.resolveNW(arg); err == nil || !strings.Contains(err.Error(), "no longer exists") {
+			t.Errorf("NW %q with a gone folder: err %v", arg, err)
+		}
+	}
+}
