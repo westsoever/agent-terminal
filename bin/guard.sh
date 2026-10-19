@@ -952,8 +952,8 @@ check_misc() { # one segment, tokens in TOKS
           if seg_matches '*supabase.co*' || seg_matches '*supabase.com*' || seg_matches '*pooler*' || seg_matches '$*DATABASE*' || seg_matches '$*SUPABASE*' || seg_matches '$*POSTGRES*'; then
             emit_deny "psql against the shared Supabase database bypasses the migration ledger. Use migrate-gate.sh and db-migrate.ts."
           fi ;;
-        bash|sh|zsh)
-          if [ "$k" -eq 0 ] && ! seg_has_operand; then emit_deny "piping into a shell hides what will run. Save the script to a file and review it."; fi ;;
+        bash|sh|zsh)   # a lone --version or --help prints and exits without reading stdin (bash --version | head -1)
+          if [ "$k" -eq 0 ] && ! seg_has_operand && ! { [ "$NT" -eq 2 ] && [[ "${TOKS[1]}" == --version || "${TOKS[1]}" == --help ]]; }; then emit_deny "piping into a shell hides what will run. Save the script to a file and review it."; fi ;;
       esac
     fi
     case "$b" in
