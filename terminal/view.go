@@ -285,10 +285,81 @@ func (m model) queuePanel(w, h int) []string {
 			}
 		}
 	}
+	// REMOTE: the active sessions on other machines, below DONE; the header stays when there are none
+	head := " REMOTE"
+	if m.remote.Err != "" {
+		head += "   " + trunc(m.remote.Err, max(0, in-10))
+	}
+	body = append(body, "", row(in, s(head, cDark)))
+	for _, r := range m.remote.Items {
+		if r.ID == m.selSID {
+			si = len(body)
+		}
+		body = append(body, m.remoteRow(in, r))
+	}
 	if vis := h - 2; len(body) > vis && si >= vis { // keep the selected row visible
 		body = body[si-vis+1:]
 	}
 	return box(w, h, []seg{s("AGENTS", cGrey)}, cDark, body)
+}
+
+// remoteRow: one REMOTE session, laid out like an agent's row; ◇ marks it as not in a window of this Mac.
+func (m model) remoteRow(in int, r RemoteSession) string {
+	stateW, ageW := 8, 4
+	nameW := in - 3 - stateW - ageW - 3
+	name := trunc(r.Title, nameW)
+	label := r.Label()
+	st, ns := cDark, cGrey
+	if r.needsYou() {
+		st, ns = cOrange, cWhite
+	}
+	if r.ID == m.selSID {
+		txt := fmt.Sprintf(" > %-*s %-*s %*s ", nameW, name, stateW, label, ageW, age(r.Updated))
+		return row(in, s(padTo(txt, in), cSel))
+	}
+	return row(in, s(" ◇ ", cPlain), s(padTo(name, nameW), ns), s(" "+padTo(label, stateW), st), s(" "+fmt.Sprintf("%*s", ageW, age(r.Updated)), cDark))
+}
+
+// remotePanel: the selected REMOTE session. Its messages cannot be read from here (the account's login is not a
+// trusted device for them), so the panel shows its state and what it last said it did; enter reads it on claude.ai.
+func (m model) remotePanel(r RemoteSession, w, h int) []string {
+	in := w - 4
+	title := []seg{s(r.Title, cWhite), s(" · remote", cGrey)}
+	if r.Model != "" {
+		title = append(title, s(" · "+r.Model, cGrey))
+	}
+	if r.CtxPct != "" {
+		title = append(title, s(" · ctx "+r.CtxPct, cGrey))
+	}
+	var body []string
+	add := func(rs ...string) {
+		for _, x := range rs {
+			body = append(body, " "+x+" ")
+		}
+	}
+	st := cGrey
+	if r.needsYou() {
+		st = cOrange
+	}
+	add(row(in, s(r.Label(), st), s(" · "+age(r.Updated)+" ago", cDark)))
+	if r.Summary != "" {
+		add(row(in), row(in, s("LAST THING IT SAID IT DID", cDark)))
+		for _, l := range wrap(r.Summary, in) {
+			add(row(in, s(l, cText)))
+		}
+	}
+	add(row(in))
+	for _, l := range wrap("It runs on another machine: kaching shows its state and sends it messages, but cannot show its messages. "+
+		m.cfg.Keys.Reply+" writes a message to it · enter opens it on claude.ai/code to read the reply", in) {
+		add(row(in, s(l, cDark)))
+	}
+	if m.mode == mTyping && m.ed.target == r.ID {
+		body = append(body, "")
+		for _, l := range m.ed.lines(in) {
+			body = append(body, " "+l+" ")
+		}
+	}
+	return box(w, h, title, cDark, body)
 }
 
 // sectionOf: the queue section an agent belongs to by itself: 0 INPUT, 1 WAITING, 2 WORKING, 3 IDLE, 4 DONE.
@@ -423,6 +494,9 @@ func (m model) agentPanel(w, h int) []string {
 	in := w - 4 // 2 borders + 1 space margin each side
 	// the box of /NW and /ALL is written below the selected agent, with its own title
 	newAgent := m.mode == mTyping && (strings.HasPrefix(m.ed.target, "nw:") || strings.HasPrefix(m.ed.target, "all:"))
+	if r := m.selRemote(); a == nil && r != nil {
+		return m.remotePanel(*r, w, h)
+	}
 	if a == nil {
 		var body []string
 		if newAgent {
@@ -1220,6 +1294,7 @@ func (m model) helpLines() []string {
 		row2(K.PCAgent+" / "+K.PCTerm+" in PC", "hand the selected issue to a new background agent / Terminal session with your permissions; a box text that starts with @Name goes to a session that already runs"),
 		row2("i in RP", "copy the path of the repo's folder, or of the selected file or folder"),
 		row2("DONE", "an agent that finished with nothing left sits in its own section at the end of the list, below IDLE"),
+		row2("REMOTE", "below DONE: the connected sessions on other machines (Remote Control), active ones only, read every 30 s. "+k(K.Next)+" / "+k(K.Prev)+" walk into it; "+K.Reply+" writes to the selected one (sent with claude -p --cloud), enter opens it on claude.ai/code to read the reply: its messages can't be read here"),
 		"",
 		"## Desk",
 		row2(k(K.Next)+" / "+k(K.Prev), "next / previous agent"),

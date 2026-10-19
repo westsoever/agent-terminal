@@ -2,6 +2,16 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D58 (2026-10-19): a REMOTE section below DONE lists the active remote sessions; messages go out through the CLI
+
+**Decision (user):** "add any remote sessions that are running and show them below the DONE in the left sidebar so I can directly interact with them from kaching"; then "it should run with auto-discover and only show active sessions so we don't lose overview"; then "Priority are the connected sessions". The owner approved one test message to `cos-worker`.
+
+**Findings:** the `claude` CLI has no command that lists them. The list claude.ai/code shows is `GET https://api.anthropic.com/v1/sessions?beta=true` with the owner's own Claude login (keychain item `Claude Code-credentials`), `anthropic-beta: ccr-byoc-2025-07-29` and `x-organization-uuid` from `~/.claude.json`. It is undocumented and may change. These are Remote Control sessions (`environment_kind: bridge`), not cloud containers. Reading or sending through `/v1/sessions/<id>/events` is refused (403 `elevated session requires a trusted device`); that gate is server side and is not worked around. `claude -p "…" --cloud <id>` is the CLI's own way to message a session and worked: "Sent to cloud session", and the session's `updated_at` moved at that moment.
+
+**Built:** `remote.go`. Every 30 s (and after a send) kaching reads the list and keeps the sessions that are connected and not archived, the last updated first. They show under a `REMOTE` header below DONE (`◇` mark; `working`, `reply` when it answered and is unread, `asks`, `idle`; `reply` and `asks` are orange). `j`/`l` walk from the agents into the section on the desk (not the wall). The right side shows model, context used and the last `post_turn_summary`. `k` writes a message, sent with `claude -p … --cloud <id>` run outside any project, 120 s limit, a text that starts with `-` gets a space in front. Enter opens `https://claude.ai/code/<id>` in the default browser to read the reply. A failed read keeps the last list and shows the error in the header line. The token goes to api.anthropic.com only and is never logged or shown.
+
+**Not built, and why:** showing a remote session's messages, and typing from kaching without the CLI. Both need this Mac to be a trusted device for the account, which only the owner can do. A terminal opened with `claude --cloud <id>` was not used: it would not give kaching the session's state.
+
 ## D57 (2026-10-19): links in the text are OSC 8 hyperlinks; the usage bar needs the statusline writer
 
 **Decision (user):** "make links in the chat clickable with cmd+click and then open in the default browser", and "the local app doesn't show the app usage in the bottom corner (it only shows 'claude usage: no statusline reading yet')".

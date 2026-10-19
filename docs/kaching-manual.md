@@ -216,7 +216,7 @@ Links in the text (`http://` and `https://`) are real links. Push `Cmd` and clic
 
 ### 4.2 The agent list
 
-The agent list has five groups. All five headers are always on the screen, also when a group has no agent. An empty `INPUT` shows that no agent needs you.
+The agent list has five groups, and the `REMOTE` part below them. All headers are always on the screen, also when a group has no agent. An empty `INPUT` shows that no agent needs you.
 
 | Group | Agents in the group |
 |---|---|
@@ -227,6 +227,21 @@ The agent list has five groups. All five headers are always on the screen, also 
 | `DONE` | The agent finished its task and nothing is left: its checkpoint has no next action and no blocker, and its `NEXT.md` is empty or missing. The agent that finished last is at the top. |
 
 Each line shows the name of the agent, its state and the time since the last change. The selected agent has an orange line.
+
+Below `DONE` is a sixth part, `REMOTE`. It lists your Claude Code sessions that run on other machines (Remote Control) and are connected to your account now. A session that is archived or not connected is not shown. Each line has a `◇`, the name, the state and the time since the last change. Kaching reads the list from your Claude account every 30 seconds.
+
+| State | Meaning |
+|---|---|
+| `working` | The session does work now. |
+| `reply` | The session answered and you did not look at it yet (orange). |
+| `asks` | The session waits for an answer from you (orange). |
+| `idle` | The session does not do work. |
+
+Push `l` or `j` to go from the agents into `REMOTE`. The right side shows the model, the context used, and what the session last said it did.
+
+- Push `k` to write a message. Kaching sends it with `claude -p "…" --cloud <session id>`. The status line shows `sending…`, then `✓ sent` or the reason it did not go.
+- Push `Enter` to open the session on `claude.ai/code` in your browser. Read the reply there.
+- Kaching cannot show the messages of a remote session. Your account refuses that read on this Mac (`elevated session requires a trusted device`). It shows the state and sends messages only.
 
 Agents in the same Terminal window (its tabs, or macOS window tabs) are one family. The agent in the first tab is the lead. Its sub-sessions show below it with `└`, and the lead shows `+2` for two sub-sessions. A family stays together. It shows in the group of its most urgent agent: when a sub-session waits, the family is in `WAITING`.
 

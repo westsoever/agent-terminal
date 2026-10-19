@@ -77,6 +77,8 @@ type model struct {
 	pcAt       time.Time
 	pulls      PullsState          // the PR view: open GitHub pull requests
 	pullsAt    time.Time           // when they were last asked for
+	remote     RemoteState         // the REMOTE section: active sessions on other machines (D58)
+	remoteAt   time.Time           // when they were last asked for
 	prOpen     bool                // the PR view's side panel is open (k)
 	prDet      map[string]PRDetail // pull request url -> its side panel
 	prScroll   *chatScroll         // how far the PR side panel is scrolled back
@@ -201,7 +203,7 @@ func (m *model) refresh() {
 			}
 		}
 	}
-	if m.sel() == nil && len(m.agents) > 0 {
+	if m.sel() == nil && m.selRemote() == nil && len(m.agents) > 0 {
 		m.selSID = m.agents[0].SID
 	}
 	m.writeState()
@@ -285,6 +287,17 @@ func (m *model) sel() *Agent {
 	return nil
 }
 
+// selRemote: the selected REMOTE session (selSID holds its id), nil when an agent or nothing is selected.
+func (m *model) selRemote() *RemoteSession {
+	if i := m.remote.index(m.selSID); i >= 0 {
+		return &m.remote.Items[i]
+	}
+	return nil
+}
+
+// isRemoteID: whether id is a remote session's (they never clash with an agent's uuid).
+func (m *model) isRemoteID(id string) bool { return strings.HasPrefix(id, "session_") }
+
 func (m *model) selIndex() int {
 	for i := range m.agents {
 		if m.agents[i].SID == m.selSID {
@@ -367,18 +380,34 @@ func (m *model) scrollChat(ks string) bool {
 	return true
 }
 
+// move selects the next or previous row of the desk: the agents, then the REMOTE sessions below them.
 func (m *model) move(d int) {
-	if len(m.agents) == 0 {
+	ids := make([]string, 0, len(m.agents)+len(m.remote.Items))
+	for _, a := range m.agents {
+		ids = append(ids, a.SID)
+	}
+	if m.view == vDesk { // the wall draws agents only
+		for _, r := range m.remote.Items {
+			ids = append(ids, r.ID)
+		}
+	}
+	if len(ids) == 0 {
 		return
 	}
-	i := m.selIndex() + d
-	if i < 0 {
-		i = len(m.agents) - 1
+	cur := -1
+	for i, id := range ids {
+		if id == m.selSID {
+			cur = i
+		}
 	}
-	if i >= len(m.agents) {
+	i := cur + d
+	if i < 0 {
+		i = len(ids) - 1
+	}
+	if i >= len(ids) {
 		i = 0
 	}
-	m.selSID = m.agents[i].SID
+	m.selSID = ids[i]
 	m.writeState()
 }
 
@@ -501,6 +530,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pullsAt = time.Now()
 			cmds = append(cmds, func() tea.Msg { return pullsMsg(loadPulls()) })
 		}
+		if time.Since(m.remoteAt) > remoteEvery && !readOnly {
+			m.remoteAt = time.Now()
+			cmds = append(cmds, func() tea.Msg { return remoteMsg(loadRemote()) })
+		}
 		if m.view == vPaperclip && time.Since(m.pcAt) > 5*time.Second {
 			m.pcAt = time.Now()
 			cmds = append(cmds, func() tea.Msg { return pcMsg(loadPaperclip()) })
@@ -581,6 +614,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case findNamesMsg, findTextMsg, findAIMsg, findPanelMsg:
 		return m.findUpdate(msg)
+	case remoteMsg:
+		m.remote = m.remote.merge(RemoteState(msg))
+		if m.selRemote() == nil && m.isRemoteID(m.selSID) { // the selected session is no longer active
+			m.selSID = ""
+			if len(m.agents) > 0 {
+				m.selSID = m.agents[0].SID
+			}
+			m.writeState()
+		}
+		return m, nil
+	case remoteSentMsg:
+		if msg.err != "" {
+			m.setErr("not sent to " + msg.title + ": " + msg.err)
+			return m, nil
+		}
+		m.setStatus("✓ sent to " + msg.title + ": read the reply with enter (claude.ai/code)")
+		m.remoteAt = time.Time{} // read the list again at the next tick: its state moved
+		return m, nil
 	case pullsMsg:
 		sel := ""
 		if m.view == vPulls && m.listSel < len(m.pulls.Items) {
@@ -784,6 +835,18 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.answer(int(ks[0] - '0'))
+	case ks == "enter" && m.view == vDesk && m.selRemote() != nil: // read its reply: the session on claude.ai/code
+		r := *m.selRemote()
+		return m, func() tea.Msg {
+			res := "ok"
+			if err := remoteOpen(remoteURL(r.ID)); err != nil {
+				res = "error: " + err.Error()
+			}
+			return sentMsg{"", r.Title, "open on claude.ai/code", res}
+		}
+	case ks == K.Reply && m.view == vDesk && m.selRemote() != nil:
+		m.mode = mTyping
+		return m, m.ed.open(m.selRemote().ID, "", m.editorWidth())
 	case ks == K.Reply:
 		a := m.sel()
 		if a == nil {
@@ -1007,6 +1070,16 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.setErr("that pull request is no longer open")
 			return m, nil
+		}
+		if i := m.remote.index(target); i >= 0 { // a message to a remote session: the CLI sends it, no window
+			id, title := target, m.remote.Items[i].Title
+			m.setStatus("sending to " + title + "…")
+			return m, func() tea.Msg {
+				if err := remoteSend(id, text); err != nil {
+					return remoteSentMsg{id, title, err.Error()}
+				}
+				return remoteSentMsg{id, title, ""}
+			}
 		}
 		if strings.HasPrefix(target, "pcno:") { // a note on an answer: a decline's reason, an approval's note, a form's text
 			return m, m.pcNoteSend(target, text)
