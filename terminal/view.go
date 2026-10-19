@@ -1347,7 +1347,7 @@ func (m model) helpLines() []string {
 		"Push " + K.Command + ", write the code, push enter. esc goes back to the desk.",
 		row2("IN", "inbox (the desk): all agents, and the selected one"),
 		row2("FL", "the last 30 files the agents wrote about, newest first\nenter opens one"),
-		row2("RP", "repos: the clones here and your GitHub repos\nthe sync check's notes (work you can lose) come first"),
+		row2("RP", "repos: the clones here and your GitHub repos\nthe 10 worked on last first, then all the others A–Z; the sync check's notes (work you can lose) in orange"),
 		row2("RC", "recaps: the agents by name on the left, the selected one's recap in full on the right\nenter goes to the agent"),
 		row2("PR", "the open pull requests that involve you on GitHub, the last updated first\n"+
 			K.Reply+" opens one on the right (description, files, thread); "+K.Reply+" again comments: enter starts a new agent with your comment as its task\n"+
@@ -1542,6 +1542,7 @@ func (m model) footer() []string {
 			add(&r1, "b", "branches")
 			add(&r1, "w", "worktrees")
 			add(&r1, "g", "on GitHub")
+			add(&r1, "i", "copy path")
 			add(&r1, "esc", "desk")
 			add(&r1, K.Command, "command")
 		}

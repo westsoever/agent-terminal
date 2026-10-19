@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
@@ -340,5 +341,63 @@ func TestRepoCopyPath(t *testing.T) {
 	m = pressRP(t, m, "esc")
 	if m.view != vDesk {
 		t.Fatalf("view %d", m.view)
+	}
+}
+
+// The list: the 10 repos worked on last, the newest first, then all the others from A to Z; a repo never worked on
+// (no time) is never in the first part.
+func TestRecentFirst(t *testing.T) {
+	now := time.Now()
+	var rs []Repo
+	for i := 0; i < 13; i++ {
+		rs = append(rs, Repo{Name: string(rune('m' - i)), At: now.Add(-time.Duration(i) * time.Hour)})
+	}
+	rs = append(rs, Repo{Name: "Zero"}, Repo{Name: "alpha"})
+	out, n := recentFirst(rs)
+	var names []string
+	for _, r := range out {
+		names = append(names, r.Name)
+	}
+	if n != 10 || strings.Join(names, " ") != "m l k j i h g f e d a alpha b c Zero" {
+		t.Fatalf("n %d order %v", n, names)
+	}
+	if _, n := recentFirst([]Repo{{Name: "x"}, {Name: "y", At: now}}); n != 1 {
+		t.Fatalf("one with a time: n %d", n)
+	}
+}
+
+// The two parts are headed; the title has no keys (they are in the footer).
+func TestRepoListParts(t *testing.T) {
+	m := repoModel(t, Repo{Name: "new", Dir: "/x/new", At: time.Now()}, Repo{Name: "old", Dir: "/x/old"})
+	m.repoRecent = 1
+	v := escRe.ReplaceAllString(strings.Join(m.reposView(12), "\n"), "")
+	if !strings.Contains(v, "MOST RECENT · the 1 worked on last") || !strings.Contains(v, "ALL REPOSITORIES · the others, A–Z") {
+		t.Fatalf("the parts must be headed:\n%s", v)
+	}
+	if strings.Contains(v, "enter opens") || strings.Index(v, "new") > strings.Index(v, "ALL REPOSITORIES") {
+		t.Fatalf("no keys in the title, new in the first part:\n%s", v)
+	}
+	m = pressRP(t, m, "k") // the narrow list beside a panel is in parts too
+	if v := escRe.ReplaceAllString(strings.Join(m.reposView(12), "\n"), ""); !strings.Contains(v, "MOST RECENT") || !strings.Contains(v, "ALL REPOSITORIES") {
+		t.Fatalf("the narrow list:\n%s", v)
+	}
+}
+
+// A clone was worked on when its HEAD log, or a worktree's, last changed.
+func TestGitActive(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".git", "logs"), 0o755)
+	os.MkdirAll(filepath.Join(dir, ".git", "worktrees", "w", "logs"), 0o755)
+	if !gitActive(dir).IsZero() {
+		t.Fatal("no logs: no time")
+	}
+	main, wt := filepath.Join(dir, ".git", "logs", "HEAD"), filepath.Join(dir, ".git", "worktrees", "w", "logs", "HEAD")
+	os.WriteFile(main, nil, 0o644)
+	os.WriteFile(wt, nil, 0o644)
+	old, newer := time.Now().Add(-48*time.Hour), time.Now().Add(-time.Hour)
+	os.Chtimes(main, old, old)
+	os.Chtimes(wt, newer, newer)
+	if got := gitActive(dir); !got.Equal(newer.Truncate(time.Second)) && got.Sub(newer).Abs() > time.Second {
+		t.Fatalf("gitActive = %v, want the worktree's %v", got, newer)
 	}
 }
