@@ -87,11 +87,12 @@ type model struct {
 	pendingJob string              // a background agent /NW started: selected once it shows in the list
 	props      []string
 	sync       []string
-	repoLocal  []Repo    // RP: the clones on this Mac
-	repoGH     GHRepos   // RP: the owners' GitHub repos
-	repos      []Repo    // RP: both, as listed
-	tree       *repoTree // RP side panel: the selected repo's folders; nil when closed
-	confirmURL string    // mConfirm: what yes opens
+	repoLocal  []Repo       // RP: the clones on this Mac
+	repoGH     GHRepos      // RP: the owners' GitHub repos
+	repos      []Repo       // RP: both, as listed
+	tree       *repoTree    // RP side panel: the selected repo's folders; nil when closed
+	branches   *branchPanel // RP side panel: the selected repo's branches or worktrees; nil when closed
+	confirmURL string       // mConfirm: what yes opens
 	ed         *editor
 	prompts    map[string]Prompt   // sid -> the menu its screen shows (selected waiting agents only)
 	scroll     *chatScroll         // shared by every copy of the model: View records the limits it drew
@@ -678,7 +679,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setErr(msg.err.Error())
 		}
 		return m, nil
-	case ghReposMsg, treeMsg:
+	case ghReposMsg, treeMsg, branchesMsg:
 		return m.repoMsg(msg)
 	case tea.KeyMsg:
 		return m.key(msg)
@@ -779,8 +780,8 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.find.Panel = nil
 		return m, nil
 	case ks == "esc":
-		if m.view == vRepos && m.tree != nil { // the folder panel closes first
-			m.tree = nil
+		if m.view == vRepos && (m.tree != nil || m.branches != nil) { // the side panel closes first
+			m.tree, m.branches = nil, nil
 		} else if m.zoom {
 			m.zoom = false
 		} else if m.view == vPulls && m.prOpen {
@@ -1065,6 +1066,13 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return bgStartedMsg{job, dir}
 			}
 		}
+		if name, ok := strings.CutPrefix(target, "br:"); ok {
+			if p := m.branches; p != nil && p.branch() != nil && p.branch().Name == name {
+				return m, m.branchStart("", text)
+			}
+			m.setErr("the branch panel of " + name + " is no longer open")
+			return m, nil
+		}
 		if url, ok := strings.CutPrefix(target, "pr:"); ok {
 			if i := m.pulls.index(url); i >= 0 {
 				return m, m.prStart(&m.pulls.Items[i], text)
@@ -1139,6 +1147,9 @@ func (m model) editorWidth() int {
 		return rw - 4
 	case m.view == vWall:
 		return m.w - 4
+	case m.view == vRepos:
+		lw, _ := pcWidths(m.w)
+		return m.w - min(lw, 44) - 2 - 4
 	}
 	_, rw := deskWidths(m.w)
 	return rw - 4
