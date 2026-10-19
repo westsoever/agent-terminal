@@ -132,16 +132,26 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | `PC` | `Enter` | Open the row in Paperclip in your browser. |
 | `PC` | `k` | Write a comment on the row. `Enter` sends it. |
 | `RP` | `Enter` | Open the folder of the repo. A repo without a local folder asks `No local folder. Open it on GitHub?`: push `Enter` or `y` to open it, any other key to stop. |
-| `RP` | `b`, `Option+Enter` | Open the repo on GitHub in your browser. `Shift+Enter` also does this, but only in a terminal that sends it differently from `Enter` (Terminal.app does not). |
+| `RP` | `g`, `Option+Enter` | Open the repo on GitHub in your browser. `Shift+Enter` also does this, but only in a terminal that sends it differently from `Enter` (Terminal.app does not). |
 | `RP` | `k` | Show the folders of the repo in a panel on the right. |
+| `RP` | `b` | Show the branches of the repo in a panel on the right. Refer to section 6.12. |
+| `RP` | `w` | Show the worktrees of the repo in a panel on the right. |
 | `RP` | `i` | Copy the path of the repo's folder. A repo without a local folder gives its GitHub address. |
 | `RP` panel | `l`, `j` | Select the next or previous file or folder. |
 | `RP` panel | `k` | Go into the folder, or open the file. `..` goes up. |
 | `RP` panel | `h`, `Backspace` | Go up one folder. |
 | `RP` panel | `Enter` | Show the folder in Finder, or open the file. |
-| `RP` panel | `b` | Open the folder that the panel shows on GitHub. |
+| `RP` panel | `g` | Open the folder that the panel shows on GitHub. |
 | `RP` panel | `i` | Copy the full path of the selected file or folder (`..` gives the folder that the panel shows). On a repo without a clone it copies the GitHub address. |
 | `RP` panel | `Esc` | Close the panel. Push `Esc` again to go to the desk. |
+| `RP` branches, worktrees | `l`, `j` | Select the next or previous branch or worktree. |
+| `RP` branches, worktrees | `1`, `2`, `3` | Start a new background agent that reviews, merges or fixes the selected branch (in the worktree panel: the worktree's branch). |
+| `RP` branches, worktrees | `k` | Write your own task for a new background agent on the branch. `Enter` starts it. |
+| `RP` branches, worktrees | `f` | Fetch origin (`git fetch --prune`) and read the branches again. |
+| `RP` branches, worktrees | `g` | Open the branch on GitHub. |
+| `RP` branches, worktrees | `Enter` | Show the folder of the branch's worktree in Finder (the repo's folder when it has none). |
+| `RP` branches, worktrees | `i` | Copy the name of the branch, or in the worktree panel the path of the worktree. |
+| `RP` branches, worktrees | `b`, `w` | Go to the branches or to the worktrees of the same repo. |
 
 ### 1.7 Keys in the FIND view
 
@@ -404,18 +414,27 @@ The tiles change size with the window. A wide window shows more tiles in each li
 ### 6.12 Look at the repos
 
 1. Push `/`, write `RP`, push `Enter`.
-2. Read the list. Each line shows the name of the repo, its name on GitHub (`owner/name`), its local folder (or `github only`) and, in orange, what the git sync check found (for example `1 stash`). Repos with a finding are at the top, then the other local repos, then the GitHub repos without a clone. The selected repo shows the full findings below its line.
+2. Read the list. Each line shows the name of the repo, its name on GitHub (`owner/name`), its local folder (or `github only`), the number of local branches and worktrees (`3 br · 2 wt`) and, in orange, what the git sync check found (for example `1 stash`). Repos with a finding are at the top, then the other local repos, then the GitHub repos without a clone. The selected repo shows the full findings below its line.
 3. Push `l` (down) or `j` (up) to select a repo.
 4. Do one of these steps:
    - To open its folder, push `Enter`. If the repo has no local folder, the command line asks `No local folder. Open it on GitHub?`. Push `Enter` or `y` to open it on GitHub. Push `Esc` to stop.
-   - To open it on GitHub, push `b` or `Option+Enter`.
+   - To open it on GitHub, push `g` or `Option+Enter`.
+   - To see its branches, push `b`. To see its worktrees, push `w`. Refer to the steps below.
    - To look at its files, push `k`. The list moves to the left and the panel on the right shows the folders and files of the repo (folders first, `.git` is not shown).
 5. In the panel:
    - Push `l` or `j` to select a file or folder.
    - Push `k` to go into a folder, or to open a file (with `open_cmd`). Select `..` and push `k`, or push `h`, to go up.
    - Push `Enter` to show the folder in Finder, or to open the file.
-   - Push `b` to open the folder that the panel shows on GitHub.
+   - Push `g` to open the folder that the panel shows on GitHub.
    - Push `Esc` to close the panel.
+6. In the branch panel (`b`):
+   - The top line counts the local branches, the branches on origin only, the branches with work that the default branch does not have, and the worktrees.
+   - Each line shows `⌂` when the branch is checked out in a worktree, then the name, then the branch against the default branch (`+2 −5`: 2 commits that the default branch does not have, 5 behind it; `merged`; `default`), then the branch against its copy on GitHub (`not pushed`, `↑1` to push, `↓1` to pull, `gone`, `pushed`), its age and its last commit. The branches on origin only are under `ON ORIGIN ONLY`.
+   - Below the list, the selected branch is described in words.
+   - Push `1` to review it, `2` to merge it into the default branch, `3` to fix it, or `k` to write your own task. Each starts a new background agent in the worktree of the branch (in the repo's folder when it has none). `2` refuses the default branch and a branch that is already merged.
+   - Push `f` to fetch origin. Kaching does not fetch by itself, so the branches on origin are as of your last fetch.
+   - Push `w` to see the worktrees.
+7. In the worktree panel (`w`): each line shows the folder of the worktree (the first is the repo's own folder), its branch, its changed files and its branch against the default branch. `1`, `2`, `3` and `k` work on the branch of the selected worktree. `Enter` shows the folder in Finder. Push `b` to see the branches.
 
 Kaching finds local repos one level below `~/bbq` and `~`, in `~/.agent-repos` and in the sync check. It reads the GitHub repos with `gh repo list` each time you open the view. If that read fails, the last list stays and the error shows at the top. For a repo without a local folder, the panel reads the folders from GitHub, and `k` on a file opens it on GitHub.
 
