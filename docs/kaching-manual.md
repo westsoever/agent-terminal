@@ -414,7 +414,7 @@ The tiles change size with the window. A wide window shows more tiles in each li
 ### 6.12 Look at the repos
 
 1. Push `/`, write `RP`, push `Enter`.
-2. Read the list. Each line shows the name of the repo, its name on GitHub (`owner/name`), its local folder (or `github only`), the number of local branches and worktrees (`3 br · 2 wt`) and, in orange, what the git sync check found (for example `1 stash`). Repos with a finding are at the top, then the other local repos, then the GitHub repos without a clone. The selected repo shows the full findings below its line.
+2. Read the list. Each line shows the name of the repo, its name on GitHub (`owner/name`), its local folder (or `github only`), the number of local branches and worktrees (`3 br · 2 wt`), how long ago it was last worked on and, in orange, what the git sync check found (for example `1 stash`). The list has two parts. `MOST RECENT` holds the 10 repos worked on last, the newest first: a commit, checkout or merge in the clone or in one of its worktrees, or a push to GitHub. `ALL REPOSITORIES` holds all the others from A to Z. The selected repo shows the full findings below its line. The keys are in the bottom line.
 3. Push `l` (down) or `j` (up) to select a repo.
 4. Do one of these steps:
    - To open its folder, push `Enter`. If the repo has no local folder, the command line asks `No local folder. Open it on GitHub?`. Push `Enter` or `y` to open it on GitHub. Push `Esc` to stop.

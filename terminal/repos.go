@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,12 +23,13 @@ import (
 
 // Repo is one row of the RP view.
 type Repo struct {
-	Name   string   // the folder's name, or the name on GitHub
-	Remote string   // owner/name on GitHub; "" when its origin is elsewhere or missing
-	Dir    string   // the local clone; "" when it is on GitHub only
-	Needs  string   // the sync check's "needs:" line
-	Notes  []string // the sync check's findings ("stash: 1 entry (oldest 20d)")
-	NB, NW int      // a clone's local branches and its worktrees besides its own folder
+	Name   string    // the folder's name, or the name on GitHub
+	Remote string    // owner/name on GitHub; "" when its origin is elsewhere or missing
+	Dir    string    // the local clone; "" when it is on GitHub only
+	Needs  string    // the sync check's "needs:" line
+	Notes  []string  // the sync check's findings ("stash: 1 entry (oldest 20d)")
+	NB, NW int       // a clone's local branches and its worktrees besides its own folder
+	At     time.Time // the last work on it: a commit, checkout or merge in the clone or its worktrees, or a push
 }
 
 func (r Repo) key() string {
@@ -159,6 +161,7 @@ func localRepos(sync []string) []Repo {
 		seen[d] = true
 		r := Repo{Name: filepath.Base(d), Dir: d, Remote: remoteRepo(gitOrigin(d))}
 		r.NB, r.NW = refCounts(d)
+		r.At = gitActive(d)
 		if i, ok := rank[d]; ok {
 			r.Needs, r.Notes = notes[i].needs, notes[i].notes
 		}
@@ -180,9 +183,10 @@ func localRepos(sync []string) []Repo {
 
 // GHRepos: the owners' GitHub repos (owner/name), not archived.
 type GHRepos struct {
-	Err   string // the last read failed; Items are still the last good list
-	Items []string
-	At    time.Time
+	Err    string // the last read failed; Items are still the last good list
+	Items  []string
+	Pushed map[string]time.Time // owner/name (lower case) -> its last push
+	At     time.Time
 }
 
 type ghReposMsg GHRepos
@@ -190,7 +194,7 @@ type ghReposMsg GHRepos
 // ghRepoList lists one owner's repos; a variable so tests can hand back their own JSON.
 var ghRepoList = func(ctx context.Context, owner string) ([]byte, error) {
 	return exec.CommandContext(ctx, "gh", "repo", "list", owner, "--no-archived", "--limit", "300",
-		"--json", "nameWithOwner").Output()
+		"--json", "nameWithOwner,pushedAt").Output()
 }
 
 func ghErr(what string, err error) string {
@@ -204,20 +208,22 @@ func ghErr(what string, err error) string {
 func loadGHRepos() GHRepos {
 	ctx, cancel := context.WithTimeout(context.Background(), pullsTimeout)
 	defer cancel()
-	st := GHRepos{At: time.Now()}
+	st := GHRepos{At: time.Now(), Pushed: map[string]time.Time{}}
 	for _, o := range repoOwners {
 		out, err := ghRepoList(ctx, o)
 		if err != nil {
 			return GHRepos{Err: ghErr("gh repo list "+o, err)}
 		}
 		var raw []struct {
-			NameWithOwner string `json:"nameWithOwner"`
+			NameWithOwner string    `json:"nameWithOwner"`
+			PushedAt      time.Time `json:"pushedAt"`
 		}
 		if err := json.Unmarshal(out, &raw); err != nil {
 			return GHRepos{Err: "gh repo list " + o + ": " + err.Error()}
 		}
 		for _, r := range raw {
 			st.Items = append(st.Items, r.NameWithOwner)
+			st.Pushed[strings.ToLower(r.NameWithOwner)] = r.PushedAt
 		}
 	}
 	return st
@@ -246,6 +252,9 @@ func repoList(local []Repo, gh GHRepos) []Repo {
 		if nw, ok := named[strings.ToLower(r.Remote)]; ok {
 			out[i].Remote = nw
 		}
+		if p := gh.Pushed[strings.ToLower(r.Remote)]; p.After(r.At) {
+			out[i].At = p
+		}
 	}
 	var only []Repo
 	for _, nw := range gh.Items {
@@ -254,10 +263,62 @@ func repoList(local []Repo, gh GHRepos) []Repo {
 		}
 		have[strings.ToLower(nw)] = true
 		_, name, _ := strings.Cut(nw, "/")
-		only = append(only, Repo{Name: name, Remote: nw})
+		only = append(only, Repo{Name: name, Remote: nw, At: gh.Pushed[strings.ToLower(nw)]})
 	}
 	sort.SliceStable(only, func(i, j int) bool { return strings.ToLower(only[i].Name) < strings.ToLower(only[j].Name) })
 	return append(out, only...)
+}
+
+// gitActive: when a clone was last worked in: the newest of its HEAD logs (commits, checkouts, merges, resets),
+// its worktrees' included. Not the index, which a git status elsewhere can touch.
+func gitActive(dir string) time.Time {
+	var at time.Time
+	logs, _ := filepath.Glob(filepath.Join(dir, ".git", "worktrees", "*", "logs", "HEAD"))
+	for _, p := range append(logs, filepath.Join(dir, ".git", "logs", "HEAD")) {
+		if fi, err := os.Stat(p); err == nil && fi.ModTime().After(at) {
+			at = fi.ModTime()
+		}
+	}
+	return at
+}
+
+// repoRecentN: how many repos the list's first part, MOST RECENT, holds.
+const repoRecentN = 10
+
+// recentFirst: the repoRecentN repos worked on last, the newest first, then all the others from A to Z; n is how
+// many the first part holds.
+func recentFirst(rs []Repo) (out []Repo, n int) {
+	byAt := append([]Repo(nil), rs...)
+	sort.SliceStable(byAt, func(i, j int) bool { return byAt[i].At.After(byAt[j].At) })
+	for n < len(byAt) && n < repoRecentN && !byAt[n].At.IsZero() {
+		n++
+	}
+	rest := byAt[n:]
+	sort.SliceStable(rest, func(i, j int) bool { return strings.ToLower(rest[i].Name) < strings.ToLower(rest[j].Name) })
+	return byAt, n
+}
+
+// repoHeads: the header rows above repo i, when a part starts there.
+func (m model) repoHeads(i, in int, short bool) []string {
+	var out []string
+	switch {
+	case i == 0 && m.repoRecent > 0:
+		t := " · the " + strconv.Itoa(m.repoRecent) + " worked on last"
+		if short {
+			t = ""
+		}
+		out = append(out, row(in, s("MOST RECENT", cGrey), s(t, cDark)))
+	case i == m.repoRecent:
+		if i > 0 {
+			out = append(out, "")
+		}
+		t := " · A–Z"
+		if m.repoRecent > 0 && !short {
+			t = " · the others, A–Z"
+		}
+		out = append(out, row(in, s("ALL REPOSITORIES", cGrey), s(t, cDark)))
+	}
+	return out
 }
 
 // ---- the folder panel
@@ -418,7 +479,7 @@ func (m *model) setRepos() {
 	if r := m.repoSel(); r != nil {
 		sel = r.key()
 	}
-	m.repos = repoList(m.repoLocal, m.repoGH)
+	m.repos, m.repoRecent = recentFirst(repoList(m.repoLocal, m.repoGH))
 	for i, r := range m.repos {
 		if sel != "" && r.key() == sel {
 			m.listSel = i
@@ -653,7 +714,6 @@ func (m model) confirmKey(ks string) (tea.Model, tea.Cmd) {
 
 // reposView: the repos; with the panel open, the list narrows to the left and the folder shows on the right.
 func (m model) reposView(h int) []string {
-	K := m.cfg.Keys
 	gh := ""
 	switch {
 	case m.repoGH.Err != "":
@@ -662,27 +722,7 @@ func (m model) reposView(h int) []string {
 		gh = " · reading GitHub…"
 	}
 	if m.tree == nil && m.branches == nil {
-		var items [][]seg
-		var details []string
-		for _, r := range m.repos {
-			remote, where, wst := r.Remote, tildify(r.Dir), cDark
-			if remote == "" {
-				remote = "–"
-			}
-			if r.Dir == "" {
-				where = "github only"
-			}
-			items = append(items, []seg{s(padTo(r.Name, 20), cWhite), s(" "+padTo(remote, 28), cGrey),
-				s(" "+padTo(where, 32), wst), s(" "+padTo(refNote(r), 12), cGrey), s(" "+r.Needs, cOrange)})
-			d := r.Notes
-			if r.Needs != "" && len(d) == 0 {
-				d = []string{"needs: " + r.Needs}
-			}
-			details = append(details, strings.Join(d, " · "))
-		}
-		title := "REPOS   enter opens the folder · " + K.Reply + " its files · b branches · w worktrees · g on GitHub · i copy path" + gh
-		empty := "no repos found in ~/bbq or ~"
-		return m.listBox(title, items, h, empty, details...)
+		return m.repoFull(h, "REPOS"+gh)
 	}
 	lw, rw := pcWidths(m.w)
 	lw = min(lw, 44)
@@ -708,6 +748,55 @@ func (m model) reposView(h int) []string {
 	return out
 }
 
+// repoFull: the whole list, in its two parts; the selected repo shows its sync-check findings below it. The keys
+// are in the footer only.
+func (m model) repoFull(h int, title string) []string {
+	in := m.w - 6
+	var body []string
+	selEnd := 0 // the selected repo's last line
+	if len(m.repos) == 0 {
+		body = append(body, row(in, s("no repos found in ~/bbq or ~", cDark)))
+	}
+	for i, r := range m.repos {
+		for _, l := range m.repoHeads(i, in, false) {
+			body = append(body, l)
+		}
+		remote, where, wst := r.Remote, tildify(r.Dir), cDark
+		if remote == "" {
+			remote = "–"
+		}
+		if r.Dir == "" {
+			where = "github only"
+		}
+		segs := []seg{s(padTo(r.Name, 20), cWhite), s(" "+padTo(remote, 28), cGrey), s(" "+padTo(where, 32), wst),
+			s(" "+padTo(refNote(r), 14), cGrey), s(fmt.Sprintf(" %4s", age(r.At)), cDark), s(" "+r.Needs, cOrange)}
+		if i != m.listSel {
+			body = append(body, row(in, append([]seg{s("   ", cPlain)}, segs...)...))
+			continue
+		}
+		t := ""
+		for _, sg := range segs {
+			t += sg.t
+		}
+		body = append(body, row(in, s(padTo(" > "+t, in), cSel)))
+		d := r.Notes
+		if r.Needs != "" && len(d) == 0 {
+			d = []string{"needs: " + r.Needs}
+		}
+		for _, dl := range wrap(strings.Join(d, " · "), in-3) {
+			if dl != "" {
+				body = append(body, row(in, s("   "+dl, cGrey)))
+			}
+		}
+		selEnd = len(body) - 1
+	}
+	vis := scrollTo(body, selEnd, max(1, h-2)) // the selected repo's findings stay on screen too
+	for i := range vis {
+		vis[i] = " " + vis[i] + " "
+	}
+	return indent(box(m.w-2, h, []seg{s(title, cWhite)}, cDark, vis))
+}
+
 // refNote: a clone's branches and worktrees for the list, "" for a repo on GitHub only.
 func refNote(r Repo) string {
 	if r.Dir == "" {
@@ -724,12 +813,14 @@ func refNote(r Repo) string {
 func (m model) repoList(w, h int) []string {
 	in := w - 2
 	var body []string
-	first := 0
-	if vis := h - 2; m.listSel >= vis {
-		first = m.listSel - vis + 1
-	}
-	for i := first; i < len(m.repos); i++ {
-		r := m.repos[i]
+	selLine := 0
+	for i, r := range m.repos {
+		for _, l := range m.repoHeads(i, in-1, true) {
+			body = append(body, " "+l)
+		}
+		if i == m.listSel {
+			selLine = len(body)
+		}
 		mark, mst := "  ", cPlain
 		if r.Needs != "" {
 			mark, mst = "! ", cOrange
@@ -742,7 +833,7 @@ func (m model) repoList(w, h int) []string {
 		}
 		body = append(body, row(in, s(" ", cPlain), s(mark, mst), s(r.Name, cDark)))
 	}
-	return box(w, h, []seg{s("REPOS", cGrey)}, cDark, body)
+	return box(w, h, []seg{s("REPOS", cGrey)}, cDark, scrollTo(body, selLine, max(1, h-2)))
 }
 
 // repoPanel: the folder shown, ".." to go up; the keys at the bottom.
