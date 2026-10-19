@@ -13,7 +13,7 @@ const (
 
 func (m model) View() string {
 	if m.w < 60 || m.h < 16 {
-		return cGrey.Render(fmt.Sprintf("kaching needs at least 60x16 (now %dx%d)", m.w, m.h))
+		return cGrey.Render(fmt.Sprintf("agterm needs at least 60x16 (now %dx%d)", m.w, m.h))
 	}
 	var lines []string
 	lines = append(lines, m.tabBar()...)
@@ -81,7 +81,7 @@ func (m model) tabBar() []string {
 	// a view with work that waits for the owner is filled orange: open proposals, Paperclip issues that need you
 	alert := map[view]bool{vProposals: len(m.props) > 0, vPaperclip: pcNeeds > 0}
 	var cells []cell
-	cells = append(cells, cell{[]seg{s("kaching", cWhite)}, false})
+	cells = append(cells, cell{[]seg{s("agterm", cWhite)}, false})
 	for _, t := range tabs {
 		active := m.view == t.v || (t.v == vDesk && m.view == vWall) // the wall (W) is the inbox as tiles
 		lbl := cGrey
@@ -352,7 +352,7 @@ func (m model) remotePanel(r RemoteSession, w, h int) []string {
 		}
 	}
 	add(row(in))
-	for _, l := range wrap("It runs on another machine: kaching shows its state and sends it messages, but cannot show its messages. "+
+	for _, l := range wrap("It runs on another machine: agterm shows its state and sends it messages, but cannot show its messages. "+
 		m.cfg.Keys.Reply+" writes a message to it · enter opens it on claude.ai/code to read the reply", in) {
 		add(row(in, s(l, cDark)))
 	}
@@ -1237,7 +1237,7 @@ func (m model) pcPanel(w, h int) []string {
 			tail = append(tail, row(in, s(fmt.Sprint(i+1), cOrange), s(" "+o.Label, cWhite)))
 		}
 		if len(a.Options) == 0 {
-			for _, l := range wrap("kaching can't answer a "+strings.ReplaceAll(a.Kind, "_", " ")+": enter opens it in Paperclip", in) {
+			for _, l := range wrap("agterm can't answer a "+strings.ReplaceAll(a.Kind, "_", " ")+": enter opens it in Paperclip", in) {
 				tail = append(tail, row(in, s(l, cDark)))
 			}
 		}
@@ -1385,7 +1385,7 @@ func (m model) helpLines() []string {
 		row2("ALL group", "one message to a group of agents: waiting (INPUT and WAITING), input, idle or working\nagents with a menu on screen are left out"),
 		row2("A3 or name", "select agent 3, or the first agent whose name starts so"),
 		row2("HELP", "this page"),
-		row2("QUIT", "stop kaching (ctrl+c also stops it)"),
+		row2("QUIT", "stop agterm (ctrl+c also stops it)"),
 		"",
 		"## New on 2026-10-19",
 		row2("REMOTE", "below DONE: the connected sessions on other machines (Remote Control), active ones only, read every 30 s\n"+
@@ -1407,7 +1407,7 @@ func (m model) helpLines() []string {
 		row2("space + key", "space waits for its second key with no time limit: the status line lists the keys, esc cancels, a key bound to nothing ends it\nit used to jump after half a second"),
 		row2(strings.Replace(k(K.Waiting), "space", "space space", 1), "the agent in INPUT that has waited the longest (it was space alone)"),
 		row2(K.Dismiss, "takes a waiting agent off the list, a background one too\nit keeps running and comes back when it has something new; it does not close the session (STOP stops a background agent)"),
-		row2("NW, "+K.PCAgent+", "+K.PCTerm, "agents that kaching starts run on "+nwDefault+" (nw_model, nw_effort, nw_permission in keys.toml)\nwords after NW win"),
+		row2("NW, "+K.PCAgent+", "+K.PCTerm, "agents that agterm starts run on "+nwDefault+" (nw_model, nw_effort, nw_permission in keys.toml)\nwords after NW win"),
 		row2(K.PCAgent+" / "+K.PCTerm+" in PC", "hand the selected issue to a new background agent / Terminal session with your permissions\na box text that starts with @Name goes to a session that already runs"),
 		row2("i in RP", "copy the path of the repo's folder, or of the selected file or folder"),
 		row2("DONE", "an agent that finished with nothing left sits in its own section at the end of the list, below IDLE"),
@@ -1475,8 +1475,8 @@ func (m model) helpLines() []string {
 	}
 	lines = append(lines, "",
 		"## More",
-		"Change keys, messages and how tables show (tables = auto, rule, grid or records) in "+tildify(configPath())+". Save: kaching reloads it.",
-		"Full manual: ~/.claude/kaching/docs/kaching-manual.md")
+		"Change keys, messages and how tables show (tables = auto, rule, grid or records) in "+tildify(configPath())+". Save: agterm reloads it.",
+		"Full manual: ~/.claude/agent-terminal/docs/agent-terminal-manual.md")
 	return lines
 }
 

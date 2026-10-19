@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # claude-stub - stands in for `claude -p ... --output-format json` in the learner tests (spec 5.6, 8). Point
-# KACHING_CLAUDE_BIN at this file. It never calls a model. It reads the prompt on stdin and prints the JSON
+# AGENT_TERMINAL_CLAUDE_BIN at this file. It never calls a model. It reads the prompt on stdin and prints the JSON
 # envelope claude prints, with a canned model answer (a JSON document, as a string) in .result.
 #
 # Which answer:
@@ -10,7 +10,7 @@
 # Other knobs:
 #   CLAUDE_STUB_EXIT=<n>          exit n with an error envelope (is_error true), as a failed or capped call
 #   CLAUDE_STUB_TOKENS=<n>        usage.input_tokens (default 1200; output_tokens is always 300)
-#   CLAUDE_STUB_LOG=<file>        append "ARGS: <args>", "PWD: <cwd>", "ENV: KACHING_LEARNER=.. CLAUDE_MEM_INTERNAL=.."
+#   CLAUDE_STUB_LOG=<file>        append "ARGS: <args>", "PWD: <cwd>", "ENV: AGENT_TERMINAL_LEARNER=.. CLAUDE_MEM_INTERNAL=.."
 #                                 and the prompt, so a test can check the flags, the working dir and the input
 #   CLAUDE_STUB_SLEEP=<secs>      sleep first (a slow or hung call, for timeout tests)
 set -euo pipefail
@@ -18,7 +18,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 prompt=$(cat || true)
 if [ -n "${CLAUDE_STUB_LOG:-}" ]; then
   { printf 'ARGS: %s\n' "$*"; printf 'PWD: %s\n' "$(pwd -P)"
-    printf 'ENV: KACHING_LEARNER=%s CLAUDE_MEM_INTERNAL=%s\n' "${KACHING_LEARNER:-}" "${CLAUDE_MEM_INTERNAL:-}"
+    printf 'ENV: AGENT_TERMINAL_LEARNER=%s CLAUDE_MEM_INTERNAL=%s\n' "${AGENT_TERMINAL_LEARNER:-}" "${CLAUDE_MEM_INTERNAL:-}"
     printf '%s\n' "$prompt"; printf -- '--- end of call\n'; } >>"$CLAUDE_STUB_LOG"
 fi
 in=${CLAUDE_STUB_TOKENS:-1200}

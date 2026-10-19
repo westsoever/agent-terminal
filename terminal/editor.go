@@ -228,7 +228,7 @@ func (e *editor) afterEdit(width int) {
 }
 
 // keep records the text being written as the target's draft, and saves the drafts when that changed, so a
-// restart of kaching loses nothing, not even a reply still open in the box (owner, 2026-10-17).
+// restart of agterm loses nothing, not even a reply still open in the box (owner, 2026-10-17).
 func (e *editor) keep() {
 	v := e.ta.Value()
 	if e.target == "" || e.drafts[e.target] == v {

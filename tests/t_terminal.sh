@@ -6,8 +6,8 @@
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-bash -n "$KIT/ui/raycast/kaching-open.sh" && pass "kaching-open.sh syntax" || fail "kaching-open.sh syntax"
-grep -q '^# @raycast.title Open Agent Terminal' "$KIT/ui/raycast/kaching-open.sh" && pass "raycast title" || fail "raycast title"
+bash -n "$KIT/ui/raycast/agent-terminal-open.sh" && pass "agent-terminal-open.sh syntax" || fail "agent-terminal-open.sh syntax"
+grep -q '^# @raycast.title Open Agent Terminal' "$KIT/ui/raycast/agent-terminal-open.sh" && pass "raycast title" || fail "raycast title"
 
 GO=$(command -v go || ls /opt/homebrew/bin/go 2>/dev/null || true)
 if [ -z "$GO" ]; then

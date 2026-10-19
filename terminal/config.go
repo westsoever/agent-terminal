@@ -48,7 +48,7 @@ type Config struct {
 	Replies  []Reply `toml:"reply"`
 }
 
-const defaultConfig = `# Kaching agent terminal: keys and pre-written replies.
+const defaultConfig = `# Agent Terminal: keys and pre-written replies.
 # Edit freely. The terminal reloads this file when you save it.
 # Keys use Bubble Tea names: a letter, "enter", "esc", "tab", "up", "down", " " (space).
 

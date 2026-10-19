@@ -163,7 +163,7 @@ func newModel() model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tick(), loadTTYs, tea.SetWindowTitle("kaching"))
+	return tea.Batch(tick(), loadTTYs, tea.SetWindowTitle("agterm"))
 }
 
 func tick() tea.Cmd {
@@ -216,9 +216,9 @@ func (m *model) refresh() {
 // selfTTY is the terminal's own tab (so a hotkey can bring it forward), ” when not in one.
 var selfTTY = pidTTYs([]string{fmt.Sprint(os.Getpid())})[os.Getpid()]
 
-// writeState tells the rest of Kaching (the monitor queue, the open hotkey) that the terminal is open and
+// writeState tells the rest of Agent Terminal (the monitor queue, the open hotkey) that the terminal is open and
 // which agent is selected: ~/.agent/terminal/open holds pid=, self_tty=, sid= and tty= lines.
-// readOnly: a --render run must not tell the queue that kaching is open.
+// readOnly: a --render run must not tell the queue that agterm is open.
 var readOnly bool
 
 func (m *model) writeState() {
@@ -252,7 +252,7 @@ func bringHere(sid, tty string) string {
 	return res
 }
 
-// returnWindow: kaching sent the agent an answer, so a window of it that the queue moved to the main display
+// returnWindow: agterm sent the agent an answer, so a window of it that the queue moved to the main display
 // goes back to its cell (queue.sh return, D42). Moving around inside a menu is no answer.
 func returnWindow(sid, what string) tea.Cmd {
 	switch what {
@@ -275,8 +275,8 @@ func transcriptAfter(path string, t time.Time) bool {
 	return err == nil && st.ModTime().After(t.Add(500*time.Millisecond))
 }
 
-// removeState: kaching closed. It only removes its own open file: opening, quitting or reloading kaching
-// never moves, resizes or closes a Terminal window (owner, 2026-10-17). kaching reads the agents and types
+// removeState: agterm closed. It only removes its own open file: opening, quitting or reloading agterm
+// never moves, resizes or closes a Terminal window (owner, 2026-10-17). agterm reads the agents and types
 // what the owner chose; window placement is the monitor queue's job, on its own events.
 func removeState() {
 	_ = os.Remove(filepath.Join(agentHome(), "terminal", "open"))
@@ -416,7 +416,7 @@ func (m *model) move(d int) {
 }
 
 // promptKey forwards enter, the arrows left/right and tab to an agent that shows a menu (choose with arrows,
-// switch question tabs, confirm), so every menu can be finished from kaching.
+// switch question tabs, confirm), so every menu can be finished from agent-terminal.
 func (m *model) promptKey(ks string) (bool, tea.Cmd) {
 	a := m.sel()
 	if a == nil {
@@ -922,7 +922,7 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// readPrompt reads screens for menus: the selected agent's, and every agent Kaching's hooks marked as needing
+// readPrompt reads screens for menus: the selected agent's, and every agent Agent Terminal's hooks marked as needing
 // input or blocked, or that showed a menu last time. Busy or not: Claude Code calls a session busy while its
 // question is open, so the screen is the truth.
 // readPrompt reads the screens that can show a menu: the selected agent's, the ones that asked or are blocked,
@@ -1284,7 +1284,7 @@ func (m *model) pcAnswer(n int) tea.Cmd {
 	}
 	d, ok := m.pcDet[it.ID]
 	if !ok || d.Ask == nil || len(d.Ask.Options) == 0 {
-		m.setErr(it.Ref + " asks nothing that kaching can answer: enter opens it in Paperclip")
+		m.setErr(it.Ref + " asks nothing that agterm can answer: enter opens it in Paperclip")
 		return nil
 	}
 	if n > len(d.Ask.Options) {
@@ -1445,7 +1445,7 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 	if m.view == vProposals && m.listSel < len(m.props) {
 		id := propID(m.props[m.listSel])
 		switch ks {
-		case "a": // approve: hand the screen to kaching-proposals, which asks for its typed code on /dev/tty
+		case "a": // approve: hand the screen to agent-terminal-proposals, which asks for its typed code on /dev/tty
 			return true, tea.ExecProcess(exec.Command(proposalsBin(), "approve", id), func(err error) tea.Msg { return execDone{err} })
 		case "x":
 			out, err := exec.Command(proposalsBin(), "reject", id).CombinedOutput()
@@ -1555,13 +1555,15 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// kitDir is the Kaching kit: ~/.claude/kaching, or ~/.claude/ching on a machine where install.sh has not run
-// since the rename (D35).
+// kitDir is the Agent Terminal kit: ~/.claude/agent-terminal, or its older names ~/.claude/kaching (D64) and
+// ~/.claude/ching (D35) on a machine where install.sh has not run since the rename.
 func kitDir() string {
-	k := filepath.Join(os.Getenv("HOME"), ".claude", "kaching")
+	k := filepath.Join(os.Getenv("HOME"), ".claude", "agent-terminal")
 	if _, err := os.Stat(k); err != nil {
-		if old := filepath.Join(os.Getenv("HOME"), ".claude", "ching"); dirExists(old) {
-			return old
+		for _, old := range []string{"kaching", "ching"} {
+			if d := filepath.Join(os.Getenv("HOME"), ".claude", old); dirExists(d) {
+				return d
+			}
 		}
 	}
 	return k
@@ -1582,7 +1584,7 @@ func isDigits(t string) bool {
 }
 
 func proposalsBin() string {
-	return filepath.Join(kitDir(), "bin", "kaching-proposals")
+	return filepath.Join(kitDir(), "bin", "agent-terminal-proposals")
 }
 
 func propID(line string) string {

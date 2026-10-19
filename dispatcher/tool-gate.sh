@@ -16,7 +16,7 @@
 #   <dash.sh> [--speak|--inbox|--next|--all|--hours N]...       single spaces, flags from this list only
 #   <dash.sh> --route                                           the routing list; alone, with no other flag
 #   <relay-log.sh> <state dir> yes|no '<single-quoted text>'    text: no quote inside except '\'' , at most 2000 chars
-# where <dash.sh> / <relay-log.sh> is one of ~/.claude/kaching/..., $HOME/.claude/kaching/..., $CLAUDE_DIR/kaching/...
+# where <dash.sh> / <relay-log.sh> is one of ~/.claude/agent-terminal/..., $HOME/.claude/agent-terminal/..., $CLAUDE_DIR/agent-terminal/...
 # or this kit's own directory. No ;, &, |, <, >, $(), backticks, newlines or tabs can get through: the flags are
 # compared as whole words and the text can only be a single-quoted string, which the shell never expands.
 #
@@ -38,8 +38,9 @@ KIT_L=$(cd "$SELF_DIR/.." && pwd)
 KIT_P=$(cd "$SELF_DIR/.." && pwd -P)
 CLAUDE_DIR=${CLAUDE_DIR:-$HOME/.claude}
 # shellcheck disable=SC2088
-BASES=("~/.claude/kaching" '$HOME/.claude/kaching' "$CLAUDE_DIR/kaching" "$KIT_L" "$KIT_P"
-       "~/.claude/ching" '$HOME/.claude/ching' "$CLAUDE_DIR/ching")   # the second row: the link's name before D35
+BASES=("~/.claude/agent-terminal" '$HOME/.claude/agent-terminal' "$CLAUDE_DIR/agent-terminal" "$KIT_L" "$KIT_P"
+       "~/.claude/kaching" '$HOME/.claude/kaching' "$CLAUDE_DIR/kaching"   # the link's name before D64
+       "~/.claude/ching" '$HOME/.claude/ching' "$CLAUDE_DIR/ching")   # and before D35
 INPUT=$(cat)
 DECIDED=0
 TOOL=""
@@ -98,7 +99,7 @@ jstr() { # jq filter that yields a string or "" (never a number, array or object
   jq -r "if ($1 | type) == \"string\" then $1 else \"\" end" <<<"$INPUT"
 }
 
-is_script() { # word suffix: is the word <one of the known kaching dirs>/<suffix>
+is_script() { # word suffix: is the word <one of the known agent-terminal dirs>/<suffix>
   local w=$1 suffix=$2 b
   for b in "${BASES[@]}"; do
     if [ "$w" = "$b/$suffix" ]; then return 0; fi
@@ -159,7 +160,7 @@ check_bash() {
   if [ "$cmd" != "$first" ]; then rest=${cmd#* }; fi
   if is_script "$first" bin/dash.sh; then check_dash_args "$rest"; fi
   if is_script "$first" dispatcher/relay-log.sh; then check_relay_args "$rest"; fi
-  emit_deny "the dispatcher runs only ~/.claude/kaching/bin/dash.sh and ~/.claude/kaching/dispatcher/relay-log.sh. Tell the user what you could not do."
+  emit_deny "the dispatcher runs only ~/.claude/agent-terminal/bin/dash.sh and ~/.claude/agent-terminal/dispatcher/relay-log.sh. Tell the user what you could not do."
 }
 
 real_path() { perl -MCwd=abs_path -e 'my $p = abs_path($ARGV[0]); print $p if defined $p' -- "$1" 2>/dev/null || true; }

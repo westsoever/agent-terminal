@@ -1,7 +1,7 @@
 package main
 
 // The PR view's side panel: one pull request read with gh pr view, the hand-off of a comment on it to a new
-// background agent that works on it in the repo's local clone, and the merge that kaching does itself.
+// background agent that works on it in the repo's local clone, and the merge that agterm does itself.
 
 import (
 	"context"
@@ -149,7 +149,7 @@ func loadPRDetail(url string) PRDetail {
 }
 
 // prQuick: the panel's number keys. One with a text starts an agent on the pull request with it as the comment;
-// merge it and close it are done by kaching itself at once with gh pr merge / gh pr close, no agent (D55, D56).
+// merge it and close it are done by agterm itself at once with gh pr merge / gh pr close, no agent (D55, D56).
 var prQuick = []struct{ label, text, act string }{
 	{"review it", "Review this pull request: does it do what it says, and is the code right? Tell me what you find.", ""},
 	{"merge it", "", "merge"},
@@ -162,7 +162,7 @@ type prMergedMsg struct{ url, ref, how, err string }
 
 type prClosedMsg struct{ url, ref, err string }
 
-// prMergeBlock: why kaching does not merge pr as its panel d shows it, "" when it does. The rule the merge agent had:
+// prMergeBlock: why agterm does not merge pr as its panel d shows it, "" when it does. The rule the merge agent had:
 // checks pass and no conflicts.
 func prMergeBlock(pr PullReq, d PRDetail) string {
 	switch {

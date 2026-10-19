@@ -192,7 +192,7 @@ setcfg queue_tile=off
 QUEUE_TTY=ttys131 "$Q" retile
 assert_eq "queue_tile=off: retile moves nothing" "0" "$(moves)"
 
-# ---------- for kaching: the tabs map, the waiting record, dismiss, single mode, show ----------
+# ---------- for agent-terminal: the tabs map, the waiting record, dismiss, single mode, show ----------
 setcfg queue_tile=off
 TB="$QD/tabs"
 reset "201 2000 100 800 500 ttys200,ttys201" "202 2100 600 800 400 ttys202" "203 2900 100 800 400 ttys203"
@@ -217,27 +217,27 @@ assert_eq "dismiss: back in its cell" "2100 600 800 400" "$(win 202)"
 assert_eq "dismiss: no longer waiting" "" "$(ls "$QD/waiting")"
 assert_eq "dismiss: unknown session" "Unknown session: nope" "$("$Q" dismiss nope)"
 
-# kaching open (a live pid in terminal/open, D37): no window moves on its own; kaching's list is the inbox. A prompt
+# agent-terminal open (a live pid in terminal/open, D37): no window moves on its own; agent-terminal's list is the inbox. A prompt
 # still sends a window back (D43).
 reset "211 2000 100 800 500 ttys210" "212 2100 600 800 400 ttys211" "213 2900 100 800 400 ttys212"
 mkdir -p "$AGENT_HOME/terminal"
-QUEUE_SID=s212 QUEUE_TTY=ttys212 "$Q" park early             # waits before kaching opens: comes over (normal mode)
-assert_eq "before kaching: the waiting one comes over" "40 70 800 400" "$(win 213)"
+QUEUE_SID=s212 QUEUE_TTY=ttys212 "$Q" park early             # waits before agent-terminal opens: comes over (normal mode)
+assert_eq "before agent-terminal: the waiting one comes over" "40 70 800 400" "$(win 213)"
 printf 'pid=%s\nself_tty=ttys999\nsid=\ntty=\n' "$$" >"$AGENT_HOME/terminal/open"
 QUEUE_SID=s210 QUEUE_TTY=ttys210 "$Q" park a
 sleep 1
 QUEUE_SID=s211 QUEUE_TTY=ttys211 "$Q" park b
-assert_eq "kaching open: a waiting window stays in its cell" "2000 100 800 500" "$(win 211)"
-assert_eq "kaching open: the next one too" "2100 600 800 400" "$(win 212)"
-assert_eq "kaching open: one parked before stays where it is (no moves at all)" "40 70 800 400" "$(win 213)"
+assert_eq "agent-terminal open: a waiting window stays in its cell" "2000 100 800 500" "$(win 211)"
+assert_eq "agent-terminal open: the next one too" "2100 600 800 400" "$(win 212)"
+assert_eq "agent-terminal open: one parked before stays where it is (no moves at all)" "40 70 800 400" "$(win 213)"
 QUEUE_SID=s212 QUEUE_TTY=ttys212 "$Q" back
-assert_eq "kaching open: prompted, it goes back to its cell (D43)" "2900 100 800 400" "$(win 213)"
+assert_eq "agent-terminal open: prompted, it goes back to its cell (D43)" "2900 100 800 400" "$(win 213)"
 QUEUE_SID=s210 QUEUE_TTY=ttys210 "$Q" back
-assert_eq "kaching open: nothing came over" "2100 600 800 400" "$(win 212)"
-# kaching closed (a dead pid): no backlog comes over; only a window whose own event fires now
+assert_eq "agent-terminal open: nothing came over" "2100 600 800 400" "$(win 212)"
+# agent-terminal closed (a dead pid): no backlog comes over; only a window whose own event fires now
 printf 'pid=999999\n' >"$AGENT_HOME/terminal/open"
 QUEUE_SID=s210 QUEUE_TTY=ttys210 "$Q" retile
-assert_eq "closed: a window that waited while kaching was open stays in its cell" "2100 600 800 400" "$(win 212)"
+assert_eq "closed: a window that waited while agent-terminal was open stays in its cell" "2100 600 800 400" "$(win 212)"
 QUEUE_SID=s211 QUEUE_KIND=idle QUEUE_TTY=ttys211 "$Q" park b
 assert_eq "closed: the idle reminder brings nothing over" "2100 600 800 400" "$(win 212)"
 QUEUE_SID=s211 QUEUE_KIND=done QUEUE_TTY=ttys211 "$Q" park b
@@ -281,7 +281,7 @@ QUEUE_SID=s311 QUEUE_NAME=b QUEUE_TTY=ttys311 "$Q" retile
 assert_eq "show: done" "Shown" "$("$Q" show s311)"
 assert_eq "show: on the main display" "hand" "$(cut -d' ' -f6 "$QD/parked/312")"
 assert_eq "dragged: bad arguments" "2" "$("$Q" dragged 1 x >/dev/null 2>&1; echo $?)"
-# return SESSION_ID: kaching sent the agent an answer; its window goes back to its cell, also while kaching is
+# return SESSION_ID: agent-terminal sent the agent an answer; its window goes back to its cell, also while agent-terminal is
 # open (an action of the owner, not an automatic move)
 printf 'pid=%s\nself_tty=ttys999\nsid=\ntty=\n' "$$" >"$AGENT_HOME/terminal/open"
 cell=$(cut -d' ' -f1-4 "$QD/parked/312")
@@ -299,19 +299,19 @@ QUEUE_KIND=input QUEUE_SID=s321 QUEUE_NAME=b QUEUE_TTY=ttys321 "$Q" park b
 assert_eq "return: another tab waits, the window stays" "Another tab waits" "$("$Q" return s320)"
 assert_eq "return: still parked" "321" "$(ls "$QD/parked")"
 # its own session is prompted (D43): a window brought over by hand (show / h, or a drag) goes back to its cell,
-# also while kaching is open
+# also while agent-terminal is open
 reset "331 1920 -67 960 1080 ttys330"
 QUEUE_SID=s330 QUEUE_NAME=c QUEUE_TTY=ttys330 "$Q" retile
 "$Q" show s330 >/dev/null
 assert_eq "shown: on the main display" "320 70 690 948" "$(win 331)"
 QUEUE_SID=s330 QUEUE_TTY=ttys330 "$Q" back
 # (tiling is on here: the one window on monitor 2 fills it)
-assert_eq "shown, then prompted with kaching open: back on monitor 2" "1920 -67 1920 1080" "$(win 331)"
+assert_eq "shown, then prompted with agent-terminal open: back on monitor 2" "1920 -67 1920 1080" "$(win 331)"
 assert_no_file "shown, then prompted: no longer parked" "$QD/parked/331"
 rm -f "$AGENT_HOME/terminal/open"
 awk '$1 == 331 { $2 = 500; $3 = 300 } { print }' "$FT/windows" >"$FT/w.tmp" && mv "$FT/w.tmp" "$FT/windows"
 "$Q" dragged 331 1920 -67 960 1080
 QUEUE_SID=s330 QUEUE_TTY=ttys330 "$Q" back
-assert_eq "dragged, then prompted with kaching closed: back on monitor 2" "1920 -67 1920 1080" "$(win 331)"
+assert_eq "dragged, then prompted with agent-terminal closed: back on monitor 2" "1920 -67 1920 1080" "$(win 331)"
 assert_no_file "dragged, then prompted: no longer parked" "$QD/parked/331"
 exit 0

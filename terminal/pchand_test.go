@@ -240,10 +240,10 @@ func TestTermCommand(t *testing.T) {
 }
 
 // Live: a real background agent gets an issue handed over, reads the briefing file and answers from it. The issue is
-// made up and the task forbids any API call. KACHING_LIVE_BG=1 runs it (haiku, the owner's Claude account).
+// made up and the task forbids any API call. AGENT_TERMINAL_LIVE_BG=1 runs it (haiku, the owner's Claude account).
 func TestPCHandLive(t *testing.T) {
-	if os.Getenv("KACHING_LIVE_BG") == "" {
-		t.Skip("KACHING_LIVE_BG=1 runs it")
+	if os.Getenv("AGENT_TERMINAL_LIVE_BG") == "" {
+		t.Skip("AGENT_TERMINAL_LIVE_BG=1 runs it")
 	}
 	m := newModel()
 	m.cfg.NWModel, m.cfg.NWPerm, m.cfg.NWEffort = "haiku", "", ""

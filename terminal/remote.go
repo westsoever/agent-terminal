@@ -3,7 +3,7 @@ package main
 // The REMOTE section of the desk: Claude Code sessions that run on another machine (Remote Control) and are
 // connected to the owner's account now, read from the same list claude.ai/code shows, with the owner's own Claude
 // login. Only active sessions on other machines are listed: connected, not archived, and not a window of this Mac. Reading a session's messages needs a
-// trusted device and is refused for this login, so kaching shows its state and sends a message with the CLI's
+// trusted device and is refused for this login, so agterm shows its state and sends a message with the CLI's
 // own path (claude -p ... --cloud <id>); the reply is read on claude.ai/code (enter).
 
 import (

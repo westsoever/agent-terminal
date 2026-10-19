@@ -472,7 +472,7 @@ func cwdIn(head []byte) string {
 	return ""
 }
 
-// fillMeta completes a hit from Kaching's record of the session (~/.agent/sessions/<id>/meta): its folder and
+// fillMeta completes a hit from Agent Terminal's record of the session (~/.agent/sessions/<id>/meta): its folder and
 // branch when the transcript gave none. (The meta name is the folder's name, not the session's.)
 func fillMeta(h *findHit) {
 	meta := readMeta(filepath.Join(agentHome(), "sessions", h.ID, "meta"))

@@ -399,7 +399,7 @@ func asString(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
 }
 
-// findRenderSync runs the names and text tiers to the end, for kaching --render.
+// findRenderSync runs the names and text tiers to the end, for agterm --render.
 func (m model) findRenderSync() model {
 	if m.find.Query == "" {
 		return m
@@ -515,7 +515,7 @@ func (m model) findEmpty() string {
 	switch {
 	case f.Query == "":
 		return "FIND looks for a session by its name, then by what was said in it, then asks Claude. Write " +
-			m.cfg.Keys.Command + "FIND and some words, for example " + m.cfg.Keys.Command + "FIND kaching resume. A session is a hit when one message has all the words."
+			m.cfg.Keys.Command + "FIND and some words, for example " + m.cfg.Keys.Command + "FIND agterm resume. A session is a hit when one message has all the words."
 	case !f.NamesDone || !f.TextDone:
 		return "searching the names and every transcript…"
 	case f.AIState == 1:

@@ -24,11 +24,11 @@
 # The Monitor tool (it runs a shell command) goes through the Bash rules. A missing dependency, a failing
 # splitter, a deny that cannot be printed, or a command that takes more than 8 s to check all fail closed.
 # Every deny is also logged as a `deny` event, after the decision has been printed.
-# Learner mode (Phase 6 spec 5.6): with KACHING_LEARNER=1 in the environment (only the org.kaching.learn job and its
+# Learner mode (Phase 6 spec 5.6): with AGENT_TERMINAL_LEARNER=1 in the environment (only the org.agent-terminal.learn job and its
 # `claude -p` calls set it) the learner may read, and may write with Edit/Write only under $AGENT_HOME/proposals/.
 # Every other tool is denied: Bash and Monitor outright (a superset of "no redirects outside proposals": a command
-# string cannot show every write), Skill, MCP, WebFetch, WebSearch and anything else. Without KACHING_LEARNER=1
-# nothing changes. Approving a learner proposal is for the person at a terminal: in every session kaching-proposals may
+# string cannot show every write), Skill, MCP, WebFetch, WebSearch and anything else. Without AGENT_TERMINAL_LEARNER=1
+# nothing changes. Approving a learner proposal is for the person at a terminal: in every session agent-terminal-proposals may
 # only be called directly as list, show, diff, reject, snooze or help (an allowlist; see check_proposals_call).
 # Env: GUARD_PROTECTED_BRANCHES (default "main master" plus the remote default branch);
 #      GUARD_TIME_LIMIT (seconds; can only lower the 8 s ceiling, for the tests)
@@ -233,7 +233,7 @@ redir_target() { # $1 = token index -> 0 when that token is the target of an out
   [ "$k" -eq 0 ] && [ "$SEG_AFTER_REDIR" -eq 1 ]
 }
 tok_written() { # $1 = token index -> 0 when the segment writes that token: a writing command, or a redirect to it
-  # (a redirect elsewhere, such as 2>&1 or >/tmp/out while running a kaching script, does not write it)
+  # (a redirect elsewhere, such as 2>&1 or >/tmp/out while running a agent-terminal script, does not write it)
   cmd_writes || redir_target "$1"
 }
 cmd_writes() { # does the command of the current segment write/modify files (rm, cp, tee, sed -i, ...)?
@@ -274,7 +274,7 @@ check_delete_target() { # path-as-written
       case "$rest" in
         */*) ;;
         *) case "$seg" in
-             claude*|com.apple*|kaching-tests*|ching-tests*|launchd*|tmux-*) ;;
+             claude*|com.apple*|agent-terminal-tests*|kaching-tests*|ching-tests*|launchd*|tmux-*) ;;
              *[._-]*) if [ "${#seg}" -ge 6 ] && is_safe_delete_target "$abs/$seg"; then return 0; fi ;;
            esac ;;
       esac
@@ -645,12 +645,12 @@ check_git() { # $1 = index of git token
 }
 
 # ---------- learner proposals: approving is for the human (Phase 6 spec 6.4) ----------
-# The main defence is in kaching-proposals itself (it refuses approve under a session: the session variables, a claude
+# The main defence is in agent-terminal-proposals itself (it refuses approve under a session: the session variables, a claude
 # process up the parent chain, a code typed back on /dev/tty). This is the cheap extra layer, and it is an allowlist,
-# because string matching can never list every spelling of `approve`. A segment that names kaching-proposals passes only
-#  - as a direct call: kaching-proposals (any path, any case, after NAME=value words only, no wrapper) whose first word
+# because string matching can never list every spelling of `approve`. A segment that names agent-terminal-proposals passes only
+#  - as a direct call: agent-terminal-proposals (any path, any case, after NAME=value words only, no wrapper) whose first word
 #    after its options is literally one of PROPOSALS_SUBS. `appr${x}ove`, `$a`, `$(echo approve)` and backticks (the
-#    splitter leaves `kaching-proposals` with nothing after it) are not on the list, nor is approve;
+#    splitter leaves `agent-terminal-proposals` with nothing after it) are not on the list, nor is approve;
 #  - as data for a command that only reads or records text (PROPOSALS_READERS; git not with -c, which can set a pager
 #    or an alias to run), or bash/sh/zsh -n (a syntax check).
 # Everything else is denied: xargs, script, env, perl, python, find -exec, cp, echo, a glob that expands to the name.
@@ -658,7 +658,7 @@ check_git() { # $1 = index of git token
 PROPOSALS_SUBS=" list show diff reject snooze help -h --help "
 PROPOSALS_READERS=" grep egrep fgrep rg cat less more head tail wc ls stat file nl bat shellcheck diff cmp sed git gh "
 deny_proposals() {
-  emit_deny "approving a learner proposal is for the person at a terminal. A session may only call kaching-proposals directly as list, show, diff, reject or snooze. Tell the user to run: kaching-proposals approve <id>"
+  emit_deny "approving a learner proposal is for the person at a terminal. A session may only call agent-terminal-proposals directly as list, show, diff, reject or snooze. Tell the user to run: agent-terminal-proposals approve <id>"
 }
 glob_path_may_name_cli() { # $1 = the raw command word; 0 = it may name a copy of the CLI, 1 = it cannot
   # A glob with a directory part (bin/c*s, 06-Wiki/learned/**) can start the CLI only if that path can name a copy of it.
@@ -673,9 +673,9 @@ glob_path_may_name_cli() { # $1 = the raw command word; 0 = it may name a copy o
   while :; do case "$w" in ./*) w=${w#./} ;; ../*) w=${w#../} ;; *) break ;; esac; done
   case "$w" in */*) ;; *) return 0 ;; esac   # ./c*s and ../c*s leave a bare word: it expands in the shell's own folder
   case "/$w/" in */./*|*/../*) return 0 ;; esac
-  for d in "$SELF_DIR" "${HOME:-/nonexistent}/.claude/kaching/bin" "${HOME:-/nonexistent}/.claude/ching/bin" /bin; do
+  for d in "$SELF_DIR" "${HOME:-/nonexistent}/.claude/agent-terminal/bin" "${HOME:-/nonexistent}/.claude/kaching/bin" "${HOME:-/nonexistent}/.claude/ching/bin" /bin; do
     d=$(printf '%s' "$d" | LC_ALL=C tr 'A-Z' 'a-z')
-    for n in kaching-proposals ching-proposals; do
+    for n in agent-terminal-proposals kaching-proposals ching-proposals; do
       # shellcheck disable=SC2053
       if [[ "$d/$n" == $w || "$d/$n" == */$w ]]; then return 0; fi
     done
@@ -687,8 +687,8 @@ check_proposals_call() { # TOKS is the segment
   while [ "$k" -lt "$NT" ] && [[ "${TOKS[$k]}" == [A-Za-z_]*=* ]]; do k=$((k + 1)); done
   [ "$k" -lt "$NT" ] || return 0
   base_of "${TOKS[$k]}"; b=$BASE
-  case "$b" in *[[:upper:]]*) b=$(printf '%s' "$b" | LC_ALL=C tr 'A-Z' 'a-z') ;; esac   # macOS: KACHING-PROPOSALS runs it too
-  # $b is a glob on purpose: would the shell expand this command word to kaching-proposals? Exempt a word ending in
+  case "$b" in *[[:upper:]]*) b=$(printf '%s' "$b" | LC_ALL=C tr 'A-Z' 'a-z') ;; esac   # macOS: AGENT-TERMINAL-PROPOSALS runs it too
+  # $b is a glob on purpose: would the shell expand this command word to agent-terminal-proposals? Exempt a word ending in
   # `)` and a word that is all pattern: no letter, digit or `/` outside its [...] classes (`*`, `*[!0-9]*`, `??`).
   # That is what the splitter leaves of a `case` arm or a heredoc line, not a command anyone types, and treating it
   # as the CLI denied any command quoting shell code. A glob with a letter or a path (bin/c*s, bin/*s,
@@ -697,16 +697,17 @@ check_proposals_call() { # TOKS is the segment
   local rawpat
   rawpat=$(printf '%s' "${TOKS[$k]}" | sed 's/\[[^]]*\]//g')
   # shellcheck disable=SC2053
-  if [[ "$b" == *[\*\?\[]* ]] && [[ "$b" != *')' ]] && [[ "$rawpat" == *[A-Za-z0-9/]* ]] && { [[ kaching-proposals == $b ]] || [[ ching-proposals == $b ]]; } && glob_path_may_name_cli "${TOKS[$k]}"; then b=kaching-proposals; fi
-  [ "$b" != ching-proposals ] || b=kaching-proposals   # the old name (D35) is a wrapper that runs the same CLI
-  if [ "$b" = kaching-proposals ]; then
+  if [[ "$b" == *[\*\?\[]* ]] && [[ "$b" != *')' ]] && [[ "$rawpat" == *[A-Za-z0-9/]* ]] && { [[ agent-terminal-proposals == $b ]] || [[ kaching-proposals == $b ]] || [[ ching-proposals == $b ]]; } && glob_path_may_name_cli "${TOKS[$k]}"; then b=agent-terminal-proposals; fi
+  case "$b" in kaching-proposals|ching-proposals) b=agent-terminal-proposals ;; esac   # the old names (D35, D64) are wrappers that run the same CLI
+  if [ "$b" = agent-terminal-proposals ]; then
     j=$((k + 1))
     while [ "$j" -lt "$NT" ]; do case "${TOKS[$j]}" in -h|--help) break ;; -*) j=$((j + 1)) ;; *) break ;; esac; done
     sub=${TOKS[$j]:-}
     if [ -n "$sub" ]; then case "$PROPOSALS_SUBS" in *" $sub "*) return 0 ;; esac; fi
     deny_proposals
   fi
-  case " ${TOKS[*]} " in *[Cc][Hh][Ii][Nn][Gg]-[Pp][Rr][Oo][Pp][Oo][Ss][Aa][Ll][Ss]*) ;; *) return 0 ;; esac
+  # ching-proposals also matches kaching-proposals (the old names, D35 and D64)
+  case " ${TOKS[*]} " in *[Cc][Hh][Ii][Nn][Gg]-[Pp][Rr][Oo][Pp][Oo][Ss][Aa][Ll][Ss]*|*[Aa][Gg][Ee][Nn][Tt]-[Tt][Ee][Rr][Mm][Ii][Nn][Aa][Ll]-[Pp][Rr][Oo][Pp][Oo][Ss][Aa][Ll][Ss]*) ;; *) return 0 ;; esac
   case "$PROPOSALS_READERS" in
     *" $b "*) if [ "$b" = git ] && { seg_matches '-c' || seg_matches '--config-env*'; }; then deny_proposals; fi; return 0 ;;
   esac
@@ -1020,7 +1021,8 @@ is_tamper_path() { # macOS volumes are case-insensitive: match on the lower-case
   s=$(printf '%s' "$SELF_DIR" | LC_ALL=C tr 'A-Z' 'a-z')
   case "$l" in "$s"|"$s"/*) return 0 ;; esac
   case "$l" in
-    */.claude/settings.json|*/.claude/settings.local.json|*/.git/hooks|*/.git/hooks/*|*.githooks|*.githooks/*|*/kaching/bin|*/kaching/bin/*|*/.claude/kaching|*/.claude/kaching/*) return 0 ;;
+    */.claude/settings.json|*/.claude/settings.local.json|*/.git/hooks|*/.git/hooks/*|*.githooks|*.githooks/*|*/agent-terminal/bin|*/agent-terminal/bin/*|*/.claude/agent-terminal|*/.claude/agent-terminal/*) return 0 ;;
+    */kaching/bin|*/kaching/bin/*|*/.claude/kaching|*/.claude/kaching/*) return 0 ;;   # the pre-D64 link and paths
     */ching/bin|*/ching/bin/*|*/.claude/ching|*/.claude/ching/*) return 0 ;;   # the pre-D35 link and paths
   esac
   return 1
@@ -1126,7 +1128,7 @@ tamper_bash() {
     case "$t" in -*) k=$((k + 1)); continue ;; esac
     abs=""
     # any case: macOS volumes are case-insensitive, so .claude/Settings.JSON is settings.json
-    case "$t" in *[Hh][Oo][Oo][Kk][Ss]*|*[Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss]*|*[Cc][Hh][Ii][Nn][Gg]*|*.[Ss][Qq][Ll])
+    case "$t" in *[Hh][Oo][Oo][Kk][Ss]*|*[Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss]*|*[Cc][Hh][Ii][Nn][Gg]*|*[Aa][Gg][Ee][Nn][Tt]-[Tt][Ee][Rr][Mm][Ii][Nn][Aa][Ll]*|*.[Ss][Qq][Ll])
       if [ "${#t}" -le 4096 ]; then abs=$(resolve_path "$t" "$SIM_CWD"); fi ;;
     esac
     if [ -n "$abs" ] && is_tamper_path "$abs" && tok_written "$k"; then
@@ -1442,7 +1444,7 @@ check_send_mcp() { # rule 10 (D18): drafts only
   allow
 }
 
-# ---------- learner mode (KACHING_LEARNER=1, Phase 6 spec 5.6) ----------
+# ---------- learner mode (AGENT_TERMINAL_LEARNER=1, Phase 6 spec 5.6) ----------
 check_learner() { # returns to let the normal rules run on what the learner may do; denies the rest
   local p abs lit root l r
   lit="${AGENT_HOME:-$HOME/.agent}/proposals"
@@ -1457,11 +1459,11 @@ check_learner() { # returns to let the normal rules run on what the learner may 
       if [ -n "$abs" ] && [ ! -L "$lit" ] && [ ! -L "$abs" ]; then
         case "$l" in "$r"/*) return 0 ;; esac
       fi
-      emit_deny "learner mode (KACHING_LEARNER=1): the learner writes only under $lit/, and ${abs:-this write} is not there." ;;
-    *) emit_deny "learner mode (KACHING_LEARNER=1): the learner may not use ${TOOL:-this tool}. It reads files and writes under $lit/ only: no shell, skills, MCP or network tools." ;;
+      emit_deny "learner mode (AGENT_TERMINAL_LEARNER=1): the learner writes only under $lit/, and ${abs:-this write} is not there." ;;
+    *) emit_deny "learner mode (AGENT_TERMINAL_LEARNER=1): the learner may not use ${TOOL:-this tool}. It reads files and writes under $lit/ only: no shell, skills, MCP or network tools." ;;
   esac
 }
-if [ "${KACHING_LEARNER:-${CHING_LEARNER:-}}" = 1 ]; then check_learner; fi
+if [ "${AGENT_TERMINAL_LEARNER:-${KACHING_LEARNER:-${CHING_LEARNER:-}}}" = 1 ]; then check_learner; fi
 
 case "$TOOL" in
   Bash|Monitor) check_bash ;;   # Monitor runs a shell command too ({command, description, timeout_ms})

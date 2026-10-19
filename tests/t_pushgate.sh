@@ -97,7 +97,7 @@ fixed=(
   'rm .git/hooks/pre-push|editing hooks, settings or the guard'
   'git config core.hooksPath /dev/null|changing core.hooksPath'
   'echo abc > .agent/release-token|release/migration tokens'
-  "$CLAUDE_DIR/kaching/bin/release-gate.sh --approve|release approval is for the human"
+  "$CLAUDE_DIR/agent-terminal/bin/release-gate.sh --approve|release approval is for the human"
 )
 # ordinary commands that were never gated
 ordinary=(

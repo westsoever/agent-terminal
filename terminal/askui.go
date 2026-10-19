@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// prog is the menu state kaching keeps for a background agent, started afresh for each question set.
+// prog is the menu state agterm keeps for a background agent, started afresh for each question set.
 func (m *model) prog(sid, id string, n int) *askProg {
 	if m.askProg == nil {
 		m.askProg = map[string]*askProg{}
@@ -24,7 +24,7 @@ func (m *model) prog(sid, id string, n int) *askProg {
 }
 
 // bgPrompt shows a background agent's menu: the one on its screen (rebuilt from claude logs), or, until that is
-// read, its open question drawn from the transcript and the keys kaching sent (askProg), in the lines of a real
+// read, its open question drawn from the transcript and the keys agterm sent (askProg), in the lines of a real
 // screen.
 func (m *model) bgPrompt(a *Agent) {
 	if p, ok := m.bgScr[a.SID]; ok {

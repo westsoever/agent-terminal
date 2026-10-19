@@ -3,7 +3,7 @@
 # pass/fail counts. Exit status is non-zero when anything failed. Set KEEP=1 to keep the sandbox.
 set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-T_ROOT=$(mktemp -d /tmp/kaching-tests.XXXXXX)
+T_ROOT=$(mktemp -d /tmp/agent-terminal-tests.XXXXXX)
 export T_ROOT
 [ -z "${KEEP:-}" ] && trap 'rm -rf "$T_ROOT"' EXIT
 

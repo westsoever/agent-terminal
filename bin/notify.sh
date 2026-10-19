@@ -12,8 +12,8 @@
 # osascript. Env: NOTIFY_CWD NOTIFY_SESSION NOTIFY_ACTIVATE NOTIFY_DRY_RUN NOTIFY_LOG NOTIFY_NOW (epoch)
 # NOTIFY_TERMINAL_NOTIFIER NOTIFY_OSASCRIPT NOTIFY_IDLE_SUPPRESS (900 s) NOTIFY_PUSH_DONE AGENT_HOME
 set -euo pipefail
-# A learner model call (learn_model_call sets KACHING_LEARNER=1) never notifies: no log line, no popup, no .last stamp.
-[ "${KACHING_LEARNER:-${CHING_LEARNER:-}}" != 1 ] || exit 0
+# A learner model call (learn_model_call sets AGENT_TERMINAL_LEARNER=1) never notifies: no log line, no popup, no .last stamp.
+[ "${AGENT_TERMINAL_LEARNER:-${KACHING_LEARNER:-${CHING_LEARNER:-}}}" != 1 ] || exit 0
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
@@ -130,7 +130,7 @@ ev notify "$(jq -nc --arg k "$KIND" --arg o "$OUTCOME" --arg w "$WHY" '{kind:$k,
 
 case "$METHOD" in
   terminal-notifier)
-    "$TN" -title "$TITLE" -message "$MSG" -group "kaching-$NAME" -activate "$ACTIVATE" >/dev/null 2>&1 || true ;;
+    "$TN" -title "$TITLE" -message "$MSG" -group "agent-terminal-$NAME" -activate "$ACTIVATE" >/dev/null 2>&1 || true ;;
   osascript)
     # Title and message go in as argv so they are never parsed as AppleScript source.
     "$OSA" -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' -e 'end run' -- "$TITLE" "$MSG" >/dev/null 2>&1 || true ;;

@@ -1,4 +1,4 @@
-module github.com/clyde/kaching-terminal
+module github.com/clyde/agent-terminal
 
 go 1.27.2
 

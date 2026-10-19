@@ -1,7 +1,7 @@
 package main
 
 // Background agents: sessions that Claude Code runs without a window (`claude --bg`, listed by `claude agents`).
-// /NW starts one. Kaching sends them text the way a person would: it opens `claude attach <id>` in a pty of its
+// /NW starts one. Agent Terminal sends them text the way a person would: it opens `claude attach <id>` in a pty of its
 // own, pastes the text, pushes Enter and closes the attach client. The session keeps running.
 
 import (
@@ -19,7 +19,7 @@ import (
 	"github.com/creack/pty"
 )
 
-// claudeBin: the claude CLI. Kaching can start from Raycast with a short PATH, so the usual places are tried too.
+// claudeBin: the claude CLI. Agent Terminal can start from Raycast with a short PATH, so the usual places are tried too.
 func claudeBin() string {
 	if p, err := exec.LookPath("claude"); err == nil {
 		return p

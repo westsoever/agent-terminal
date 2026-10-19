@@ -350,7 +350,7 @@ func pcFormPost(a *PCAsk, f *pcForm) (path string, body map[string]any, what str
 		}
 		return "verdicts", body, what, nil
 	}
-	return "", nil, "", errors.New("kaching can't send this answer")
+	return "", nil, "", errors.New("agterm can't send this answer")
 }
 
 // pcSend posts what the form holds, or says what is missing.

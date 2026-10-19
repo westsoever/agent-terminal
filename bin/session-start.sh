@@ -6,8 +6,8 @@
 #   touch   UserPromptSubmit hook: mark the session "working"; its window leaves the monitor queue (queue.sh back).
 #   end      SessionEnd hook: mark the session "ended" (queue.sh forget).
 set -euo pipefail
-# A learner model call (learn_model_call sets KACHING_LEARNER=1) is no session: no registry entry, no event, no context.
-[ "${KACHING_LEARNER:-${CHING_LEARNER:-}}" != 1 ] || exit 0
+# A learner model call (learn_model_call sets AGENT_TERMINAL_LEARNER=1) is no session: no registry entry, no event, no context.
+[ "${AGENT_TERMINAL_LEARNER:-${KACHING_LEARNER:-${CHING_LEARNER:-}}}" != 1 ] || exit 0
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"

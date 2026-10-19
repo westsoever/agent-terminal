@@ -1,8 +1,8 @@
 package main
 
-// Questions an agent asks the owner (the AskUserQuestion tool): read in full from its transcript, so kaching shows
+// Questions an agent asks the owner (the AskUserQuestion tool): read in full from its transcript, so agterm shows
 // every question with its recommended answer, takes all recommended answers with one key (quick approve), and
-// can show and answer the menu of a background agent, which has no screen kaching can read.
+// can show and answer the menu of a background agent, which has no screen agterm can read.
 //
 // The keys of Claude Code's menu, checked against a live session (2.1.302):
 //   - a single-choice question: its number picks the option and moves on to the next question;
@@ -108,7 +108,7 @@ func askRecommendation(q AskQuestion) string {
 	return strings.Join(r, ", ")
 }
 
-// askProg is where a background agent's menu is, as far as kaching can tell: it counts the keys it sent. A
+// askProg is where a background agent's menu is, as far as agterm can tell: it counts the keys it sent. A
 // new question set (another tool call) starts at the first question.
 type askProg struct {
 	id    string         // the tool call this belongs to
@@ -144,7 +144,7 @@ func (p *askProg) press(qs []AskQuestion, k string) {
 	case len(k) == 1 && k[0] >= '1' && k[0] <= '9':
 		n := int(k[0] - '0')
 		if n > len(q.Options) {
-			return // "Type something", "Chat about this": kaching does not follow those
+			return // "Type something", "Chat about this": agterm does not follow those
 		}
 		if q.Multi {
 			if p.picks[p.cur] == nil {

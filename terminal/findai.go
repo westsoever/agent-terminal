@@ -13,7 +13,7 @@ package main
 // ~/.claude/sessions and a row in `claude agents`); loadAgents leaves it out (hidden in snapshot.go), so it
 // never shows on the desk. It is gone when the call ends.
 //
-// It also sets KACHING_LEARNER=1, the marker Kaching's own hooks read as "a model call, no session" (so they stay
+// It also sets AGENT_TERMINAL_LEARNER=1, the marker Agent Terminal's own hooks read as "a model call, no session" (so they stay
 // out even if --safe-mode did not exist), and CLAUDE_MEM_INTERNAL=1 (claude-mem does not observe it). --bare is
 // no choice: it wants an API key. The prompt is an index of the latest sessions, at most aiPromptCap bytes.
 
@@ -48,9 +48,9 @@ var aiModel = "haiku"
 // aiTimeout is how long Claude has to answer; a variable so a test can shorten it.
 var aiTimeout = 120 * time.Second
 
-// aiBin: the claude to run. KACHING_CLAUDE_BIN overrides it (the learner's variable; the tests use a fake).
+// aiBin: the claude to run. AGENT_TERMINAL_CLAUDE_BIN overrides it (the learner's variable; the tests use a fake).
 func aiBin() string {
-	if p := os.Getenv("KACHING_CLAUDE_BIN"); p != "" {
+	if p := os.Getenv("AGENT_TERMINAL_CLAUDE_BIN"); p != "" {
 		return p
 	}
 	return claudeBin()
@@ -163,7 +163,7 @@ func aiEnv(env []string) []string {
 	var out []string
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
-		drop := k == "KACHING_LEARNER" || k == "CLAUDE_MEM_INTERNAL"
+		drop := k == "AGENT_TERMINAL_LEARNER" || k == "CLAUDE_MEM_INTERNAL"
 		for _, v := range sessionVars {
 			drop = drop || k == v
 		}
@@ -171,12 +171,12 @@ func aiEnv(env []string) []string {
 			out = append(out, kv)
 		}
 	}
-	return append(out, "KACHING_LEARNER=1", "CLAUDE_MEM_INTERNAL=1")
+	return append(out, "AGENT_TERMINAL_LEARNER=1", "CLAUDE_MEM_INTERNAL=1")
 }
 
 // aiDir is the folder the call runs in: empty, so no project config is found there.
 func aiDir() string {
-	d := filepath.Join(os.TempDir(), "kaching-find")
+	d := filepath.Join(os.TempDir(), "agent-terminal-find")
 	_ = os.MkdirAll(d, 0o700)
 	return d
 }

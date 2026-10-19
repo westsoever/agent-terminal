@@ -49,7 +49,7 @@ func transmit(a Agent, text string, keys []string) string {
 }
 
 // recipients: the agents of a group that /ALL writes to. An agent that shows a menu is left out (a message typed
-// into a menu is no message), and so is one that kaching can't type into.
+// into a menu is no message), and so is one that agterm can't type into.
 func (m *model) recipients(group string) (send []Agent, skipped []string) {
 	for _, a := range m.agents {
 		if !inGroup(a, group) {

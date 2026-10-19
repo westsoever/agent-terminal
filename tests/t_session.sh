@@ -128,15 +128,22 @@ assert_eq "events: compact with trigger" "auto" "$(jq -r 'select(.kind=="compact
 printf '%s' "$(hook_json SessionEnd "$ER" s-ev)" | "$BIN/session-start.sh" end
 assert_eq "events: session_end" "1" "$(jq -r 'select(.kind=="session_end" and .sid=="s-ev") | .kind' "$EVF" | wc -l | tr -d ' ')"
 assert_eq "events: name is the repo" "evrepo" "$(jq -r 'select(.sid=="s-ev") | .name' "$EVF" | sort -u)"
-# ---------- the learner's own model calls (KACHING_LEARNER=1) are not sessions: every mode exits at once ----------
+# ---------- the learner's own model calls (AGENT_TERMINAL_LEARNER=1) are not sessions: every mode exits at once ----------
 LR=$(mk_repo learnrepo); write_goal "$LR" "true"
 for m in start touch end; do
   a=$m; [ "$m" != start ] || a=""
   # a here-string, not a pipe: the hook exits without reading stdin, and a pipe's writer could then die of SIGPIPE
-  out=$(KACHING_LEARNER=1 "$BIN/session-start.sh" ${a:+"$a"} 2>&1 <<<"$(hook_json SessionStart "$LR" s-learner '{"source":"startup"}')"); rc=$?
+  out=$(AGENT_TERMINAL_LEARNER=1 "$BIN/session-start.sh" ${a:+"$a"} 2>&1 <<<"$(hook_json SessionStart "$LR" s-learner '{"source":"startup"}')"); rc=$?
   assert_eq "learner ($m): exit 0" "0" "$rc"
   assert_eq "learner ($m): prints nothing (no context injected)" "" "$out"
 done
 assert_no_file "learner: no registry entry in sessions/" "$AGENT_HOME/sessions/s-learner"
 assert_eq "learner: no events" "0" "$(grep -c '"s-learner"' "$AGENT_HOME/events.jsonl" 2>/dev/null || true)"
+# ---------- the old variable names still count (D64: KACHING_*, D35: CHING_*): lib.sh maps them to AGENT_TERMINAL_* ----------
+assert_eq "env: KACHING_X fills AGENT_TERMINAL_X" "from-kaching" "$(env -u AGENT_TERMINAL_ZZ KACHING_ZZ=from-kaching bash -c '. "$1"; echo "$AGENT_TERMINAL_ZZ"' _ "$BIN/lib.sh")"
+assert_eq "env: CHING_X fills AGENT_TERMINAL_X" "from-ching" "$(env -u AGENT_TERMINAL_ZZ CHING_ZZ=from-ching bash -c '. "$1"; echo "$AGENT_TERMINAL_ZZ"' _ "$BIN/lib.sh")"
+assert_eq "env: KACHING_X wins over CHING_X" "from-kaching" "$(env -u AGENT_TERMINAL_ZZ KACHING_ZZ=from-kaching CHING_ZZ=from-ching bash -c '. "$1"; echo "$AGENT_TERMINAL_ZZ"' _ "$BIN/lib.sh")"
+assert_eq "env: AGENT_TERMINAL_X wins over both" "new" "$(AGENT_TERMINAL_ZZ=new KACHING_ZZ=from-kaching CHING_ZZ=from-ching bash -c '. "$1"; echo "$AGENT_TERMINAL_ZZ"' _ "$BIN/lib.sh")"
+out=$(KACHING_LEARNER=1 "$BIN/session-start.sh" 2>&1 <<<"$(hook_json SessionStart "$LR" s-learner '{"source":"startup"}')"); rc=$?
+assert_eq "env: KACHING_LEARNER=1 still makes the session hook exit at once" "0:" "$rc:$out"
 exit 0

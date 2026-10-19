@@ -154,7 +154,7 @@ func TestSlashProjectCommands(t *testing.T) {
 	}
 }
 
-// A draft survives a restart: typing saves it (even with the box still open), a new kaching loads it, Esc keeps
+// A draft survives a restart: typing saves it (even with the box still open), a new agterm loads it, Esc keeps
 // it, sending forgets it, and an emptied draft is no draft.
 func TestDraftsSurviveRestart(t *testing.T) {
 	t.Setenv("AGENT_HOME", t.TempDir())

@@ -3,7 +3,7 @@ package main
 // The RP view's branch and worktree panels (D60): b lists a repo's branches, the local ones and the ones on origin
 // with no local branch, each against the default branch; w lists its worktrees. On a branch (or a worktree's
 // branch) 1 starts an agent that reviews it, 2 one that merges it into the default branch, 3 one that fixes it;
-// k writes the agent's task. A merge here is an agent's job, not kaching's: a local branch has no checks and can
+// k writes the agent's task. A merge here is an agent's job, not agterm's: a local branch has no checks and can
 // conflict, and the main checkout may have another session's work in it.
 
 import (

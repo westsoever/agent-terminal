@@ -5,7 +5,7 @@
 
 LW=$KIT/tests/live-watch.sh
 FAKE=$WORK/fake-lc
-SCRIPT=$WORK/kaching-watch-fake.sh
+SCRIPT=$WORK/agent-terminal-watch-fake.sh
 printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' >"$SCRIPT"
 LOG=$AGENT_HOME/watch.log
 : >"$LOG"
@@ -32,7 +32,7 @@ export LAUNCHCTL=$FAKE
 
 mkprint() { # state runs lastexit [script]
   local state=$1 runs=$2 last=$3 script=${4:-$SCRIPT}
-  printf 'gui/501/org.kaching.watch = {\n\tactive count = 0\n\tpath = /x/org.kaching.watch.plist\n\ttype = LaunchAgent\n\tstate = %s\n\n\tprogram = /bin/bash\n\targuments = {\n\t\t/bin/bash\n\t\t%s\n\t}\n\n\tstdout path = %s\n\tstderr path = %s\n\tenvironment = {\n\t\tAGENT_HOME => %s\n\t}\n\n\truns = %s\n\tlast exit code = %s\n\n\trun interval = 300 seconds\n}\n' \
+  printf 'gui/501/org.agent-terminal.watch = {\n\tactive count = 0\n\tpath = /x/org.agent-terminal.watch.plist\n\ttype = LaunchAgent\n\tstate = %s\n\n\tprogram = /bin/bash\n\targuments = {\n\t\t/bin/bash\n\t\t%s\n\t}\n\n\tstdout path = %s\n\tstderr path = %s\n\tenvironment = {\n\t\tAGENT_HOME => %s\n\t}\n\n\truns = %s\n\tlast exit code = %s\n\n\trun interval = 300 seconds\n}\n' \
     "$state" "$script" "$LOG" "$LOG" "$AGENT_HOME" "$runs" "$last" >"$WORK/print.txt"
 }
 lw() { LIVE_WATCH_KICK_WAIT=2 "$LW" "$@" 2>&1; }   # output of one run; $? of the run is read by the caller via lw_rc
@@ -45,7 +45,7 @@ put_event() { printf '{"ts":"%s","sid":"s","name":"n","cwd":"/x","kind":"%s","da
 rm -f "$WORK/print.txt"
 out=$(lw); rc=$(lw_rc)
 assert_eq "not loaded: exit 1" "1" "$rc"
-assert_contains "not loaded: says so" "$out" "FAIL: org.kaching.watch is not loaded"
+assert_contains "not loaded: says so" "$out" "FAIL: org.agent-terminal.watch is not loaded"
 
 # ---- healthy
 mkprint "not running" 174 0
@@ -122,7 +122,7 @@ mkprint "not running" 10 0
 out=$(lw --kick); rc=$(lw_rc --kick)
 assert_eq "kick: exit 0 when runs goes up" "0" "$rc"
 assert_contains "kick: runs went up" "$out" "kickstart: runs 10 -> 11"
-assert_contains "kick: kickstarted the right job" "$(cat "$WORK/lc.calls")" "kickstart gui/$(id -u)/org.kaching.watch"
+assert_contains "kick: kickstarted the right job" "$(cat "$WORK/lc.calls")" "kickstart gui/$(id -u)/org.agent-terminal.watch"
 assert_not_contains "kick: never uses -k (would kill a run in progress)" "$(cat "$WORK/lc.calls")" "kickstart -k"
 mkprint "not running" 10 0
 touch "$WORK/kick-noop"

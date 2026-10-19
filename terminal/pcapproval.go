@@ -45,7 +45,7 @@ func pcApprovalKind(typ string) string {
 }
 
 // pcInlineApproval: Paperclip's own inbox gives request_board_approval no approve button (attention.js sets
-// inlineResolvable false): it carries a reviewed tool action that the approval page shows. kaching follows it.
+// inlineResolvable false): it carries a reviewed tool action that the approval page shows. agterm follows it.
 func pcInlineApproval(typ string) bool { return typ != "request_board_approval" }
 
 // pcApprovalInfo reads the company's pending approvals for the payloads (the feed gives only a title). It asks

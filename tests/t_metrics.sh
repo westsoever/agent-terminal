@@ -3,7 +3,7 @@
 # logs in the shape lib.sh ev writes; the real log is never read. TZ and METRICS_NOW pin the clock.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-unset KACHING_INCLUDE_SANDBOX                    # the session running the tests must not switch the exclusion off
+unset AGENT_TERMINAL_INCLUDE_SANDBOX                    # the session running the tests must not switch the exclusion off
 export TZ=UTC
 NOW=$(date -j -f '%Y-%m-%d %H:%M:%S' "2026-10-16 12:00:00" +%s)   # 2026-10-16 12:00 UTC (TZ=UTC above)
 export METRICS_NOW=$NOW
@@ -297,8 +297,8 @@ assert_contains "sandbox: the footer says how to include them" "$OUT" "--all"
 OUT=$(AGENT_HOME="$SB" "$M" --all 2>&1)
 assert_eq "sandbox: --all includes them" "8" "$(tcell TOTAL asked)"
 assert_contains "sandbox: --all shows nothing excluded" "$OUT" "excluded: 0 events"
-OUT=$(AGENT_HOME="$SB" KACHING_INCLUDE_SANDBOX=1 "$M" 2>&1)
-assert_eq "sandbox: KACHING_INCLUDE_SANDBOX=1 includes them" "8" "$(tcell TOTAL asked)"
+OUT=$(AGENT_HOME="$SB" AGENT_TERMINAL_INCLUDE_SANDBOX=1 "$M" 2>&1)
+assert_eq "sandbox: AGENT_TERMINAL_INCLUDE_SANDBOX=1 includes them" "8" "$(tcell TOTAL asked)"
 JSON=$(AGENT_HOME="$SB" "$M" --json)
 assert_eq "sandbox: --json excluded count" "5" "$(printf '%s' "$JSON" | jq -r '.excluded_sandbox_events')"
 assert_eq "sandbox: --json total asked" "3" "$(printf '%s' "$JSON" | jq -r '.total.asked')"
@@ -310,8 +310,8 @@ assert_eq "sandbox-only log: exit 0" "0" "$rc"
 assert_contains "sandbox-only log: no events" "$OUT" "no events"
 assert_contains "sandbox-only log: the exclusion is visible" "$OUT" "excluded: 1 events"
 # the same fixtures under the real /tmp cwd shape the tests themselves use
-OUT=$(AGENT_HOME="$SB2" KACHING_INCLUDE_SANDBOX=1 "$M" 2>&1)
-assert_eq "sandbox-only log with KACHING_INCLUDE_SANDBOX=1 shows it" "1" "$(tcell TOTAL asked)"
+OUT=$(AGENT_HOME="$SB2" AGENT_TERMINAL_INCLUDE_SANDBOX=1 "$M" 2>&1)
+assert_eq "sandbox-only log with AGENT_TERMINAL_INCLUDE_SANDBOX=1 shows it" "1" "$(tcell TOTAL asked)"
 # lib.sh keeps the one definition of what a sandbox is
 assert_eq "metrics.sh does not define its own is_sandbox_path" "0" "$(grep -c '^is_sandbox_path()' "$M")"
 assert_contains "metrics.sh sources lib.sh" "$(cat "$M")" 'lib.sh'
@@ -361,7 +361,7 @@ OUT=$(AGENT_HOME="$TZD" TZ=UTC "$M" --day 2026-10-15 2>&1)
 assert_contains "UTC --day 15th has nothing" "$OUT" "no events"
 export METRICS_NOW=$NOW
 
-# ---------- rotated logs (kaching-watch.sh moves a full log to events-<UTC stamp>.jsonl) ----------
+# ---------- rotated logs (agent-terminal-watch.sh moves a full log to events-<UTC stamp>.jsonl) ----------
 RT="$WORK/ah-rot"; mkdir -p "$RT"
 printf '{"ts":"2026-10-15T09:00:00Z","sid":"r1","cwd":"/work/alpha","kind":"stop_ok","data":{"outcome":"input"}}\n' >"$RT/events.jsonl"
 printf '{"ts":"2026-10-14T09:00:00Z","sid":"r2","cwd":"/work/alpha","kind":"stop_ok","data":{"outcome":"input"}}\n' >"$RT/events-20261015-020000.jsonl"

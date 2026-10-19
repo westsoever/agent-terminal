@@ -294,7 +294,7 @@ assert_contains "help: --inbox marks FINISHED as seen" "$help" "--inbox marks FI
 assert_contains "help: the whole header is printed (ends with the Env line)" "$help" "DASH_ACTIVE_MINS (30)"
 assert_not_contains "help: does not print code" "$help" "set -euo pipefail"
 assert_contains "dispatcher doc: --inbox marks FINISHED as seen" "$(cat "$KIT/dispatcher/AGENTS.md")" "marks FINISHED as seen"
-assert_contains "kaching-functions.md: reading the inbox marks finished work as seen" "$(cat "$KIT/kaching-functions.md")" "marks it as seen"
+assert_contains "agent-terminal-functions.md: reading the inbox marks finished work as seen" "$(cat "$KIT/agent-terminal-functions.md")" "marks it as seen"
 
 # ---------- git sync: a SYNC lane in --inbox and one line in the default view ----------
 # The snapshot is bin/sync-check.sh's sync-check.md. Written by hand here so these checks do not depend on it;
@@ -353,7 +353,7 @@ assert_eq "sync: removing the snapshot brings the old output back, byte for byte
 # the real script and the real dash together
 SYR=$(cd "$(mk_repo syrepo)" && pwd -P); printf 'u\n' >"$SYR/untracked.txt"
 printf '%s\n' "$SYR" >"$WORK/sy-repos"
-KACHING_INCLUDE_SANDBOX=1 SYNC_NO_FETCH=1 AGENT_HOME="$SYA" AGENT_REPOS_FILE="$WORK/sy-repos" "$BIN/sync-check.sh" --quiet
+AGENT_TERMINAL_INCLUDE_SANDBOX=1 SYNC_NO_FETCH=1 AGENT_HOME="$SYA" AGENT_REPOS_FILE="$WORK/sy-repos" "$BIN/sync-check.sh" --quiet
 assert_contains "sync: sync-check.sh then dash.sh: the count line" "$(sydash | tail -1)" "sync: 1 repo needs attention (oldest <1h) - bin/dash.sh --inbox"
 assert_contains "sync: ... and the lane" "$(sydash --inbox | sed -n '/^SYNC/,$p')" "  syrepo: 1 dirty worktree (oldest <1h)"
 

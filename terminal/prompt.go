@@ -7,7 +7,7 @@ import (
 )
 
 // Prompt is a menu the agent shows on its screen right now: an AskUserQuestion (one question or several, with
-// its review step), a plan approval, a permission or trust prompt. Read from the Terminal tab itself, so kaching
+// its review step), a plan approval, a permission or trust prompt. Read from the Terminal tab itself, so agterm
 // shows exactly what the agent shows, whatever produced it.
 type Prompt struct {
 	Lines   []string // the prompt as on screen, rule lines left out

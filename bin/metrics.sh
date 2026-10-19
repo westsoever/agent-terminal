@@ -5,7 +5,7 @@
 #
 #   --days N   the last N days up to today (default 7; today counts as one)
 #   --day D    that one day only
-#   --all      count sandbox/test sessions too (same as KACHING_INCLUDE_SANDBOX=1)
+#   --all      count sandbox/test sessions too (same as AGENT_TERMINAL_INCLUDE_SANDBOX=1)
 #   --json     the same numbers as one JSON document
 #
 # One row per day: sessions seen, questions asked, notifications delivered / routed to the inbox / suppressed
@@ -14,9 +14,9 @@
 # Days are LOCAL time (TZ; TZ=UTC gives UTC days): notify.sh books its daily budget and quiet hours by the
 # local clock, so a "day" here is the day those limits ran on. Event timestamps are UTC and are converted.
 # Reads $AGENT_HOME/events.jsonl and, when the window reaches them, the rotated events-<UTC stamp>.jsonl files
-# that kaching-watch.sh leaves. One streaming jq pass over the log, so a 20 MiB log takes a couple of seconds;
+# that agent-terminal-watch.sh leaves. One streaming jq pass over the log, so a 20 MiB log takes a couple of seconds;
 # events whose cwd is_sandbox_path (lib.sh) are left out and counted. Malformed lines are skipped and counted.
-# Env: AGENT_HOME  KACHING_INCLUDE_SANDBOX  METRICS_NOW (epoch, tests)
+# Env: AGENT_HOME  AGENT_TERMINAL_INCLUDE_SANDBOX  METRICS_NOW (epoch, tests)
 set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
@@ -30,7 +30,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --days) [ $# -ge 2 ] || bad_usage "--days needs a number"; DAYS=$2; shift 2 ;;
     --day) [ $# -ge 2 ] || bad_usage "--day needs a date (YYYY-MM-DD)"; DAY=$2; shift 2 ;;
-    --all) export KACHING_INCLUDE_SANDBOX=1; shift ;;
+    --all) export AGENT_TERMINAL_INCLUDE_SANDBOX=1; shift ;;
     --json) JSON=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) bad_usage "unknown argument $1" ;;
@@ -80,7 +80,7 @@ for f in ${FILES[@]+"${FILES[@]}"}; do
   [ -r "$f" ] || { echo "metrics: cannot read $f" >&2; exit 1; }
 done
 
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/kaching-metrics.XXXXXX")
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/agent-terminal-metrics.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
 # Pass 1, the only pass over the log: every line is parsed once and folded into a small aggregate,
@@ -167,9 +167,9 @@ elif ! jq -nR --arg lo "$LO" --arg hi "$HI" "$PASS1" "${FILES[@]}" >"$TMP/agg.js
   exit 1
 fi
 
-# Sandbox cwds, by the one definition in lib.sh (is_sandbox_path honours KACHING_INCLUDE_SANDBOX / --all).
+# Sandbox cwds, by the one definition in lib.sh (is_sandbox_path honours AGENT_TERMINAL_INCLUDE_SANDBOX / --all).
 : >"$TMP/sbx.txt"
-if [ -z "${KACHING_INCLUDE_SANDBOX:-}" ]; then
+if [ -z "${AGENT_TERMINAL_INCLUDE_SANDBOX:-}" ]; then
   while IFS= read -r c; do
     if is_sandbox_path "$c"; then printf '%s\n' "$c" >>"$TMP/sbx.txt"; fi
   done < <(jq -r '[.days[] | keys[]] | unique | .[]' "$TMP/agg.json")
@@ -214,7 +214,7 @@ def relsum($k): map(.v[$k] // 0) | add;
    malformed_lines: .bad, undated_events: .undated}
 EOF
 )
-jq --slurpfile sbx "$TMP/sbx.json" --arg from "$FROM" --arg to "$TO" --arg tz "$TZNAME" --arg incl "${KACHING_INCLUDE_SANDBOX:-}" \
+jq --slurpfile sbx "$TMP/sbx.json" --arg from "$FROM" --arg to "$TO" --arg tz "$TZNAME" --arg incl "${AGENT_TERMINAL_INCLUDE_SANDBOX:-}" \
    --argjson files "$FILES_JSON" --argjson rotated "$ROTATED" --arg live "$AGENT_HOME/events.jsonl" --argjson livep "$LIVE_PRESENT" \
    "$RESULT" "$TMP/agg.json" >"$TMP/result.json"
 
@@ -262,7 +262,7 @@ def rcols: [col("sha"; "sha"; "l"), col("day"; "day"; "l"), col("repo"; "repo"; 
         elif .log.first_ts == null then "no events (the log has no readable event)"
         else "no events from \($win) (the log runs from \(.log.first_ts) to \(.log.last_ts))" end)
      else
-       ("kaching pilot metrics, \($win); days are local time (\(.tz)), the clock notify.sh budgets by",
+       ("agent-terminal pilot metrics, \($win); days are local time (\(.tz)), the clock notify.sh budgets by",
         "log: \(.log.live)" + (if .log.live_present then "" else " (missing)" end) + (if .log.rotated > 0 then " + \(.log.rotated) rotated" else "" end),
         "",
         table(dcols; (.days + [.total + {day: "TOTAL"}]); [2, 3, 11, 12, 14];
@@ -275,8 +275,8 @@ def rcols: [col("sha"; "sha"; "l"), col("day"; "day"; "l"), col("repo"; "repo"; 
      end),
     (if (.log.files | length) == 0 then empty else
       ("excluded: \(.excluded_sandbox_events) events"
-         + (if .sandbox_included then " (sandbox/test sessions are counted: --all or KACHING_INCLUDE_SANDBOX=1)"
-            else " from sandbox/test sessions (cwd under /tmp, /private/tmp, /var/folders or a task*-repo folder); --all or KACHING_INCLUDE_SANDBOX=1 counts them" end),
+         + (if .sandbox_included then " (sandbox/test sessions are counted: --all or AGENT_TERMINAL_INCLUDE_SANDBOX=1)"
+            else " from sandbox/test sessions (cwd under /tmp, /private/tmp, /var/folders or a task*-repo folder); --all or AGENT_TERMINAL_INCLUDE_SANDBOX=1 counts them" end),
        "skipped: \(.malformed_lines) malformed lines, \(.undated_events) events without a usable timestamp") end) ]
 | .[]
 EOF

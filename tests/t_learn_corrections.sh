@@ -9,8 +9,8 @@ FX="$KIT/tests/fixtures/learn"
 CFX="$FX/corrections"
 LC="$BIN/learn-corrections.sh"
 export TZ=UTC
-export KACHING_CLAUDE_BIN="$FX/claude-stub"
-export KACHING_GH_BIN="$WORK/no-such-gh"   # no test reaches the real gh
+export AGENT_TERMINAL_CLAUDE_BIN="$FX/claude-stub"
+export AGENT_TERMINAL_GH_BIN="$WORK/no-such-gh"   # no test reaches the real gh
 VERSION_FP=$(proposal_fingerprint "do not bump the version number; the owner releases by hand")
 DATES_FP=$(proposal_fingerprint "write dates as YYYY-MM-DD")
 
@@ -229,11 +229,11 @@ assert_eq "bad patch: no rule file" "0" "$(nrules)"
 assert_contains "bad patch: logged" "$(cat "$P/.work/learn.log")" "does not apply"
 cp "$FX/agents-CLAUDE.md" "$HOME/.agents/CLAUDE.md"
 
-# ---------- KACHING_GLOBAL_RULES overrides the global file ----------
+# ---------- AGENT_TERMINAL_GLOBAL_RULES overrides the global file ----------
 fresh override
 mkdir -p "$WORK/override/rules"; cp "$FX/agents-CLAUDE.md" "$WORK/override/rules/CLAUDE.md"
 printf '# not this one\n' >"$HOME/.agents/CLAUDE.md"
-KACHING_GLOBAL_RULES="$WORK/override/rules/CLAUDE.md" "$LC"
+AGENT_TERMINAL_GLOBAL_RULES="$WORK/override/rules/CLAUDE.md" "$LC"
 assert_eq "override: target is that file" "$WORK/override/rules/CLAUDE.md" "$(proposal_get "$P/rule-no-version-bump.md" target)"
 assert_contains "override: draft sees it" "$(call_prompt corrections-draft)" "Write dates as YYYY-MM-DD."
 cp "$FX/agents-CLAUDE.md" "$HOME/.agents/CLAUDE.md"
@@ -273,7 +273,7 @@ cat >"$WORK/fake-gh" <<'EOS'
 EOS
 chmod +x "$WORK/fake-gh"
 git -C "$REPO" remote add pub https://github.com/fixture/repo-one.git
-repo_run gh KACHING_GH_BIN="$WORK/fake-gh"
+repo_run gh AGENT_TERMINAL_GH_BIN="$WORK/fake-gh"
 assert_contains "public (github remote): said in the first sentence" "$(proposal_section "$R" proposal | head -c 140)" "has a public remote (github.com/fixture/repo-one)"
 git -C "$REPO" remote remove pub
 

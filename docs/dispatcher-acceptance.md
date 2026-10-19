@@ -6,18 +6,18 @@ The dispatcher is one slim session that talks. It can run `dash.sh`, read a sess
 
 ## Before you start
 
-1. `ching-b` is merged into `~/bbq/kaching` main and `~/.claude/kaching` points at it (it does: `~/.claude/kaching` is a link to `~/bbq/kaching`). Check: `ls ~/.claude/kaching/dispatcher/tool-gate.sh`.
-2. `~/.claude/kaching/install.sh --install-dispatcher` has been run (it shows what it writes and asks first). Check: `ls ~/.agent/dispatcher/.claude/settings.json`. This does not touch `~/.claude/settings.json`.
+1. `ching-b` is merged into `~/bbq/agent-terminal` main and `~/.claude/agent-terminal` points at it (it does: `~/.claude/agent-terminal` is a link to `~/bbq/agent-terminal`). Check: `ls ~/.claude/agent-terminal/dispatcher/tool-gate.sh`.
+2. `~/.claude/agent-terminal/install.sh --install-dispatcher` has been run (it shows what it writes and asks first). Check: `ls ~/.agent/dispatcher/.claude/settings.json`. This does not touch `~/.claude/settings.json`.
 3. Voice services are up: `voicemode whisper service status` and `voicemode kokoro status` both say running. macOS microphone access is allowed for the terminal app you start it in.
 4. You picked the speed pass line in `MANUAL-STEPS.md`, step 0.6. Write it here before you begin: **pass line: 8 seconds** (picked 2026-10-16, D25) from the end of your sentence to the first spoken word.
 5. Have a stopwatch (a phone) and a second terminal for the checks below.
 
 ## Start it
 
-Press the voice shortcut, **Right Ctrl + Left Option**, from any Terminal tab. KachingBar starts the dispatcher if it is not running (`launch.sh "[shortcut] listen"`), or types `[shortcut] listen` into it if it is idle. It says "Yes?" at most and listens. Without KachingBar, start it by hand:
+Press the voice shortcut, **Right Ctrl + Left Option**, from any Terminal tab. AgentTerminalBar starts the dispatcher if it is not running (`launch.sh "[shortcut] listen"`), or types `[shortcut] listen` into it if it is idle. It says "Yes?" at most and listens. Without AgentTerminalBar, start it by hand:
 
 ```
-~/.claude/kaching/dispatcher/launch.sh "[shortcut] listen"
+~/.claude/agent-terminal/dispatcher/launch.sh "[shortcut] listen"
 ```
 
 The first start asks whether to trust the folder `~/.agent/dispatcher`: say yes (without that, Claude Code ignores that folder's permission rules; the gate hook still runs). The launcher refuses to start if the gate is missing or does not deny a test call, and says why.
@@ -38,7 +38,7 @@ Speak in normal sentences. After each phrase, stop the stopwatch at the first sp
 - It leads with the count ("Two need you."), names each blocked session by folder or repo name, and says the blocker in plain words.
 - It never reads out a path, a session id, a hash or a bit of markdown.
 - It stops and listens.
-- The facts match what `~/.claude/kaching/bin/dash.sh --speak` prints in your second terminal, run right after.
+- The facts match what `~/.claude/agent-terminal/bin/dash.sh --speak` prints in your second terminal, run right after.
 - First word within the pass line.
 
 **Fail:** answers without running `dash.sh`; misses a session that `dash.sh` shows as blocked; reads ids or paths; goes on past about four sentences; a denial for `dash.sh` itself (the gate's reason names the command it saw).
@@ -90,7 +90,7 @@ A push to `~/.miso` main is a production release. Never answer "yes" to this one
 ### 4b. The "yes" branch, on a throwaway session (optional, 3 minutes)
 
 ```
-mkdir -p /tmp/kaching-accept/sandbox && cd /tmp/kaching-accept/sandbox && printf 'x\n' > notes.txt
+mkdir -p /tmp/agent-terminal-accept/sandbox && cd /tmp/agent-terminal-accept/sandbox && printf 'x\n' > notes.txt
 claude -n sandbox --permission-mode bypassPermissions
 ```
 
@@ -105,10 +105,10 @@ Say: **"Tell sandbox to delete notes.txt."**
 Run the four phrases (and 3b) on Haiku, the default, then once more on Sonnet and note the two tables side by side:
 
 ```
-DISPATCHER_MODEL=sonnet ~/.claude/kaching/dispatcher/launch.sh "[shortcut] listen"
+DISPATCHER_MODEL=sonnet ~/.claude/agent-terminal/dispatcher/launch.sh "[shortcut] listen"
 ```
 
-Before a live run, the offline eval shows how each model handles the same phrases with a fixture session list and no microphone, nothing relayed: `~/.claude/kaching/dispatcher/eval.sh --model haiku` and `--model sonnet` (report in `/tmp/dispatcher-eval/`).
+Before a live run, the offline eval shows how each model handles the same phrases with a fixture session list and no microphone, nothing relayed: `~/.claude/agent-terminal/dispatcher/eval.sh --model haiku` and `--model sonnet` (report in `/tmp/dispatcher-eval/`).
 
 ## Check afterwards (second terminal)
 

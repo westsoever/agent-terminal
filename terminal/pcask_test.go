@@ -12,7 +12,7 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// The requests of an issue that kaching answers with a form. The fake server is the one of pcdetail_test.go
+// The requests of an issue that agterm answers with a form. The fake server is the one of pcdetail_test.go
 // (issue i14); every POST lands in the list it returns as "<path after /api/issues/i14/> <body>".
 
 func interaction(id, kind string, payload map[string]any, result map[string]any) map[string]any {
@@ -142,7 +142,7 @@ func TestPCAsksRender(t *testing.T) {
 		{"questions", questions, []string{"question 1 of 3", "Which lane?", "1 ( ) research ★", "2 ( ) hold", "←→ question", "s send"}},
 		{"recommended", recommended, []string{"a ★ answers, send", "1 ( ) research ★"}},
 		{"verdicts", verdicts, []string{"item 1 of 3", "1 approve", "2 reject", "3 defer", "←→ item", "s send", "> ·", "First note"}},
-		{"connection", connection, []string{"Connect Linear for Builder.", "kaching can't answer a connection intent: enter opens it in Paperclip"}},
+		{"connection", connection, []string{"Connect Linear for Builder.", "agterm can't answer a connection intent: enter opens it in Paperclip"}},
 	}
 	for _, c := range cases {
 		for _, sz := range [][2]int{{80, 24}, {160, 40}} {
@@ -462,7 +462,7 @@ func refusing(t *testing.T, srv *httptest.Server, msg string) *httptest.Server {
 	return front
 }
 
-// connection_intent and a kind kaching does not know: no key posts anything; the panel says to open it.
+// connection_intent and a kind agterm does not know: no key posts anything; the panel says to open it.
 func TestPCUnknownKindsPostNothing(t *testing.T) {
 	future := interaction("f1", "something_new", map[string]any{"version": 1, "prompt": "A request from a later Paperclip."}, nil)
 	for _, in := range []map[string]any{connection, future} {

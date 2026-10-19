@@ -8,7 +8,7 @@ yes() { if is_sandbox_path "$2"; then pass "sandbox: $1"; else fail "sandbox: $1
 no()  { if is_sandbox_path "$2"; then fail "real: $1" "  wrongly excluded: $2"; else pass "real: $1"; fi; }
 
 yes "/tmp itself" /tmp
-yes "under /tmp" /tmp/kaching-tests.abc/repo
+yes "under /tmp" /tmp/agent-terminal-tests.abc/repo
 yes "private tmp" /private/tmp/agent-sandbox/repo
 yes "private tmp itself" /private/tmp
 yes "macOS temp" /var/folders/zz/abc/T/x
@@ -23,4 +23,4 @@ no "tmp as a later component" /Users/clyde/bbq/tmp/x
 no "task without -repo" /Users/clyde/bbq/task3
 no "empty" ""
 
-KACHING_INCLUDE_SANDBOX=1 is_sandbox_path /tmp/x && fail "override" "  still excluded" || pass "override: KACHING_INCLUDE_SANDBOX=1 includes everything"
+AGENT_TERMINAL_INCLUDE_SANDBOX=1 is_sandbox_path /tmp/x && fail "override" "  still excluded" || pass "override: AGENT_TERMINAL_INCLUDE_SANDBOX=1 includes everything"

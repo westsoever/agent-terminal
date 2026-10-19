@@ -34,8 +34,8 @@
 #  cwd .work): {component: corrections, scanned: new prompts, candidates: stage-1 hits sent to stage 2, proposals:
 #  new files, outcome: ok|nothing-new|truncated|capped|error, covered: clusters dropped as covered}.
 # Env: AGENT_HOME; the LEARN_* settings (learn_setting; LEARN_PUBLIC_REPOS: repo paths or names, blank or comma
-#   separated); KACHING_CLAUDE_BIN (learn_model_call); KACHING_GLOBAL_RULES (default ~/.agents/CLAUDE.md);
-#   KACHING_GH_BIN (default gh); LEARN_CORRECTIONS_TEMPLATE (default templates/learn-prompts/corrections.md).
+#   separated); AGENT_TERMINAL_CLAUDE_BIN (learn_model_call); AGENT_TERMINAL_GLOBAL_RULES (default ~/.agents/CLAUDE.md);
+#   AGENT_TERMINAL_GH_BIN (default gh); LEARN_CORRECTIONS_TEMPLATE (default templates/learn-prompts/corrections.md).
 # Exit: 0, also when a model call fails or is capped (logged, the event says so); 2 bad usage; 3 unusable root.
 set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -43,7 +43,7 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$SELF_DIR/lib.sh"
 umask 077   # everything under .work (learn.log, the --classify prompt) is private, on every path
 TEMPLATE=${LEARN_CORRECTIONS_TEMPLATE:-$SELF_DIR/../templates/learn-prompts/corrections.md}
-GLOBAL_RULES=${KACHING_GLOBAL_RULES:-$HOME/.agents/CLAUDE.md}
+GLOBAL_RULES=${AGENT_TERMINAL_GLOBAL_RULES:-$HOME/.agents/CLAUDE.md}
 
 # ---------- stage 1: the cues. Lower-cased text, curly apostrophes made straight, the whole prompt. ----------
 # Each cue is named so that learn-eval.sh can report hits per cue. Tune against the labelled set:
@@ -240,7 +240,7 @@ place_of() {
 tilde() { case "$1" in "$HOME") printf '~' ;; "$HOME"/*) printf '~/%s' "${1#"$HOME"/}" ;; *) printf '%s' "$1" ;; esac; }
 # public_note REPO: the first sentence of a proposal whose target repo is public, or nothing
 public_note() {
-  local repo=$1 name=${1##*/} e url slug vis gh=${KACHING_GH_BIN:-gh}
+  local repo=$1 name=${1##*/} e url slug vis gh=${AGENT_TERMINAL_GH_BIN:-gh}
   for e in $(learn_setting LEARN_PUBLIC_REPOS | tr ',' ' '); do
     if [ "$e" = "$repo" ] || [ "$e" = "$name" ]; then
       printf 'The target repo %s is public (LEARN_PUBLIC_REPOS), so approving this publishes the rule.' "$name"; return
