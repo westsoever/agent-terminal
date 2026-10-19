@@ -605,3 +605,39 @@ func TestHelpScrolls(t *testing.T) {
 		t.Fatal("help must open at the top")
 	}
 }
+
+// RC lists the agents by name on the left and shows the selected one's recap in full on the right; j/k cycle
+// through them, the scroll keys scroll a long recap and enter goes to the agent.
+func TestRecapPanel(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	cfg, _, _ := loadConfig()
+	m := model{cfg: cfg, w: 120, h: 30, view: vRecaps, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, rcScroll: &chatScroll{}}
+	long := strings.Repeat("A long recap line. ", 80) + "THE_END"
+	older := strings.Replace(recapLine, "We fixed the queue.", long, 1)
+	newer := strings.Replace(strings.Replace(recapLine, "We fixed the queue.", "The newer recap.", 1), "15:29", "16:29", 1)
+	m.agents = []Agent{{SID: "a", Name: "older-agent", Cwd: "/tmp", Transcript: writeTranscript(t, older)},
+		{SID: "b", Name: "newer-agent", Cwd: "/tmp", Transcript: writeTranscript(t, newer)}}
+	text := func() string {
+		return escRe.ReplaceAllString(strings.Join(m.recapsView(m.h-headerH-footerH), "\n"), "")
+	}
+
+	v := text()
+	if !strings.Contains(v, "newer-agent") || !strings.Contains(v, "older-agent") || !strings.Contains(v, "The newer recap.") {
+		t.Fatalf("the names on the left, the newest recap on the right:\n%s", v)
+	}
+	if strings.Contains(v, "A long recap") {
+		t.Fatalf("only the selected agent's recap shows:\n%s", v)
+	}
+	m, _ = press(m, cfg.Keys.Next)
+	if v = text(); !strings.Contains(v, "A long recap line.") || strings.Contains(v, "THE_END") || !strings.Contains(v, "more lines") {
+		t.Fatalf("the next agent's recap starts at its top and says there is more:\n%s", v)
+	}
+	m, _ = press(m, "end")
+	if v = text(); !strings.Contains(v, "THE_END") {
+		t.Fatalf("end scrolls to the end of the recap:\n%s", v)
+	}
+	m, _ = press(m, "enter")
+	if m.view != vDesk || m.selSID != "a" {
+		t.Fatalf("enter goes to the agent: view %d, sel %q", m.view, m.selSID)
+	}
+}
