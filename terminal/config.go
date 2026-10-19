@@ -44,6 +44,7 @@ type Config struct {
 	NWModel  string  `toml:"nw_model"`      // the model /NW starts an agent with, "" for Claude Code's default
 	NWEffort string  `toml:"nw_effort"`     // its effort level
 	NWPerm   string  `toml:"nw_permission"` // its permission mode: plan, auto, bypass, accept, manual or dontask
+	Theme    string  `toml:"theme"`         // the accent color, see theme.go; /THEME writes it
 	Keys     Keys    `toml:"keys"`
 	Replies  []Reply `toml:"reply"`
 }
@@ -67,6 +68,9 @@ nw_model = "claude-sonnet-5-5"
 nw_effort = "high"
 nw_permission = ""
 
+# The accent color: orange, amber, green, cyan, blue, violet, magenta or red. /THEME picks it and writes this line.
+theme = "orange"
+
 [keys]
 next = "l"            # next agent (down the list)
 prev = "j"            # previous agent (up the list)
@@ -75,7 +79,7 @@ type_reply = "k"      # write a reply (enter sends, esc keeps a draft)
 open_file = "o"       # then a letter: open that mentioned file
 go_to_window = "g"    # bring the agent's own Terminal window forward, where it is
 bring_here = "h"      # bring the agent's window to the main display and into focus, to type in it
-command = "/"         # command line: IN FL RP RC PR PO PC FIND <words> A<n> HELP QUIT
+command = "/"         # command line: IN FL RP RC PR PO PC FIND <words> THEME A<n> HELP QUIT
 wall = "W"            # every agent as tiles
 zoom = "z"            # in the wall: one tile full screen
 dismiss = "x"         # take a waiting agent out of the queue without answering
@@ -158,6 +162,7 @@ func loadConfig() (Config, time.Time, error) {
 	if !slices.Contains(tableStyles, c.Tables) {
 		c.Tables = "auto"
 	}
+	c.Theme = themeID(c.Theme) // empty or unknown: orange
 	fill := func(v *string, d string) {
 		if *v == "" {
 			*v = d

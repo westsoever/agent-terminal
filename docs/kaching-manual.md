@@ -18,6 +18,7 @@ Push `/`, write the code, then push `Enter`.
 | `PO` | Proposals | The changes that the learner proposes. The tab is orange when proposals are open. |
 | `PC` | Paperclip | Paperclip issues and company approvals that need you, and issues in progress. The selected row shows on the right, with what it asks you. The tab is orange when a row needs you. |
 | `FIND` | Find a session | Look for a session by its name, or by what you and the agents said in it. Write the words after `FIND`, for example `FIND kaching resume`. No tab shows this view. Refer to section 6.19. |
+| `THEME` | Accent color | Choose the color of the selected rows and of the things that need you: one of 8, orange is the default. Refer to section 7.7. |
 | `NW` | New agent | Start a background agent. You can add a folder, a model, an effort and a mode, for example `NW soii sonnet high`. Refer to section 6.15. |
 | `ALL` | Write to a group | Write one message to a group of agents: `ALL waiting`, `ALL input`, `ALL idle` or `ALL working`. Refer to section 6.17. |
 | `STOP` | – | Stop the selected background agent. Its conversation stays. |
@@ -696,6 +697,16 @@ Kaching draws the markdown tables in an agent's messages as tables.
 2. Above `[keys]`, set `nw_model`, `nw_effort` and `nw_permission`. A new `keys.toml` has `claude-sonnet-5-5` and `high`. Words that you write after `NW` have priority. An empty value leaves the choice to Claude Code, which then uses the `model` and `effortLevel` of `~/.claude/settings.json`. These options also start the agents that `b` and `t` hand a Paperclip issue to.
 3. In `[keys]`, set `quick_approve` to change the key of quick approve (`a`). Set `pc_agent` (`b`) and `pc_terminal` (`t`) to change the keys that hand a Paperclip issue to an agent.
 4. Save the file.
+
+### 7.7 Change the accent color
+
+The accent color is the color of the selected row, of the things that need you, and of the cursor. It is orange at first. You can change it to one of 8 colors: orange, amber, green, cyan, blue, violet, magenta or red. Each one is easy to read on a dark background and on a light background.
+
+1. Push `/`, write `THEME`, push `Enter`.
+2. Push `j` or `l` (or `↑` or `↓`), or a number from `1` to `8`, to move the cursor. The whole screen shows the color under the cursor, so you can see it before you choose.
+3. Push `Enter` to keep the color. Kaching writes it as `theme = "green"` in `keys.toml` and uses it again the next time that it starts. Push `Esc` to go back to the color that you had.
+
+To set a color at once, write its name after the command, for example `THEME green`. You can also write the `theme` line in `keys.toml` yourself, above `[keys]`. If the name in the file is not one of the 8, Kaching uses orange.
 
 ## 8. Kaching and the Terminal windows
 
