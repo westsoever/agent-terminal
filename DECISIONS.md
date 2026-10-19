@@ -2,6 +2,16 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D68 (2026-10-20): the grid on monitor 2 is laid out while agterm is open too (amends D38)
+
+**Decision (owner):** "Sometimes (e.g. now) the resizing of the terminals doesn't happen, tell me why that's the case and fix it."
+
+**Why it happened:** D38 said "agterm open: no automatic moves at all". `queue.sh` enforced that by having `reconcile` return before `flush`, and the grid is laid out in `flush`. So while agterm ran, a new session's `retile` did nothing, and a window opened or closed on monitor 2 never got its cell. "Sometimes" was "while agterm is open". A second, smaller cause, by design: a window on a desktop (Space) not shown now is left out of the grid until that desktop is shown and something retiles.
+
+**Built:** with agterm open, `reconcile` still lays out the grid (and applies a `send_back` move, which the `back` job used to flush on its own). What D38 was about stays the same: nothing comes over to monitor 1 and nothing goes back on its own while agterm is open. The main display is never laid out. Test in `tests/t_queue.sh`.
+
+**Not built:** retiling a desktop when you switch to it (it waits for the next session start, or the `tile` hotkey).
+
 ## D67 (2026-10-19): x dismisses an idle agent too
 
 **Decision (owner):** "Currently, I can only dismiss waiting sessions, allow me to also remove idle sessions from the agent-terminal so that I can keep a clean slate if I want to."
