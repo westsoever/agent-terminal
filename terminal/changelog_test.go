@@ -9,7 +9,7 @@ import (
 
 func TestChangelogLines(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "DECISIONS.md")
-	md := "# log\n\n## D2 (2026-10-20): second thing\n\nbody\n\n## D1 (2026-10-20): first thing\n\n## D0 (2026-10-19): older\n\n## Not a decision\n"
+	md := "# log\n\n## D2 (2026-10-20): second thing\n\nbody\n\n## D1 (2026-10-20): `first` thing\n\n## D0 (2026-10-19): older\n\n## Not a decision\n"
 	if err := os.WriteFile(p, []byte(md), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -31,6 +31,17 @@ func TestChangelogCommand(t *testing.T) {
 		got := m2.(model)
 		if got.view != vChangelog || got.helpOff != 0 {
 			t.Fatalf("%s: view %d offset %d", c, got.view, got.helpOff)
+		}
+	}
+}
+
+func TestChangelogFooter(t *testing.T) {
+	cfg, _, _ := loadConfig()
+	for _, v := range []view{vChangelog, vHelp} {
+		m := model{cfg: cfg, w: 120, h: 40, view: v}
+		f := escRe.ReplaceAllString(strings.Join(m.footer(), "\n"), "")
+		if !strings.Contains(f, "pgup pgdown") || !strings.Contains(f, "esc desk") || strings.Contains(f, "answer") {
+			t.Fatalf("view %d: the footer must show the scroll keys, not the desk's:\n%s", v, f)
 		}
 	}
 }
