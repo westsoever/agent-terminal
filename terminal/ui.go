@@ -567,6 +567,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		m.ticks++
 		m.refresh()
+		m.selectFile()
 		cmds := []tea.Cmd{tick()}
 		if c := m.closeShorts(); c != nil {
 			cmds = append(cmds, c)
@@ -1251,6 +1252,10 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.setStatus("answering " + name + "…")
 				return m, func() tea.Msg { return sentMsg{sid, name, "answer", answerTyped(tty, n, text)} }
 			}
+		}
+		if a := m.sel(); a != nil && a.Bg && screenCommand(text) { // its screen opens on nobody's window: show it
+			ag := *a
+			return m, tea.Sequence(m.deliver(text, nil), m.openShort(ag))
 		}
 		return m, m.deliver(text, nil)
 	}

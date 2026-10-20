@@ -1415,6 +1415,7 @@ func (m model) helpLines() []string {
 			"folder: a path, a folder in ~/bbq, or an agent's name; left out: the selected agent's\n"+
 			"options after it, in any order: a model (opus sonnet haiku fable) · an effort (low … max) · a mode (plan auto bypass accept manual dontask)\n"+
 			"e.g. NW soii sonnet high"),
+		row2("cl in a shell", "cl [name] [prompt]: a background agent in that folder, on NW's options; agterm selects it when it shows"),
 		row2("FIND words", "find a session: by its name, then by what was said in it (one message with all the words), then Claude picks (s)\nmore: Find below"),
 		row2("STOP", "stop the selected background agent (its conversation stays)"),
 		row2("BG", "move the selected Terminal session to the background: /exit, then claude --bg --resume with its id, name, model and mode; its tab closes\n"+
@@ -1477,7 +1478,7 @@ func (m model) helpLines() []string {
 		row2("enter", "send"),
 		row2("new line", "option+enter, ctrl+j, or \\ then enter"),
 		row2("option+key", "your layout's character: option+l @, option+5 [, option+8 {, option+7 |"),
-		row2("@ and /", "suggest the agent's files and the other sessions / commands; tab or enter takes one"),
+		row2("@ and /", "suggest the agent's files and the other sessions / commands; tab or enter takes one\na command with a screen of its own (/config, /mcp, /model with no name…) to a background agent opens its screen too"),
 		row2("@Name text", "a message that starts with a live session's name goes to that session (@\"two words\" for names with spaces)\na mention elsewhere stays in the text, and the agent itself passes it on"),
 		row2("@NewName", "a name that is no session yet: enter starts it first, as a background helper in the agent's folder\n(NW's model, effort, mode), then sends the message; the box shows it in orange before you send"),
 		row2("ctrl+v", "paste a clipboard image (saved, its path goes in)"),

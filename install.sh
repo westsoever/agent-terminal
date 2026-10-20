@@ -12,7 +12,7 @@
 #       diff shown before applying; nothing is written when the result is identical), and appends the two
 #       VoiceMode converse tool names to permissions.allow when they are missing (--uninstall leaves them).
 #   $CLAUDE_DIR/agent-terminal  -> symlink to this directory;  $CLAUDE_DIR/commands/<name>.md -> symlink for every
-#       file in commands/ (handoff, next, dash).
+#       file in commands/ (handoff, next, dash);  $CL_LINK (~/.local/bin/cl) -> bin/cl (D73; --uninstall removes it).
 #   From Kaching (D65) or Ching (D35): hooks under kaching/ or ching/ and the org.kaching.* / org.ching.* jobs are replaced; both links stay.
 #   ~/.agent-repos: created empty with a comment if absent (optional extra list for dash.sh).
 #   $LAUNCH_AGENTS_DIR/org.agent-terminal.watch.plist (default ~/Library/LaunchAgents): runs bin/agent-terminal-watch.sh every 300 s.
@@ -47,6 +47,7 @@ if [ -z "${AGENT_REPOS_FILE:-}" ]; then
   if [ "$CLAUDE_DIR" = "$HOME/.claude" ]; then AGENT_REPOS_FILE=$HOME/.agent-repos; else AGENT_REPOS_FILE=$(dirname "$CLAUDE_DIR")/.agent-repos; fi
 fi
 LINK="$CLAUDE_DIR/agent-terminal"
+CL_LINK=${CL_LINK:-$HOME/.local/bin/cl}   # D73: the cl command
 OLD_LINKS=("$CLAUDE_DIR/kaching" "$CLAUDE_DIR/ching")   # D65, D35: the link's names before the renames, kept as more links to this directory
 AGENT_TERMINAL_APPS_DIR=${AGENT_TERMINAL_APPS_DIR:-${KACHING_APPS_DIR:-${CHING_APPS_DIR:-}}}
 
@@ -394,7 +395,10 @@ if [ "$UNINSTALL" -eq 0 ]; then
     [ -f "$c" ] || continue
     plan_link "$c" "$CLAUDE_DIR/commands/$(basename "$c")"
   done
+  plan_link "$AGENT_TERMINAL_ROOT/bin/cl" "$CL_LINK"
 fi
+unlink_plan=""   # --uninstall: the cl link, only when it leads to this kit's bin/cl
+if [ "$UNINSTALL" -eq 1 ] && [ -L "$CL_LINK" ] && same_target "$CL_LINK" "$AGENT_TERMINAL_ROOT/bin/cl"; then unlink_plan=$CL_LINK; fi
 NEED_REPOS=0
 if [ "$UNINSTALL" -eq 0 ] && [ ! -e "$AGENT_REPOS_FILE" ]; then NEED_REPOS=1; fi
 
@@ -495,7 +499,7 @@ else
   OLD_MB_JOBS=""; OLD_MB_APPS_RM=""   # only --install-menubar and --uninstall remove an old dot
 fi
 
-if [ "$CHANGED" -eq 0 ] && [ -z "$link_plan" ] && [ -z "$relink_plan" ] && [ "$NEED_REPOS" -eq 0 ] && [ "$NEED_PLIST" -eq 0 ] \
+if [ "$CHANGED" -eq 0 ] && [ -z "$link_plan" ] && [ -z "$relink_plan" ] && [ -z "$unlink_plan" ] && [ "$NEED_REPOS" -eq 0 ] && [ "$NEED_PLIST" -eq 0 ] \
    && [ "$NEED_LPLIST" -eq 0 ] && [ "$CM_CHANGED" -eq 0 ] && [ "$NEED_MB_RM" -eq 0 ] && [ "$NEED_MB_APP_RM" -eq 0 ] \
    && [ -z "$OLD_JOBS" ] && [ -z "$OLD_MB_JOBS" ] && [ -z "$OLD_MB_APPS_RM" ]; then
   say "nothing to do"; exit 0
@@ -533,6 +537,7 @@ fi
 plan_lines() { # everything this run would do, whether or not settings.json changes
   while IFS='|' read -r t l; do [ -z "$l" ] || would "symlink $l -> $t"; done <<<"$link_plan"
   while IFS='|' read -r t l; do [ -z "$l" ] || would "point $l at $t (it led elsewhere)"; done <<<"$relink_plan"
+  [ -z "$unlink_plan" ] || would "remove the symlink $unlink_plan"
   [ "$NEED_REPOS" -eq 0 ] || would "create $AGENT_REPOS_FILE (empty, optional)"
   [ "$CHANGED" -eq 0 ] || would "back up and rewrite $SETTINGS_FILE"
   [ "$NEED_PLIST" -eq 0 ] || { if [ "$UNINSTALL" -eq 1 ]; then would "launchctl bootout and remove $PLIST"; else would "write $PLIST and launchctl bootstrap it"; fi; }
@@ -578,6 +583,7 @@ while IFS='|' read -r t l; do
     || { rm -f "$l.new.$$"; echo "install: could not point $l at $t" >&2; exit 1; }
   act "pointed $l at $t"
 done <<<"$relink_plan"
+if [ -n "$unlink_plan" ]; then rm -f "$unlink_plan"; act "removed the symlink $unlink_plan"; fi
 if [ "$NEED_REPOS" -eq 1 ]; then
   cp "$AGENT_TERMINAL_ROOT/templates/agent-repos.example" "$AGENT_REPOS_FILE.tmp"
   sed -i.bak 's/^~/# ~/' "$AGENT_REPOS_FILE.tmp"; rm -f "$AGENT_REPOS_FILE.tmp.bak"
@@ -620,5 +626,5 @@ remove_old_job() { # plist label
 }
 while IFS='|' read -r _p _l; do [ -z "$_p" ] || remove_old_job "$_p" "$_l"; done <<<"$OLD_JOBS"
 old_mb_remove
-if [ "$UNINSTALL" -eq 1 ]; then say "note: --uninstall removes hook entries, the watcher, the learner job and the menu bar dot; symlinks, a removed popup and the converse entries in permissions.allow (they may predate the install) are left as they are."; fi
+if [ "$UNINSTALL" -eq 1 ]; then say "note: --uninstall removes hook entries, the watcher, the learner job and the menu bar dot and ~/.local/bin/cl; other symlinks, a removed popup and the converse entries in permissions.allow (they may predate the install) are left as they are."; fi
 exit 0

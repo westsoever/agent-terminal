@@ -80,7 +80,7 @@ You can change these keys and messages. Refer to section 7.
 | `@`, then letters | Show the other sessions and the files of the agent folder that agree with the letters. A session shows with the word `session`. |
 | `@Name` at the start | Send the message to the session with that name, not to the selected agent. Refer to section 6.18. |
 | `@NewName` | A name that is not a session yet: `Enter` starts it as a background helper first, then sends the message to the selected agent. Refer to section 6.18. |
-| `/` at the start, then letters | Show the commands and skills that agree with the letters, with their descriptions: Claude Code commands, your commands and skills, the commands and skills of the agent folder and its parent folders, and the enabled plugins. |
+| `/` at the start, then letters | Show the commands and skills that agree with the letters, with their descriptions: Claude Code commands, your commands and skills, the commands and skills of the agent folder and its parent folders, and the enabled plugins. A command that opens a screen of its own in Claude Code (`/config`, `/model` without a name, `/mcp`, `/permissions`, `/agents`, `/hooks`, `/plugin`, `/memory`, `/resume`, `/rewind`, `/status`, `/context`, `/doctor`, `/login`), sent to a background agent, also opens the agent's screen in a short-lived window, so that you can use it there. |
 | `Tab` or `Enter` | Put the selected suggestion into the message. |
 | `↑`, `↓` | Select a suggestion. When there are no suggestions, move between lines. |
 | `Ctrl+V` | Paste an image from the clipboard. Agent Terminal saves it as a file and writes its path. The agent opens the file. If the clipboard has no image, Agent Terminal pastes the text. |
@@ -562,6 +562,16 @@ The folder must be trusted by Claude Code. If it is not, the command line asks `
 
 If Claude Code is logged out, the footer shows `Claude Code is logged out · /LOGIN` instead of the usage. Write `/LOGIN`: a short-lived window runs `claude auth login`. Agent Terminal checks every 5 minutes.
 
+#### Start a background agent from a shell
+
+`cl` starts a background agent in the folder of the shell, without Agent Terminal's command line. `install.sh` puts it in `~/.local/bin`, next to `agterm`.
+
+1. In a terminal, go to the folder.
+2. Write `cl` and push `Enter`. The agent gets the name of the folder. To give it another name, write it after `cl`: `cl hlp`. To give it a first message, write it after the name: `cl hlp fix the failing test`.
+3. `cl` shows the id of the agent. Agent Terminal selects the agent when it shows in the list (in a few seconds).
+
+`cl` uses the same model, effort and mode as `NW` (`nw_model`, `nw_effort`, `nw_permission` in `keys.toml`, section 7.6). If the folder is not trusted, `cl` shows Claude Code's message and Agent Terminal selects nothing. `claude` without `cl` still starts a session in the Terminal window.
+
 #### Move a Terminal session to the background
 
 A session that runs in a Terminal window can become a background agent. It keeps its conversation, its id and its name.
@@ -729,7 +739,7 @@ Agent Terminal draws the markdown tables in an agent's messages as tables.
 ### 7.6 Change how `NW` starts agents and the quick approve key
 
 1. Open `~/.agent/terminal/keys.toml`.
-2. Above `[keys]`, set `nw_model`, `nw_effort` and `nw_permission`. A new `keys.toml` has `claude-sonnet-5-5` and `high`. Words that you write after `NW` have priority. An empty value leaves the choice to Claude Code, which then uses the `model` and `effortLevel` of `~/.claude/settings.json`. These options also start the agents that `b` and `t` hand a Paperclip issue to.
+2. Above `[keys]`, set `nw_model`, `nw_effort` and `nw_permission`. A new `keys.toml` has `claude-sonnet-5-5` and `high`. Words that you write after `NW` have priority. An empty value leaves the choice to Claude Code, which then uses the `model` and `effortLevel` of `~/.claude/settings.json`. These options also start the agents that `b` and `t` hand a Paperclip issue to, and the agents that `cl` starts.
 3. In `[keys]`, set `quick_approve` to change the key of quick approve (`a`). Set `pc_agent` (`b`) and `pc_terminal` (`t`) to change the keys that hand a Paperclip issue to an agent.
 4. Save the file.
 
@@ -803,6 +813,8 @@ To read the screen of a background agent, Agent Terminal does not attach. It run
 | File | Contents |
 |---|---|
 | `~/.local/bin/agterm` | The program. |
+| `~/.local/bin/cl` | The `cl` command (a link to `bin/cl`). It starts a background agent from a shell. |
+| `~/.agent/terminal/select` | The agent that `cl` started. Agent Terminal selects it and removes the file. |
 | `~/.agent/terminal/keys.toml` | Your keys and fixed messages. |
 | `~/.agent/terminal/open` | Tells the monitor queue that Agent Terminal operates and which agent is selected. Agent Terminal removes it when it stops. |
 | `~/.agent/terminal/send.js` | The script that sends text to Terminal windows. Agent Terminal writes it when it starts. |

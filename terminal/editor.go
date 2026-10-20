@@ -679,3 +679,17 @@ func (e *editor) lines(w int) []string {
 	out = append(out, row(w, s(hint, cDark)))
 	return out
 }
+
+// screenCommand: a / command that opens a screen of its own in Claude Code (a list to pick from, a form, an
+// editor). Sent to a background agent, its screen opens with it (D77). /model with a model name opens none.
+func screenCommand(text string) bool {
+	cmd, arg, _ := strings.Cut(strings.TrimSpace(text), " ")
+	switch cmd {
+	case "/model":
+		return arg == ""
+	case "/config", "/mcp", "/permissions", "/agents", "/hooks", "/plugin", "/memory", "/resume", "/rewind",
+		"/status", "/context", "/doctor", "/login":
+		return true
+	}
+	return false
+}
