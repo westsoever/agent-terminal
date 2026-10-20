@@ -93,6 +93,15 @@ assert_eq "hotkeys: the file replaces the defaults" "key=18 mods=768 script=~/bi
 bad=ctrl+q
 bad=hyper+n" "$out"
 
+# ---------- the window checker (D69): AgentTerminalBar --tile-check, one "open|closed ids" tick per line ----------
+tc() { printf '%s\n' "$@" | "$EXE" --tile-check 2>&1 | tr '\n' ' ' | sed 's/ $//'; }
+assert_eq "tile check: agterm just opened -> one tile after the settle ticks" "- tile - -" "$(tc "open 1,2" "open 1,2" "open 1,2" "open 1,2")"
+assert_eq "tile check: a window opened -> tiles once it holds still" "- tile - - tile -" "$(tc "open 1,2" "open 1,2" "open 1,2" "open 1,2,3" "open 1,2,3" "open 1,2,3")"
+assert_eq "tile check: a window closed -> tiles" "- tile - - tile" "$(tc "open 1,2,3" "open 1,2,3" "open 1,2,3" "open 1,2" "open 1,2")"
+assert_eq "tile check: a set that keeps changing waits" "- - - - tile" "$(tc "open 1" "open 1,2" "open 1,2,3" "open 1,2,3,4" "open 1,2,3,4")"
+assert_eq "tile check: agterm closed -> never" "- - - -" "$(tc "closed 1,2" "closed 1,2,3" "closed 1,2,3" "closed 1")"
+assert_eq "tile check: agterm reopened -> tiles again" "- tile - - - tile" "$(tc "open 1" "open 1" "closed 1" "closed 1" "open 1" "open 1")"
+
 # ---------- the dot's state: AgentTerminalBar --status-once on fixtures ----------
 S_AH="$WORK/st-agent"; S_LA="$WORK/st-launchagents"; S_CL="$WORK/st-claude"; mkdir -p "$S_AH/sessions" "$S_LA" "$S_CL/sessions"
 status() { AGENT_HOME="$S_AH" LAUNCH_AGENTS_DIR="$S_LA" AGENT_TERMINAL_DIR="$KIT" CLAUDE_DIR="$S_CL" "$EXE" --status-once 2>&1; }

@@ -202,6 +202,22 @@ assert_eq "agent-terminal open: retile lays out the grid, right half" "2880 -67 
 QUEUE_KIND=input QUEUE_TTY=ttys132 "$Q" park w
 assert_eq "agent-terminal open: a waiting window keeps its cell" "1920 -67 960 1080" "$(win 143)"
 rm -f "$AGENT_HOME/terminal/open"
+# agent-terminal open: `tile auto` (AgentTerminalBar's checker, when the set of Terminal windows changed) lays out
+# the grid like the hotkey, but honours queue_tile=off; agterm's own window holds no cell on monitor 2 even when
+# it was dragged to the main display and parked by hand
+printf 'pid=%s\nself_tty=ttys390\n' "$$" >"$AGENT_HOME/terminal/open"
+reset "391 2000 30 700 700 ttys391" "392 2800 30 700 700 ttys392" "390 100 100 800 600 ttys390"
+printf '2000 30 640 1050 1 hand\n' >"$QD/parked/390"
+assert_eq "tile auto: two windows moved" "Tiled: 2 windows moved" "$("$Q" tile auto)"
+assert_eq "tile auto: agterm's window left no empty cell, left half" "1920 -67 960 1080" "$(win 391)"
+assert_eq "tile auto: right half" "2880 -67 960 1080" "$(win 392)"
+assert_eq "tile auto: agterm's window untouched" "100 100 800 600" "$(win 390)"
+assert_no_file "tile auto: agterm's window is not parked" "$QD/parked/390"
+reset "393 2000 30 700 700 ttys393" "394 2800 30 700 700 ttys394"
+setcfg queue_tile=off
+assert_eq "tile auto: queue_tile=off moves nothing" "Tiled: 0 windows moved" "$("$Q" tile auto)"
+assert_eq "tile (the hotkey) still tiles with queue_tile=off" "Tiled: 2 windows moved" "$("$Q" tile)"
+rm -f "$AGENT_HOME/terminal/open"
 setcfg queue_tile=off
 
 # ---------- for agent-terminal: the tabs map, the waiting record, dismiss, single mode, show ----------
