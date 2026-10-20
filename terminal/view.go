@@ -1475,7 +1475,7 @@ func (m model) helpLines() []string {
 		row2("enter", "send"),
 		row2("new line", "option+enter, ctrl+j, or \\ then enter"),
 		row2("option+key", "your layout's character: option+l @, option+5 [, option+8 {, option+7 |"),
-		row2("@ and /", "suggest the agent's files and the other sessions / commands; tab or enter takes one"),
+		row2("@ and /", "suggest the agent's files and the other sessions / commands; tab or enter takes one\na command with a screen of its own (/config, /mcp, /model with no name…) to a background agent opens its screen too"),
 		row2("@Name text", "a message that starts with a live session's name goes to that session (@\"two words\" for names with spaces)\na mention elsewhere stays in the text, and the agent itself passes it on"),
 		row2("@NewName", "a name that is no session yet: enter starts it first, as a background helper in the agent's folder\n(NW's model, effort, mode), then sends the message; the box shows it in orange before you send"),
 		row2("ctrl+v", "paste a clipboard image (saved, its path goes in)"),

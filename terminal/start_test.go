@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -96,5 +97,60 @@ func TestLoggedOutFooter(t *testing.T) {
 	mm, _ := m.Update(authMsg(true))
 	if v := escRe.ReplaceAllString(mm.(model).View(), ""); !strings.Contains(v, "Claude Code is logged out · /LOGIN") {
 		t.Errorf("footer:\n%s", v)
+	}
+}
+
+func TestScreenCommand(t *testing.T) {
+	for in, want := range map[string]bool{"/config": true, "/model": true, " /mcp ": true, "/memory": true, "/login": true,
+		"/model sonnet": false, "/compact": false, "/clear": false, "config": false, "fix /config": false} {
+		if screenCommand(in) != want {
+			t.Errorf("screenCommand(%q) = %v", in, !want)
+		}
+	}
+}
+
+// /config to a background agent is typed, then its screen opens; to a Terminal agent it only goes as text.
+func TestScreenCommandOpensScreen(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	var sent []string
+	opened := 0
+	oldSend, oldRun := transmitFn, osascriptRun
+	t.Cleanup(func() { transmitFn, osascriptRun = oldSend, oldRun })
+	transmitFn = func(a Agent, text string, keys []string) string { sent = append(sent, a.Name+"<-"+text); return "ok" }
+	osascriptRun = func(s string) ([]byte, error) { opened++; return []byte("/dev/ttys042"), nil }
+	for _, c := range []struct {
+		sid     string
+		windows int
+	}{{"d", 1}, {"a", 0}} { // bg one, miso in Terminal
+		m := newModel()
+		m.w, m.h = 150, 40
+		m.agents = fleet()
+		m.selSID = c.sid
+		m.mode = mTyping
+		m.ed.open(c.sid, "/tmp", m.editorWidth())
+		m.ed.ta.SetValue("/config")
+		opened = 0
+		_, cmd := m.typingKey(tea.KeyMsg{Type: tea.KeyEnter})
+		runAll(cmd)
+		if opened != c.windows {
+			t.Errorf("%s: %d windows, want %d", c.sid, opened, c.windows)
+		}
+	}
+	if strings.Join(sent, ",") != "bg one<-/config,miso<-/config" {
+		t.Errorf("sent %v", sent)
+	}
+}
+
+// runAll runs a command and the commands of a batch or a sequence in it (their messages are slices of commands).
+func runAll(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	if v := reflect.ValueOf(cmd()); v.Kind() == reflect.Slice {
+		for i := 0; i < v.Len(); i++ {
+			if c, ok := v.Index(i).Interface().(tea.Cmd); ok {
+				runAll(c)
+			}
+		}
 	}
 }
