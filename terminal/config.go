@@ -90,7 +90,7 @@ dismiss = "x"         # take a waiting or idle agent off the list without answer
 refresh = "R"         # re-read everything now
 quick_approve = "a"   # an agent that asks questions: take every recommended answer and submit
 pc_agent = "b"        # PC view: hand the selected issue to a new background agent (it has your permissions)
-pc_terminal = "t"     # PC view: hand it to a new session in a Terminal window
+pc_terminal = "t"     # PC view: the same, and its screen opens in a short-lived window
 scroll_up = "up"      # the agent's conversation: 3 lines back (pgup a page, home the start)
 scroll_down = "down"  # 3 lines on (pgdown a page, end the newest)
 

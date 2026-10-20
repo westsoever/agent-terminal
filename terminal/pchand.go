@@ -10,7 +10,6 @@ package main
 // request that waits, and how to report back through Paperclip's local API.
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,7 +30,7 @@ const (
 	pcHandComment  = 1500 // characters of one comment
 )
 
-// pcHandTarget splits the box target "pcgo:<issue id>@<kind>" (kind b: background agent, t: Terminal session).
+// pcHandTarget splits the box target "pcgo:<issue id>@<kind>" (kind b: background agent, t: the same with its screen open, D75).
 func pcHandTarget(target string) (id, kind string, ok bool) {
 	rest, ok := strings.CutPrefix(target, "pcgo:")
 	if !ok {
@@ -199,35 +198,6 @@ func writeBriefing(it PCItem, text string) (string, error) {
 	return p, os.WriteFile(p, []byte(text), 0o600)
 }
 
-// termStartFn is termStart; tests replace it.
-var termStartFn = termStart
-
-// termCommand is the shell line that starts the session: in dir, with the name and options, then the prompt.
-func termCommand(o nwOpts, dir, prompt string) string {
-	args := ""
-	if o.Name != "" {
-		args += " -n " + shQuote(o.Name)
-	}
-	if o.Model != "" {
-		args += " --model " + shQuote(o.Model)
-	}
-	if o.Effort != "" {
-		args += " --effort " + shQuote(o.Effort)
-	}
-	if o.Perm != "" {
-		args += " --permission-mode " + shQuote(o.Perm)
-	}
-	return "cd " + shQuote(dir) + " && " + shQuote(claudeBin()) + args + " -- " + shQuote(prompt)
-}
-
-// termStart opens a new Terminal window with an interactive session in dir that starts with prompt.
-func termStart(o nwOpts, dir, prompt string) error {
-	if r := termWindow(termCommand(o, dir, prompt)); r != "ok" {
-		return errors.New(strings.TrimPrefix(r, "error: "))
-	}
-	return nil
-}
-
 // pcHandOpen opens the box for handing the selected issue over: kind "b" a new background agent, "t" a new session
 // in a Terminal window. An empty text sends the default task; @Name first sends it to that running session.
 func (m *model) pcHandOpen(kind string) tea.Cmd {
@@ -250,7 +220,7 @@ func (m model) pcHandTitle() string {
 	}
 	what := "a new background agent"
 	if kind == "t" {
-		what = "a new Terminal session"
+		what = "a new background agent, its screen open"
 	}
 	ref := id
 	for _, it := range m.pc.Items {
@@ -317,17 +287,12 @@ func (m *model) pcHandSend(id, kind, text string) (cmd tea.Cmd, keep bool) {
 		switch {
 		case target != nil:
 			return sentMsg{target.SID, target.Name, "hand over " + item.Ref, transmitFn(*target, prompt, nil)}
-		case kind == "t":
-			if err := termStartFn(o, dir, prompt); err != nil {
-				return sentMsg{"", item.Ref, "hand over", "error: " + err.Error()}
-			}
-			return statusMsg("✓ " + item.Ref + " is in a new Terminal session in " + tildify(dir))
 		}
 		o.Dir = dir
-		job, err := bgStart(o, prompt)
+		job, err := bgStartFn(o, prompt)
 		if err != nil {
 			return sentMsg{"", item.Ref, "hand over", "error: " + err.Error()}
 		}
-		return bgStartedMsg{job, dir}
+		return bgStartedMsg{job, dir, kind == "t"} // t: a background agent too, with its screen open at once (D75)
 	}, false
 }

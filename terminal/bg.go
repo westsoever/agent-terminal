@@ -162,6 +162,7 @@ var bgStartedRe = regexp.MustCompile(`backgrounded\s+·\s+([0-9a-f]+)`)
 type nwOpts struct {
 	Dir, Model, Effort, Perm string
 	Name                     string // the session's name in the list ("" for Claude Code's own)
+	Resume                   string // the id of an ended session to continue ("" for a new one)
 }
 
 var (
@@ -213,6 +214,9 @@ func (o nwOpts) summary() string {
 // args are the claude flags for the options; the prompt follows after "--", so it may start with "/" or "-".
 func (o nwOpts) args(prompt string) []string {
 	a := []string{"--bg"}
+	if o.Resume != "" {
+		a = append(a, "--resume", o.Resume)
+	}
 	if o.Name != "" {
 		a = append(a, "-n", o.Name)
 	}
@@ -224,6 +228,9 @@ func (o nwOpts) args(prompt string) []string {
 	}
 	if o.Perm != "" {
 		a = append(a, "--permission-mode", o.Perm)
+	}
+	if prompt == "" { // no first message: the session waits (phase 0)
+		return a
 	}
 	return append(a, "--", prompt)
 }
@@ -286,24 +293,30 @@ type shortClosedMsg map[string]string
 // openShort shows a background agent's own screen in its short-lived window: a new one, or the open one raised, so
 // a session never gets two (D74).
 func (m *model) openShort(a Agent) tea.Cmd {
-	job, name := a.Job, a.Name
-	if tty, ok := m.short[job]; ok {
+	job := a.Job
+	m.setStatus("opening the screen of " + a.Name + " · ctrl+z there closes it")
+	return m.openShortCmd(job, a.Name, func() (string, error) { return shortWindow(job) })
+}
+
+// openShortCmd opens the short-lived window that key names (a job, "login", "trust:<dir>") with open, or raises
+// it when it is open already.
+func (m *model) openShortCmd(key, name string, open func() (string, error)) tea.Cmd {
+	if tty, ok := m.short[key]; ok {
 		if tty == "" {
 			return nil // still opening
 		}
-		return func() tea.Msg { return sentMsg{"", name, "go to its screen", raiseTabFn(tty)} }
+		return func() tea.Msg { return sentMsg{"", name, "go to its window", raiseTabFn(tty)} }
 	}
 	if m.short == nil {
 		m.short = map[string]string{}
 	}
-	m.short[job] = ""
-	m.setStatus("opening the screen of " + name + " · ctrl+z there closes it")
+	m.short[key] = ""
 	return func() tea.Msg {
-		tty, err := shortWindow(job)
+		tty, err := open()
 		if err != nil {
-			return shortMsg{job: job, err: err.Error()}
+			return shortMsg{job: key, err: err.Error()}
 		}
-		return shortMsg{job: job, tty: tty}
+		return shortMsg{job: key, tty: tty}
 	}
 }
 

@@ -105,6 +105,9 @@ type model struct {
 	nwDir      nwFolder            // where that folder came from and what is there (the box shows it)
 	bgScr      map[string]Prompt   // sid -> the menu on a background agent's screen (rebuilt from claude logs)
 	short      map[string]string   // job -> the tty of its short-lived window, "" while it opens (D74)
+	after      map[string]tea.Cmd  // a short-lived window's key -> what runs once it closes (the trust window, D75)
+	trust      *trustMsg           // mConfirm: the folder to trust, when that is the question
+	loggedOut  bool                // claude auth status says logged out: the footer says /LOGIN
 	files      *fileHistory        // the FL view: the last files the agents mentioned
 	openLinks  []string            // the links o numbered on screen; 1-9 opens one (D72)
 	find       findState           // the FIND view: the search on the screen
@@ -148,7 +151,10 @@ type pcMsg PCState
 type propsMsg []string
 type pcDetailMsg PCDetail
 type pcActedMsg struct{ ref, what, err string }
-type bgStartedMsg struct{ job, dir string }
+type bgStartedMsg struct {
+	job, dir string
+	show     bool // open its screen in a short-lived window (D74) once it started
+}
 type execDone struct{ err error }
 
 func newModel() model {
@@ -169,7 +175,7 @@ func newModel() model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tick(), loadTTYs, tea.SetWindowTitle("AgentTerminal"))
+	return tea.Batch(tick(), loadTTYs, tea.SetWindowTitle("AgentTerminal"), authCheck)
 }
 
 func tick() tea.Cmd {
@@ -565,6 +571,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if c := m.closeShorts(); c != nil {
 			cmds = append(cmds, c)
 		}
+		if m.ticks%150 == 0 { // every 5 minutes
+			cmds = append(cmds, authCheck)
+		}
 		if c := m.readPrompt(0); c != nil {
 			cmds = append(cmds, c)
 		}
@@ -677,16 +686,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case shortClosedMsg:
+		var cmds []tea.Cmd
 		for job, tty := range msg {
 			if m.short[job] == tty {
 				delete(m.short, job)
+				if c := m.after[job]; c != nil { // the trust window closed: start again
+					delete(m.after, job)
+					cmds = append(cmds, c)
+				}
 			}
 		}
+		return m, tea.Batch(cmds...)
+	case trustMsg:
+		m.mode, m.trust = mConfirm, &msg
+		return m, nil
+	case authMsg:
+		m.loggedOut = bool(msg)
 		return m, nil
 	case bgStartedMsg:
 		m.setStatus("✓ background agent " + msg.job + " started in " + tildify(msg.dir) + " · g opens its screen")
 		m.pendingJob = msg.job
 		m.refresh()
+		if msg.show {
+			return m, m.openShort(Agent{Job: msg.job, Name: msg.job})
+		}
 		return m, nil
 	case findNamesMsg, findTextMsg, findAIMsg, findPanelMsg:
 		return m.findUpdate(msg)
@@ -1122,7 +1145,7 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = mKeys
 			return m, cmd
 		}
-		if text == "" {
+		if text == "" && !strings.HasPrefix(m.ed.target, "nw:") { // an empty NW starts the agent and opens its screen
 			return m, nil
 		}
 		target := m.ed.target
@@ -1159,13 +1182,7 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setStatus("starting a background agent in " + tildify(dir) + "…")
 			o := m.nw
 			o.Dir = dir
-			return m, func() tea.Msg {
-				job, err := bgStart(o, text)
-				if err != nil {
-					return sentMsg{"", "new agent", "start", "error: " + err.Error()}
-				}
-				return bgStartedMsg{job, dir}
-			}
+			return m, bgStartCmd(o, text, text == "")
 		}
 		if name, ok := strings.CutPrefix(target, "br:"); ok {
 			if p := m.branches; p != nil && p.branch() != nil && p.branch().Name == name {
@@ -1307,7 +1324,7 @@ func (m *model) prStart(pr *PullReq, comment string) tea.Cmd {
 		if err != nil {
 			return sentMsg{"", fmt.Sprintf("%s#%d", p.Repo, p.Number), "start", "error: " + err.Error()}
 		}
-		return bgStartedMsg{job, dir}
+		return bgStartedMsg{job, dir, false}
 	}
 }
 
@@ -1625,6 +1642,9 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 	case c == "ALL":
 		_, arg, _ := strings.Cut(strings.TrimSpace(code), " ")
 		return m.allCommand(arg)
+	case c == "LOGIN":
+		m.setStatus("log in in the new window; it closes when that is done")
+		return m, m.openShortCmd("login", "login", func() (string, error) { return termShort(shQuote(claudeBin()) + " auth login") })
 	case c == "STOP":
 		a := m.sel()
 		if a == nil || !a.Bg {

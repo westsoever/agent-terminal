@@ -99,10 +99,13 @@ func handModel(t *testing.T) (model, *[]string, *[]string) {
 	t.Setenv("HOME", home)
 	os.MkdirAll(filepath.Join(home, "cos"), 0o755)
 	var texts, terms []string
-	oldT, oldTerm := transmitFn, termStartFn
+	oldT, oldStart := transmitFn, bgStartFn
 	transmitFn = func(a Agent, text string, keys []string) string { texts = append(texts, a.Name+"<-"+text); return "ok" }
-	termStartFn = func(o nwOpts, dir, prompt string) error { terms = append(terms, o.Name+"|"+dir+"|"+prompt); return nil }
-	t.Cleanup(func() { transmitFn, termStartFn = oldT, oldTerm })
+	bgStartFn = func(o nwOpts, prompt string) (string, error) {
+		terms = append(terms, o.Name+"|"+o.Dir+"|"+prompt)
+		return "ab12cd34", nil
+	}
+	t.Cleanup(func() { transmitFn, bgStartFn = oldT, oldStart })
 	m := newModel()
 	m.w, m.h = 160, 44
 	m.view = vPaperclip
@@ -129,8 +132,8 @@ func TestPCHandKeys(t *testing.T) {
 	if m = mm.(model); m.ed.target != "pcgo:i14@t" {
 		t.Fatalf("t: target %q", m.ed.target)
 	}
-	if v = escRe.ReplaceAllString(m.View(), ""); !strings.Contains(v, "to a new Terminal session") {
-		t.Error("the Terminal title is missing")
+	if v = escRe.ReplaceAllString(m.View(), ""); !strings.Contains(v, "to a new background agent, its screen open") {
+		t.Error("the title of t is missing")
 	}
 	// the footer and the panel say the keys
 	m.mode = mKeys
@@ -140,7 +143,8 @@ func TestPCHandKeys(t *testing.T) {
 	}
 }
 
-// Enter on an empty box sends the default task to a new Terminal session in the issue's folder, with a briefing file.
+// Enter on an empty box sends the default task to a new background agent in the issue's folder, with a briefing file,
+// and its screen opens at once (D75).
 func TestPCHandTerminal(t *testing.T) {
 	m, _, terms := handModel(t)
 	m.pcDet["i14"] = PCDetail{ID: "i14", Ref: "COS-14", Title: "Clip", Description: "repo: cos\n\nMake /unbox clip pages.", At: time.Now()}
@@ -152,7 +156,7 @@ func TestPCHandTerminal(t *testing.T) {
 		t.Fatalf("an empty box did not send: mode %v", m.mode)
 	}
 	msg := cmd()
-	if sm, ok := msg.(statusMsg); !ok || !strings.Contains(string(sm), "COS-14 is in a new Terminal session") {
+	if sm, ok := msg.(bgStartedMsg); !ok || sm.job != "ab12cd34" || !sm.show {
 		t.Fatalf("msg %#v", msg)
 	}
 	home := os.Getenv("HOME")
@@ -201,6 +205,7 @@ func TestPCHandRunningSession(t *testing.T) {
 // A new background agent: claude --bg with the name, the options of /NW and the prompt after --.
 func TestPCHandBackground(t *testing.T) {
 	m, _, _ := handModel(t)
+	bgStartFn = bgStart // the real start, with the fake claude below
 	bin := t.TempDir()
 	log := filepath.Join(bin, "args.txt")
 	os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+log+"\necho 'backgrounded · cafe1234 · x'\n"), 0o755)
@@ -220,22 +225,6 @@ func TestPCHandBackground(t *testing.T) {
 	got := strings.Split(strings.TrimSpace(string(b)), "\n")
 	if strings.Join(got[:8], " ") != "--bg -n paperclip COS-14 --model sonnet --permission-mode plan --" || !strings.Contains(strings.Join(got[8:], "\n"), "review only, change nothing") {
 		t.Errorf("claude args: %q", got)
-	}
-}
-
-// The shell line that opens a Terminal session: quoted so an apostrophe or a newline in the task can't break it, and the
-// AppleScript that runs it compiles.
-func TestTermCommand(t *testing.T) {
-	o := nwOpts{Name: "paperclip COS-14", Model: "sonnet", Perm: "plan"}
-	cmd := termCommand(o, "/Users/x/my dir", "Take over: it's \"hard\"\nline 2 $HOME `x`")
-	for _, want := range []string{"cd '/Users/x/my dir' && ", "-n 'paperclip COS-14'", "--model 'sonnet'", "--permission-mode 'plan'",
-		" -- 'Take over: it'\\''s \"hard\"\nline 2 $HOME `x`'"} {
-		if !strings.Contains(cmd, want) {
-			t.Errorf("command lacks %q:\n%s", want, cmd)
-		}
-	}
-	if out, err := exec.Command("osacompile", "-e", termScript(cmd), "-o", filepath.Join(t.TempDir(), "t.scpt")).CombinedOutput(); err != nil {
-		t.Errorf("the AppleScript does not compile: %v %s", err, out)
 	}
 }
 

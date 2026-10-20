@@ -859,11 +859,14 @@ func TestFindKeys(t *testing.T) {
 		t.Errorf("second esc: view %d", m.view)
 	}
 
-	// r on the ended session opens a Terminal window; the folder is where the session started
+	// r on the ended session resumes it in the background, in the folder where the session started (D75)
 	var script string
-	old := osascriptRun
-	t.Cleanup(func() { osascriptRun = old })
+	var resumed []nwOpts
+	old, oldStart := osascriptRun, bgStartFn
+	t.Cleanup(func() { osascriptRun, bgStartFn = old, oldStart })
 	osascriptRun = func(s string) ([]byte, error) { script = s; return nil, nil }
+	bgStartFn = func(o nwOpts, prompt string) (string, error) { resumed = append(resumed, o); return "ab12cd34", nil }
+	m.ed = newEditor() // the started agent refreshes the list, which restyles the box
 	m.view = vFind
 	m.listSel = 1
 	m.find.Text[len(m.find.Text)-1].Cwd = cwdA // the folder exists
@@ -875,11 +878,11 @@ func TestFindKeys(t *testing.T) {
 		t.Fatalf("r: no command, status %q", m.status)
 	}
 	m = feed(m, cmd)
-	if !strings.Contains(script, "--resume") || !strings.Contains(script, sid(6)) || !strings.Contains(script, "tell application \"Terminal\"") {
-		t.Errorf("script: %s", script)
+	if len(resumed) != 1 || resumed[0].Resume != sid(6) || resumed[0].Dir != cwdA || script != "" {
+		t.Errorf("resumed %+v script %q", resumed, script)
 	}
-	if !strings.Contains(m.status, "sent resume in a new window") {
-		t.Errorf("status %q", m.status)
+	if m.pendingJob != "ab12cd34" {
+		t.Errorf("the resumed agent is not selected when it shows: pending %q", m.pendingJob)
 	}
 	// its folder is gone: an error, no window
 	script = ""
@@ -887,28 +890,6 @@ func TestFindKeys(t *testing.T) {
 	m, cmd = findPress(m, "r")
 	if cmd != nil || !m.statusErr || !strings.Contains(m.status, "is gone") || script != "" {
 		t.Errorf("gone folder: cmd %v status %q", cmd, m.status)
-	}
-}
-
-func TestResumeScript(t *testing.T) {
-	cases := []struct{ cwd, bin, id, wantDo string }{
-		{"/Users/clyde/bbq", "/Users/clyde/.local/bin/claude", "abc-123",
-			`do script "cd '/Users/clyde/bbq' && '/Users/clyde/.local/bin/claude' --resume 'abc-123'"`},
-		{"/tmp/a b/c", "claude", "id", `do script "cd '/tmp/a b/c' && 'claude' --resume 'id'"`},
-		// a single quote closes, escapes and opens the shell quoting; AppleScript then doubles the backslash
-		{"/tmp/it's", "claude", "id", `do script "cd '/tmp/it'\\''s' && 'claude' --resume 'id'"`},
-		// double quotes and backslashes are escaped for AppleScript
-		{`/tmp/say "hi"\now`, "claude", "id", `do script "cd '/tmp/say \"hi\"\\now' && 'claude' --resume 'id'"`},
-		{"/tmp/$HOME `x` ; rm -rf", "claude", "id", `do script "cd '/tmp/$HOME ` + "`x`" + ` ; rm -rf' && 'claude' --resume 'id'"`},
-	}
-	for _, c := range cases {
-		got := termScript(resumeCmd(c.bin, c.cwd, c.id))
-		if !strings.Contains(got, c.wantDo) || !strings.HasPrefix(got, "tell application \"Terminal\"\n\tactivate\n") || !strings.HasSuffix(got, "\nend tell") {
-			t.Errorf("resumeScript(%q):\n%s\nwant to contain %s", c.cwd, got, c.wantDo)
-		}
-	}
-	if got := shQuote("it's"); got != `'it'\''s'` {
-		t.Errorf("shQuote = %s", got)
 	}
 }
 
