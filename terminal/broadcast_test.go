@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -188,5 +191,78 @@ func TestEditorSessionSuggestions(t *testing.T) {
 	e.accept()
 	if e.ta.Value() != `ask @"release notes" ` {
 		t.Errorf("value %q", e.ta.Value())
+	}
+}
+
+// @Name of no session in a message: enter starts it as a background helper in the agent's folder first, then sends
+// the message unchanged; a failed start sends nothing and keeps the draft (D70).
+func TestHelpers(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var started []nwOpts
+	fail := false
+	oldStart, oldSend := bgStartFn, transmitFn
+	bgStartFn = func(o nwOpts, prompt string) (string, error) {
+		if fail {
+			return "", errors.New("Workspace not trusted")
+		}
+		started = append(started, o)
+		return "abc", nil
+	}
+	var sentTo, sentText string
+	transmitFn = func(a Agent, text string, keys []string) string { sentTo, sentText = a.Name, text; return "ok" }
+	t.Cleanup(func() { bgStartFn, transmitFn = oldStart, oldSend })
+
+	m := newModel()
+	m.w, m.h = 150, 40
+	m.agents = fleet()
+	m.agents[0].Cwd = dir
+	m.selSID = "a"
+	m.remote.Items = []RemoteSession{{ID: "session_1", Title: "cloudy"}}
+	text := "merge it, use @agtermHelper. Ask @soii, @notes, @x.md, @cloudy and @AGTERMHELPER; mail a@b.c"
+	if _, names := m.helpers("a", text); strings.Join(names, ",") != "agtermHelper" {
+		t.Fatalf("helpers %v", names)
+	}
+	if _, names := m.helpers("e", "@new"); names != nil {
+		t.Errorf("an agent that can't take the message starts helpers: %v", names)
+	}
+
+	send := func(text string) tea.Cmd {
+		m.mode = mTyping
+		m.ed.open("a", dir, m.editorWidth())
+		m.ed.ta.SetValue(text)
+		if v := escRe.ReplaceAllString(m.View(), ""); !strings.Contains(v, "@agtermHelper → new background agent in") {
+			t.Errorf("the box does not say what enter starts:\n%s", v)
+		}
+		mm, cmd := m.typingKey(tea.KeyMsg{Type: tea.KeyEnter})
+		m = mm.(model)
+		if cmd == nil || m.mode != mKeys || m.ed.drafts["a"] != text {
+			t.Fatalf("no start, or the text is not kept meanwhile: mode %v draft %q", m.mode, m.ed.drafts["a"])
+		}
+		return cmd
+	}
+	cmd := send(text)
+	mm, cmd2 := m.Update(cmd())
+	m = mm.(model)
+	if len(started) != 1 || started[0].Name != "agtermHelper" || started[0].Dir != dir || cmd2 == nil {
+		t.Fatalf("started %+v", started)
+	}
+	if msg := cmd2().(sentMsg); msg.res != "ok" || sentTo != "miso" || sentText != text {
+		t.Errorf("sent %+v to %q: %q", msg, sentTo, sentText)
+	}
+	if _, ok := m.ed.drafts["a"]; ok {
+		t.Error("the draft stays after the message went out")
+	}
+
+	fail, sentTo, m.agents, m.selSID = true, "", fleet(), "a" // the refresh above read the empty AGENT_HOME
+	m.agents[0].Cwd = dir
+	cmd = send("try @agtermHelper")
+	mm, cmd2 = m.Update(cmd())
+	m = mm.(model)
+	if cmd2 != nil || sentTo != "" || !m.statusErr || !strings.Contains(m.status, "Workspace not trusted") || m.ed.drafts["a"] != "try @agtermHelper" {
+		t.Errorf("a failed start: cmd %v sent to %q status %q draft %q", cmd2 != nil, sentTo, m.status, m.ed.drafts["a"])
 	}
 }

@@ -403,9 +403,9 @@ func (m *model) scrollChat(ks string) bool {
 	step := 0
 	switch ks {
 	case m.cfg.Keys.Older:
-		step = 3
+		step = max(3, c.page/3) // a third of what shows, so a long answer takes a few presses (owner, 2026-10-20)
 	case m.cfg.Keys.Newer:
-		step = -3
+		step = -max(3, c.page/3)
 	case "pgup":
 		step = max(1, c.page-1)
 	case "pgdown":
@@ -661,6 +661,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return pcMsg(loadPaperclip()) }
 	case allMsg:
 		return m, m.sentAll(msg)
+	case helpersMsg:
+		return m, m.helpersStarted(msg)
 	case bgStartedMsg:
 		m.setStatus("✓ background agent " + msg.job + " started in " + tildify(msg.dir) + " · g attaches a window")
 		m.pendingJob = msg.job
@@ -965,7 +967,7 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			_ = exec.Command(queueBin(), "dismiss", sid).Run()
 			return statusMsg(txt)
 		}
-	case ks == K.Zoom && m.view == vWall:
+	case ks == K.Zoom && (m.view == vWall || m.view == vDesk):
 		m.zoom = !m.zoom
 	default:
 		if m.view != vDesk && m.view != vWall {
@@ -1109,6 +1111,11 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.ed.sent()
 				m.mode = mKeys
 				return m, cmd
+			}
+			if a, names := m.helpers(target, text); len(names) > 0 { // @Name of no session: start it, then send
+				m.ed.close() // the text stays the agent's draft until the helpers run and it goes out
+				m.mode = mKeys
+				return m, m.startHelpers(a, names, text)
 			}
 		}
 		m.ed.sent()
@@ -1375,9 +1382,9 @@ func (m *model) panelScroll(c *chatScroll, ks string) bool {
 	step := 0
 	switch ks {
 	case m.cfg.Keys.Older:
-		step = 3
+		step = max(3, c.page/3)
 	case m.cfg.Keys.Newer:
-		step = -3
+		step = -max(3, c.page/3)
 	case "pgup":
 		step = max(1, c.page-1)
 	case "pgdown":

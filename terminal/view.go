@@ -22,7 +22,11 @@ func (m model) View() string {
 	var body []string
 	switch m.view {
 	case vDesk:
-		body = m.desk(bodyH)
+		if m.zoom {
+			body = m.agentPanel(m.w, bodyH)
+		} else {
+			body = m.desk(bodyH)
+		}
 	case vWall:
 		if m.zoom {
 			body = m.agentPanel(m.w, bodyH)
@@ -621,14 +625,15 @@ func (m model) agentPanel(w, h int) []string {
 	}
 	switch {
 	case newAgent:
-	case a.Bg && m.mode == mTyping && m.ed.target == a.SID:
+	case a.canSend() && m.mode == mTyping && m.ed.target == a.SID:
+		if _, names := m.helpers(a.SID, m.ed.ta.Value()); len(names) > 0 { // what enter will start first (D70)
+			tail = append(tail, row(in, s("@"+strings.Join(names, " @")+" → new background agent in "+tildify(a.Cwd), cOrange)))
+		}
 		tail = append(tail, m.ed.lines(in)...)
 	case a.Bg:
 		tail = append(tail, row(in, s("> ", cOrange), s(m.cfg.Keys.Reply+" to write · "+m.cfg.Keys.Goto+" attaches a window · /STOP stops it", cDark)))
 	case !a.InTerminal:
 		tail = append(tail, row(in, s("not a Terminal tab: look only", cDark)))
-	case m.mode == mTyping && m.ed.target == a.SID:
-		tail = append(tail, m.ed.lines(in)...)
 	default:
 		tail = append(tail, row(in, s("> ", cOrange), s(m.cfg.Keys.Reply+" to write", cDark)))
 	}
@@ -1431,7 +1436,8 @@ func (m model) helpLines() []string {
 		"## Desk",
 		row2(k(K.Next)+" / "+k(K.Prev), "next / previous agent"),
 		row2(strings.Replace(k(K.Waiting), "space", "space space", 1), "the agent in INPUT that has waited the longest\nspace waits for its second key, esc cancels"),
-		row2(k(K.Older)+" / "+k(K.Newer), "scroll the agent's conversation 3 lines back / on\nalso when zoomed, and while writing on the draft's first / last line"),
+		row2(k(K.Older)+" / "+k(K.Newer), "scroll the agent's conversation a third of a page back / on\nalso when zoomed, and while writing on the draft's first / last line"),
+		row2(K.Zoom, "the selected agent on the full screen, again (or esc) to go back"),
 		row2("pgup / pgdown", "a page back / on"),
 		row2("home / end", "the start / the newest line"),
 		row2("1-9", "send that numbered answer"),
@@ -1450,6 +1456,7 @@ func (m model) helpLines() []string {
 		row2("option+key", "your layout's character: option+l @, option+5 [, option+8 {, option+7 |"),
 		row2("@ and /", "suggest the agent's files and the other sessions / commands; tab or enter takes one"),
 		row2("@Name text", "a message that starts with a live session's name goes to that session (@\"two words\" for names with spaces)\na mention elsewhere stays in the text, and the agent itself passes it on"),
+		row2("@NewName", "a name that is no session yet: enter starts it first, as a background helper in the agent's folder\n(NW's model, effort, mode), then sends the message; the box shows it in orange before you send"),
 		row2("ctrl+v", "paste a clipboard image (saved, its path goes in)"),
 		row2("cmd+v", "paste text"),
 		row2("option+arrows", "move by word"),
@@ -1603,6 +1610,7 @@ func (m model) footer() []string {
 		}
 		add(&r1, K.Next+" "+K.Prev, "next/prev")
 		add(&r1, key(K.Older)+key(K.Newer), "scroll")
+		add(&r1, K.Zoom, "zoom")
 		add(&r1, strings.Replace(key(K.Waiting), "␣", "␣␣", 1), "longest input")
 		add(&r1, K.Open+" a-i", "open file")
 		add(&r1, K.Goto, "go to window")

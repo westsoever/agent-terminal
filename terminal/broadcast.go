@@ -1,10 +1,12 @@
 package main
 
 // /ALL <group>: one message to every agent in a group, and @SessionName: a message that starts with an agent's name
-// goes to that agent.
+// goes to that agent; an @Name that is no session yet starts one as a helper (D70).
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -227,4 +229,104 @@ func (m *model) routeMention(text string) (cmd tea.Cmd, handled bool) {
 	return func() tea.Msg {
 		return sentMsg{a.SID, a.Name, rest, transmitFn(a, rest, nil)}
 	}, true
+}
+
+// helperRe: a word that is an @Name, maybe followed by punctuation ("use @helper." or "@a, @b"). @file.md is no name.
+var helperRe = regexp.MustCompile(`^@([A-Za-z0-9_-]+)[.,;:!?)]*$`)
+
+// bgStartFn is bgStart; tests replace it.
+var bgStartFn = bgStart
+
+// helpers: the @Names in a message to agent sid that are no session yet, so sending it starts each as a background
+// helper in that agent's folder first (D70). None when the agent can't take the message now (no window, a menu):
+// the message then goes, or fails, as before. A name of a file in the folder or of a REMOTE session is no helper.
+func (m *model) helpers(sid, text string) (a Agent, names []string) {
+	for _, x := range m.agents {
+		if x.SID == sid {
+			a = x
+		}
+	}
+	if a.SID == "" || !a.canSend() || m.prompts[sid].Options != nil {
+		return a, nil
+	}
+	seen := map[string]bool{}
+	for _, w := range strings.Fields(text) {
+		sm := helperRe.FindStringSubmatch(w)
+		if sm == nil || seen[strings.ToLower(sm[1])] {
+			continue
+		}
+		name := sm[1]
+		seen[strings.ToLower(name)] = true
+		if _, n := m.agentNamed(name); n > 0 || m.remoteNamed(name) {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(a.Cwd, name)); err == nil {
+			continue
+		}
+		names = append(names, name)
+	}
+	return a, names
+}
+
+func (m *model) remoteNamed(name string) bool {
+	for _, r := range m.remote.Items {
+		if strings.EqualFold(r.Title, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// helpersMsg: the helpers of a message started (err "" ) or one failed; then the message is not sent.
+type helpersMsg struct {
+	sid, text string
+	names     []string // the helpers that started
+	err       string
+}
+
+// startHelpers starts each name as a background session in a's folder, on the /NW defaults, briefed to wait for a.
+func (m *model) startHelpers(a Agent, names []string, text string) tea.Cmd {
+	m.setStatus("starting " + strings.Join(names, ", ") + " in " + tildify(a.Cwd) + "…")
+	o := parseNW("", m.cfg)
+	o.Dir = a.Cwd
+	return func() tea.Msg {
+		for i, n := range names {
+			o.Name = n
+			brief := "You are " + n + ", a helper session for the session " + a.Name + ". Wait: " + a.Name +
+				" sends you your task. Report back to " + a.Name + " when it is done."
+			if _, err := bgStartFn(o, brief); err != nil {
+				return helpersMsg{a.SID, text, names[:i], n + ": " + err.Error()}
+			}
+		}
+		return helpersMsg{sid: a.SID, text: text, names: names}
+	}
+}
+
+// helpersStarted sends the message once its helpers run; when one failed, the message stays as the agent's draft.
+func (m *model) helpersStarted(msg helpersMsg) tea.Cmd {
+	var a Agent
+	for _, x := range m.agents {
+		if x.SID == msg.sid {
+			a = x
+		}
+	}
+	m.refresh() // the helpers show in the list now
+	if msg.err != "" {
+		started := ""
+		if len(msg.names) > 0 {
+			started = " (started: " + strings.Join(msg.names, ", ") + ")"
+		}
+		m.setErr("helper not started, message kept as draft" + started + ": " + msg.err)
+		return nil
+	}
+	if a.SID == "" {
+		m.setErr("started " + strings.Join(msg.names, ", ") + "; the agent has gone, message kept as draft")
+		return nil
+	}
+	if strings.TrimSpace(m.ed.drafts[msg.sid]) == msg.text && !(m.mode == mTyping && m.ed.target == msg.sid) {
+		delete(m.ed.drafts, msg.sid)
+		saveDrafts(m.ed.drafts)
+	}
+	m.setStatus("started " + strings.Join(msg.names, ", ") + " · sending to " + a.Name + "…")
+	return func() tea.Msg { return sentMsg{a.SID, a.Name, msg.text, transmitFn(a, msg.text, nil)} }
 }
