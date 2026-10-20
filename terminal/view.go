@@ -1616,6 +1616,12 @@ func (m model) footer() []string {
 		add(&r1, "enter", "go to it")
 		add(&r1, "esc", "desk")
 		add(&r1, K.Command, "command")
+	case vHelp, vChangelog:
+		add(&r1, key(K.Older)+key(K.Newer), "scroll")
+		add(&r1, "pgup pgdown", "page")
+		add(&r1, "home end", "top/bottom")
+		add(&r1, "esc", "desk")
+		add(&r1, K.Command, "command")
 	case vFiles, vProposals:
 		add(&r1, K.Next+" "+K.Prev, "move")
 		add(&r1, "enter", "open")
