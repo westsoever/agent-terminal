@@ -24,6 +24,7 @@ Push `/`, write the code, then push `Enter`.
 | `STOP` | – | Stop the selected background agent. Its conversation stays. |
 | `A3` | Agent 3 | The desk, with agent 3 selected. Use a number from 1 to 9. |
 | `ching` | An agent by name | The desk, with the first agent whose name starts with these letters. |
+| `CL` | Changelog | What changed, newest first: one line per decision in `DECISIONS.md`, read each time you open it. `CHANGELOG` does the same. Scroll like the help page. |
 | `HELP` | Help | The key list, with what is new at the top. You can also push `?`. The page is longer than the screen: scroll it with `↑`, `↓`, `PgUp`, `PgDn`, `Home` and `End`. |
 | `QUIT` | – | Agent Terminal stops. You can also push `Ctrl+C`. |
 

@@ -2,6 +2,17 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D71 (2026-10-20): CL opens the changelog
+
+**Decision (owner):** "Something that would be good to have is a \"CL\" command, which opens the changelog".
+
+**Built:**
+- `CL` (or `CHANGELOG`) on the command line opens a scrolling page, newest first: a heading per day, one line per decision (`D70`, its title) from `DECISIONS.md`. It has no tab, like FIND, and scrolls like HELP (same keys, `esc` goes back).
+- `DECISIONS.md` is read from the kit folder each time CL opens, so a merged decision shows without rebuilding agterm.
+- HELP and the manual list it.
+
+**Not built:** the Built/Not built text of each decision (the title is the changelog line; `DECISIONS.md` has the rest), a separate CHANGELOG.md to maintain.
+
 ## D70 (2026-10-20): @NewName in a message starts a helper session; z zooms on the desk; ↑↓ scroll a third of a page
 
 **Decision (owner):** the owner still tabbed out of agterm to Terminal for two things: to start a new session to hand work to ("the steps to create a new subagent for that main session take too long and I still have to manually connect them by mentioning the session with @"; `/NW` "didn't come to my mind"), and to read one session on its own. "If we end up managing all sessions in agent-terminal and have no open terminals, that's completely fine." Trackpad scrolling is not the focus: "adjust the lines an up/down key scrolls per press to start with". Clicking links and replacing Terminal entirely come later.

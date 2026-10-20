@@ -372,7 +372,7 @@ func (m *model) last(a *Agent) Last {
 func (m *model) helpScroll(ks string) bool {
 	K := m.cfg.Keys
 	rows := max(1, m.h-headerH-footerH-2)
-	last := max(0, len(m.textBody(m.helpLines()))-rows)
+	last := max(0, len(m.textBody(m.pageLines()))-rows)
 	off := m.helpOff
 	switch ks {
 	case K.Older, K.Prev:
@@ -878,7 +878,7 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	switch {
-	case m.view == vHelp && m.helpScroll(ks):
+	case (m.view == vHelp || m.view == vChangelog) && m.helpScroll(ks):
 	case (m.view == vDesk || m.zoom) && m.scrollChat(ks):
 	case ks == K.Next || ks == "down":
 		m.move(1)
@@ -1567,6 +1567,8 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 		return m.findCommand(code)
 	case c == "HELP" || c == "?":
 		m.view, m.helpOff = vHelp, 0
+	case c == "CL" || c == "CHANGELOG":
+		m.view, m.zoom, m.helpOff = vChangelog, false, 0
 	case c == "QUIT" || c == "Q":
 		removeState()
 		return m, tea.Quit

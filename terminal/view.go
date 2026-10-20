@@ -49,7 +49,7 @@ func (m model) View() string {
 		body = m.findView(bodyH)
 	case vTheme:
 		body = m.themeView(bodyH)
-	case vHelp:
+	case vHelp, vChangelog:
 		body = m.helpView(bodyH)
 	}
 	for len(body) < bodyH {
@@ -217,6 +217,9 @@ func (m model) commandLine() string {
 		}
 		if m.view == vTheme {
 			code = "THEME"
+		}
+		if m.view == vChangelog {
+			code = "CL"
 		}
 		left = []seg{s(" > ", cOrange), s(code, cWhite), s(" <GO>", cGrey)}
 		if m.leader {
@@ -1345,10 +1348,14 @@ func (m model) leaderHint() string {
 
 // helpView draws the help page from line m.helpOff on; the title says how to scroll when it does not all fit.
 func (m model) helpView(h int) []string {
-	body := m.textBody(m.helpLines())
+	body := m.textBody(m.pageLines())
 	rows := max(1, h-2)
 	off := min(max(m.helpOff, 0), max(0, len(body)-rows))
-	title := []seg{s("HELP", cWhite)}
+	name := "HELP"
+	if m.view == vChangelog {
+		name = "CHANGELOG"
+	}
+	title := []seg{s(name, cWhite)}
 	if len(body) > rows {
 		more := ""
 		if off+rows < len(body) {
@@ -1401,6 +1408,7 @@ func (m model) helpLines() []string {
 		row2("STOP", "stop the selected background agent (its conversation stays)"),
 		row2("ALL group", "one message to a group of agents: waiting (INPUT and WAITING), input, idle or working\nagents with a menu on screen are left out"),
 		row2("A3 or name", "select agent 3, or the first agent whose name starts so"),
+		row2("CL", "the changelog: what changed, newest first, from DECISIONS.md (also CHANGELOG)"),
 		row2("HELP", "this page"),
 		row2("QUIT", "stop agterm (ctrl+c also stops it)"),
 		"",
