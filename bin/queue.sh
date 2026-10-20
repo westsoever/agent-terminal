@@ -219,7 +219,8 @@ single_mode() {
 }
 
 # reconcile: move windows so the main display holds what it should now, then flush (the grid comes along).
-#   agent-terminal open (D37): nothing moves. agent-terminal's list is the inbox.
+#   agent-terminal open (D37): nothing comes over or goes back on its own; agent-terminal's list is the inbox. The grid
+#           on the other displays is still laid out (D68), and a move already asked for (send_back) is applied.
 #   agent-terminal closed: the windows with a waiting tab whose own park event asked to come (come/<tty>) are parked;
 #           a window parked that way goes back to its cell once none of its tabs wants it. A window you dragged
 #           over (hand) is not sent back here: only a drag back or a prompt of its session (send_back) moves it.
@@ -228,7 +229,7 @@ reconcile() {
   local want="" win f id target t
   [ -n "$(main_display)" ] || return 0
   prune
-  if single_mode; then return 0; fi
+  if single_mode; then flush >/dev/null; return 0; fi
   for f in "$COME"/*; do
     [ -f "$f" ] || continue
     t=${f##*/}
@@ -369,9 +370,7 @@ case "$CMD" in
                       if ! single_mode && [ "${QUEUE_KIND:-done}" != idle ]; then : >"$COME/$TTY"; fi
                       lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
       back)   job() { rm -f "$WAITING/$TTY" "$COME/$TTY"; lock || return 0; load_windows; register "$TTY"
-                      send_back "$TTY" prompted >/dev/null; reconcile
-                      # agent-terminal open: reconcile moves nothing and does not flush; apply the send_back move alone
-                      if single_mode && [ -n "${MOVES// /}" ]; then flush >/dev/null; fi; } ;;
+                      send_back "$TTY" prompted >/dev/null; reconcile; } ;;
       retile) job() { lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
       forget) job() { # the session ended: its tab leaves the queue; a parked window with nothing else waiting
                       # stays where it is (it is yours now)

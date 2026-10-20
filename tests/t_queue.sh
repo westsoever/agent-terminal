@@ -191,6 +191,18 @@ reset "141 2000 30 700 700 ttys130" "142 2800 30 700 700 ttys131"
 setcfg queue_tile=off
 QUEUE_TTY=ttys131 "$Q" retile
 assert_eq "queue_tile=off: retile moves nothing" "0" "$(moves)"
+# agent-terminal open (D68): a session start still lays out the grid, but a waiting window does not come over
+setcfg ""
+mkdir -p "$AGENT_HOME/terminal"
+printf 'pid=%s\n' "$$" >"$AGENT_HOME/terminal/open"
+reset "143 2000 30 700 700 ttys132" "144 2800 30 700 700 ttys133"
+QUEUE_TTY=ttys133 "$Q" retile
+assert_eq "agent-terminal open: retile lays out the grid, left half" "1920 -67 960 1080" "$(win 143)"
+assert_eq "agent-terminal open: retile lays out the grid, right half" "2880 -67 960 1080" "$(win 144)"
+QUEUE_KIND=input QUEUE_TTY=ttys132 "$Q" park w
+assert_eq "agent-terminal open: a waiting window keeps its cell" "1920 -67 960 1080" "$(win 143)"
+rm -f "$AGENT_HOME/terminal/open"
+setcfg queue_tile=off
 
 # ---------- for agent-terminal: the tabs map, the waiting record, dismiss, single mode, show ----------
 setcfg queue_tile=off
