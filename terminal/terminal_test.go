@@ -351,7 +351,7 @@ func TestChatScroll(t *testing.T) {
 		t.Fatalf("no divider under the recap:\n%s", out)
 	}
 	m.scrollChat("up")
-	if out = screen(); !strings.Contains(out, "↓ 3 newer lines") {
+	if out = screen(); !strings.Contains(out, "↓ "+itoa(max(3, m.scroll.page/3))+" newer lines") {
 		t.Fatalf("up did not scroll back:\n%s", out)
 	}
 	m.scrollChat("home")
@@ -402,7 +402,7 @@ func TestTypingScroll(t *testing.T) {
 		m.View()
 	}
 	press(tea.KeyUp)
-	if m.scroll.off != 3 {
+	if m.scroll.off != max(3, m.scroll.page/3) {
 		t.Fatalf("empty draft: up did not scroll (off %d)", m.scroll.off)
 	}
 	press(tea.KeyDown)
@@ -415,7 +415,7 @@ func TestTypingScroll(t *testing.T) {
 		t.Fatalf("two-line draft: up should move the cursor (off %d, line %d)", m.scroll.off, m.ed.ta.Line())
 	}
 	press(tea.KeyUp)
-	if m.scroll.off != 3 {
+	if m.scroll.off != max(3, m.scroll.page/3) {
 		t.Fatalf("two-line draft, first line: up did not scroll (off %d)", m.scroll.off)
 	}
 	press(tea.KeyPgDown)
@@ -657,5 +657,38 @@ func TestHelpColumns(t *testing.T) {
 	}
 	if len(strings.Split(body, "\n")) < 2 {
 		t.Fatal("the test text must wrap")
+	}
+}
+
+// z on the desk shows the selected agent on the full screen; z again, or esc, goes back to the desk.
+func TestDeskZoom(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	m := newModel()
+	m.w, m.h = 150, 40
+	m.agents = fleet()
+	m.selSID = "a"
+	key := func(ks string) {
+		k := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(ks)}
+		if ks == "esc" {
+			k = tea.KeyMsg{Type: tea.KeyEsc}
+		}
+		mm, _ := m.Update(k)
+		m = mm.(model)
+	}
+	if !strings.Contains(m.View(), "AGENTS") {
+		t.Fatal("the desk shows no agent list")
+	}
+	key("z")
+	if v := m.View(); !m.zoom || m.view != vDesk || strings.Contains(v, "AGENTS") || !strings.Contains(v, "miso") {
+		t.Fatalf("z did not zoom the selected agent:\n%s", v)
+	}
+	key("z")
+	if m.zoom || !strings.Contains(m.View(), "AGENTS") {
+		t.Fatal("z again did not go back")
+	}
+	key("z")
+	key("esc")
+	if m.zoom || m.view != vDesk {
+		t.Fatal("esc did not go back")
 	}
 }

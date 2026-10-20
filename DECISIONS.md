@@ -2,6 +2,17 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D70 (2026-10-20): @NewName in a message starts a helper session; z zooms on the desk; ↑↓ scroll a third of a page
+
+**Decision (owner):** the owner still tabbed out of agterm to Terminal for two things: to start a new session to hand work to ("the steps to create a new subagent for that main session take too long and I still have to manually connect them by mentioning the session with @"; `/NW` "didn't come to my mind"), and to read one session on its own. "If we end up managing all sessions in agent-terminal and have no open terminals, that's completely fine." Trackpad scrolling is not the focus: "adjust the lines an up/down key scrolls per press to start with". Clicking links and replacing Terminal entirely come later.
+
+**Built:**
+- `@Name` anywhere in a message to an agent, where Name is no live session, no `REMOTE` session and no file in the agent's folder: `Enter` starts it first as a background agent (`claude --bg -n Name`, `NW`'s model, effort and mode) in that folder, briefed to wait for the agent, and then sends the message unchanged to the agent, which briefs the helper itself. The box shows `@Name → new background agent in <folder>` in orange before you send. When a start fails nothing is sent and the text stays the agent's draft. `@Name` at the start of a message still goes to that live session (6.18). `broadcast.go` `helpers`, `startHelpers`, `helpersStarted`.
+- `z` on the desk shows the selected agent's panel on the full screen (the wall's zoom); `z` or `Esc` goes back.
+- The scroll keys move a third of the visible conversation (at least 3 lines) instead of 3 lines, in the agent panel and the side panels.
+
+**Not built:** mouse or trackpad scrolling, clickable links, a replacement for Terminal windows.
+
 ## D69 (2026-10-20): AgentTerminalBar re-tiles monitor 2 while agterm is open, and agterm's own window holds no cell (amends D68)
 
 **Decision (owner):** "Currently, the agent-terminal window resizing doesn't work. Why is that happening again? Make sure that whenever agterm is running, the windows on the other screen get resized and ordered correctly. For that, you can even use a checker in the AgentTerminalBar."

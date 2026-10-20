@@ -46,6 +46,7 @@ The right hand does the most frequent work: `j` goes up, `l` goes down, `k` open
 | `g` | Show the Terminal window of the selected agent, where it is. For a background agent, open a new Terminal window that is attached to it. |
 | `h` | Bring the window of the selected agent to monitor 1 and into focus, so that you can write in it. Drag it back to monitor 2 to put it back in its position. |
 | `x` | Remove the selected agent from the waiting list. You do not send an answer. |
+| `z` | Show the selected agent on the full screen: its recap, its conversation and the message box. `↑` and `↓` scroll a third of a page. Push `z` or `Esc` to go back. |
 | `Enter`, `←`, `→` | When the agent asks a question: confirm, or go to the previous or next question. |
 | `W` | Go to the wall. |
 | `R` | Read all data again now. |
@@ -75,6 +76,7 @@ You can change these keys and messages. Refer to section 7.
 | `Option` + a key | Write the character that your keyboard layout puts on this key, for example `Option+L` for `@`, `Option+5` for `[`, `Option+8` for `{`, `Option+7` for `|`. |
 | `@`, then letters | Show the other sessions and the files of the agent folder that agree with the letters. A session shows with the word `session`. |
 | `@Name` at the start | Send the message to the session with that name, not to the selected agent. Refer to section 6.18. |
+| `@NewName` | A name that is not a session yet: `Enter` starts it as a background helper first, then sends the message to the selected agent. Refer to section 6.18. |
 | `/` at the start, then letters | Show the commands and skills that agree with the letters, with their descriptions: Claude Code commands, your commands and skills, the commands and skills of the agent folder and its parent folders, and the enabled plugins. |
 | `Tab` or `Enter` | Put the selected suggestion into the message. |
 | `↑`, `↓` | Select a suggestion. When there are no suggestions, move between lines. |
@@ -597,6 +599,14 @@ Agent Terminal leaves out an agent that shows a menu on its screen, because the 
 A name in the middle of a message stays in the message. The selected agent then passes the message on itself, with its own tool for messages between sessions.
 
 If the name is not a live session, Agent Terminal sends the message to the selected agent. If two sessions have the name, or the session shows a menu, the box stays open and the command line tells you.
+
+To hand work to a new helper session, write a name that no session has, anywhere in the message, for example `merge #15 and #16, use @agtermHelper for it`:
+
+1. The box shows an orange line: `@agtermHelper → new background agent in <folder>`. If it does not, the name belongs to a session, to a file in the folder or to a `REMOTE` session, and no helper starts.
+2. Push `Enter`. Agent Terminal starts a background agent with that name in the folder of the selected agent, with the model, effort and mode of `NW` (section 6.15). The helper waits for its task.
+3. Then Agent Terminal sends your message, unchanged, to the selected agent. The agent gives the helper its task with its own tool for messages between sessions.
+
+If a helper does not start, for example in a folder that Claude Code does not trust yet, Agent Terminal sends nothing. Your message stays as the draft of the agent: push `k` to open it again.
 
 ### 6.19 Find a session
 
