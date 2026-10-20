@@ -1,6 +1,6 @@
 # No Terminal windows: design
 
-Date: 2026-10-20. Status: draft; the owner answered three questions (below), the rest waits for approval. Nothing here is built; D72 records the plan. Checked against `main` at D71 and Claude Code 2.1.304.
+Date: 2026-10-20. Status: approved by the owner ("build it", 2026-10-20) with the recommended defaults for the open questions; phase 0 answered below. Nothing here is built; D72 records the plan. Checked against `main` at D71 and Claude Code 2.1.304.
 
 ## Intent
 
@@ -98,6 +98,18 @@ Nothing to build. With no session windows on monitor 2, `queue.sh` and the tile 
 - The ambient wall of live windows on monitor 2; see open question 2.
 - Seeing tool output live without a key press: it takes `g` and a window (A).
 - Sessions survive closing Terminal, but it is not checked yet what happens to background sessions on a reboot or a Claude Code update (`claude respawn` exists for updates).
+
+## Phase 0 answers (2026-10-20, Claude Code 2.1.304)
+
+Checked with throwaway background sessions in this repo (haiku, stopped afterwards).
+
+- **Ending `claude attach`:** `Ctrl+Z` ends the process with exit code 0 (the session keeps running). `←` goes to Claude Code's agent view and keeps the attach running.
+- **Closing the window:** the owner's profile (`Clear Dark`) has no `shellExitAction`, so Terminal's default applies. agterm closes the window itself once the tab is no longer busy, so it works with any profile.
+- **`claude --bg` with no prompt:** starts and prints the job id as usual.
+- **`claude --bg --resume <id>`:** keeps the session id, the job id and the name. The session file does not record model or permission mode, so agterm passes `--model` and `--permission-mode` itself.
+- **Statusline:** background sessions write `~/.agent/usage/<sid>.json`, so agterm's usage bar keeps working.
+- **`!cmd` typed through `claude attach`:** runs as a shell command (`<bash-input>` in the transcript), the same as typed by hand.
+- **Reboot:** not tested. `claude respawn` restarts background sessions; a later check covers a reboot.
 
 ## Phased order
 
