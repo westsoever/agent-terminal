@@ -79,7 +79,7 @@ You can change these keys and messages. Refer to section 7.
 | `@`, then letters | Show the other sessions and the files of the agent folder that agree with the letters. A session shows with the word `session`. |
 | `@Name` at the start | Send the message to the session with that name, not to the selected agent. Refer to section 6.18. |
 | `@NewName` | A name that is not a session yet: `Enter` starts it as a background helper first, then sends the message to the selected agent. Refer to section 6.18. |
-| `/` at the start, then letters | Show the commands and skills that agree with the letters, with their descriptions: Claude Code commands, your commands and skills, the commands and skills of the agent folder and its parent folders, and the enabled plugins. |
+| `/` at the start, then letters | Show the commands and skills that agree with the letters, with their descriptions: Claude Code commands, your commands and skills, the commands and skills of the agent folder and its parent folders, and the enabled plugins. A command that opens a screen of its own in Claude Code (`/config`, `/model` without a name, `/mcp`, `/permissions`, `/agents`, `/hooks`, `/plugin`, `/memory`, `/resume`, `/rewind`, `/status`, `/context`, `/doctor`, `/login`), sent to a background agent, also opens the agent's screen in a short-lived window, so that you can use it there. |
 | `Tab` or `Enter` | Put the selected suggestion into the message. |
 | `↑`, `↓` | Select a suggestion. When there are no suggestions, move between lines. |
 | `Ctrl+V` | Paste an image from the clipboard. Agent Terminal saves it as a file and writes its path. The agent opens the file. If the clipboard has no image, Agent Terminal pastes the text. |

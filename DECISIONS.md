@@ -2,6 +2,12 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D77 (2026-10-20): a / command with a screen of its own, sent to a background agent, opens its screen (no-Terminal phase 4)
+
+**Decision (owner):** "build it" for the no-Terminal design (plan Task 5, spec D).
+
+**Built:** `editor.go` `screenCommand`: `/config`, `/model` with no name, `/mcp`, `/permissions`, `/agents`, `/hooks`, `/plugin`, `/memory`, `/resume`, `/rewind`, `/status`, `/context`, `/doctor`, `/login`. Sent to a background agent, the command is typed as before and then the agent's short-lived window (D74) opens on it, so the screen is not left open on a pty nobody sees. The window opens even when the typing failed (you then type it there). To a Terminal agent nothing changes. D76 is the `/BG` move (plan Task 4), built in parallel.
+
 ## D75 (2026-10-20): every start is a background one: FIND r, an empty NW, PC t, the trust question, LOGIN (no-Terminal phase 2)
 
 **Decision (owner):** "build it" for the no-Terminal design with its recommended defaults (plan Task 2): no session gets a Terminal window of its own; trust is answered in a short-lived window (agterm never writes `~/.claude.json`); PC `t` stays as "background session, then its short-lived window at once".

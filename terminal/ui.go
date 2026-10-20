@@ -1252,6 +1252,10 @@ func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg { return sentMsg{sid, name, "answer", answerTyped(tty, n, text)} }
 			}
 		}
+		if a := m.sel(); a != nil && a.Bg && screenCommand(text) { // its screen opens on nobody's window: show it
+			ag := *a
+			return m, tea.Sequence(m.deliver(text, nil), m.openShort(ag))
+		}
 		return m, m.deliver(text, nil)
 	}
 	return m, cmd
