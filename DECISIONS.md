@@ -2,6 +2,20 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D72 (2026-10-20): o numbers the links on screen and 1-9 opens one; a plan to drop Terminal windows (design only)
+
+**Decision (owner):** clicking links in agterm does nothing. "If we end up managing all sessions in agent-terminal and have no open terminals, that's completely fine." Trackpad scrolling is not a priority; drag-to-select text must keep working.
+
+**Why clicking did nothing:** the links are OSC 8 hyperlinks (`links.go`), and Terminal.app (2.15 on macOS 26.5) does not know OSC 8. Its binary has URL detection on plain text (data detectors, `_clickedURL`) and OSC 6/7 (the tab's document and folder), but nothing that keeps a link per cell, and the escape is dropped. Its own URL detection needs the whole address on screen and a right-click or cmd+double-click, and fails on an address cut with `…`. So cmd+click works in iTerm2 or Ghostty and never in Terminal.app.
+
+**Built:** `o` (the open-file key) now also numbers the links on screen: each link shows its number (1-9, accent background) on its first character, so no line moves or changes width, and `1`-`9` opens that link in the default browser (`open`). `a`-`i` still open the agent's files; `esc` or any other key cancels. The links are read from the drawn screen (the OSC 8 targets), so every panel with links works without its own code: the conversation, the recap, the PR and PC panels, a zoomed agent. A link cut with `…` opens its whole address. More than 9 links: the lowest 9 (the newest) get a number. The command line says `open: 1-9 the link with that number · a-i a file`. `links.go` `screenLinks`, `numberLinks`; the footers of the desk, PR and PC say `o`.
+
+**Chosen over mouse mode:** Bubble Tea's mouse mode (`tea.WithMouseCellMotion`) would make a click open a link, but then agterm gets every mouse event: drag-to-select and copy in Terminal.app stop working (only with a modifier held, and only in some terminals), and each panel would have to map a click's cell back to the link under it. The keyboard picker costs one key press more, keeps the mouse the terminal's, and works the same in every terminal and over ssh. The OSC 8 links stay, for the terminals that know them.
+
+**Not built:** mouse clicks and trackpad scrolling; links in the list views (they have `enter`). In PC, while a question takes your own answer, `o` stays "own answer" and the links can't be picked.
+
+**Design only (not built):** `docs/superpowers/specs/2026-10-20-no-terminal-design.md`: what still needs a Terminal.app window today and how agterm could take each over (every new session a background one, adopting Terminal sessions), with a phased order and the questions for the owner. It waits for the owner's approval.
+
 ## D71 (2026-10-20): CL opens the changelog
 
 **Decision (owner):** "Something that would be good to have is a \"CL\" command, which opens the changelog".

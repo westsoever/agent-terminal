@@ -57,6 +57,9 @@ func (m model) View() string {
 	}
 	lines = append(lines, body[:bodyH]...)
 	lines = append(lines, m.footer()...)
+	if m.mode == mOpen && len(m.openLinks) > 0 { // o: each link shows the number that opens it (D72)
+		return numberLinks(strings.Join(lines, "\n"), m.openLinks)
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -202,7 +205,11 @@ func (m model) commandLine() string {
 			left = append(left, s("  enter starts it", cGrey))
 		}
 	case mOpen:
-		left = []seg{s(" open file: press its letter", cOrange)}
+		left = []seg{s(" open: a-i a file", cOrange)}
+		if len(m.openLinks) > 0 {
+			left = []seg{s(" open: 1-9 the link with that number · a-i a file", cOrange)}
+		}
+		left = append(left, s(" · esc", cGrey))
 	case mConfirm:
 		left = []seg{s(" No local folder. Open it on GitHub? ", cOrange), s("enter/y yes · esc no", cGrey)}
 	default:
@@ -1453,6 +1460,7 @@ func (m model) helpLines() []string {
 		row2("enter, ←, →", "when the agent asks: confirm, previous / next part"),
 		row2(K.Reply, "write a message (keys below)\nesc keeps it as a draft; sending it sends a window on monitor 1 back"),
 		row2(K.Open+" then a-i", "open that file"),
+		row2(K.Open+" then 1-9", "open a link in the browser: "+K.Open+" puts a number on each link on screen\n(Terminal.app ignores cmd+click on links); works in the PR and PC panels too"),
 		row2(K.Goto, "show the agent's own Terminal window, where it is\na background agent (◦) gets a new window attached to it"),
 		row2(K.Here, "bring its window to monitor 1 and into focus, to type in it\na prompt sends it back"),
 		row2(K.Dismiss, "remove a waiting or idle agent (a background one too) from the list, no answer\nit keeps running and comes back when it has something new"),
@@ -1546,6 +1554,7 @@ func (m model) footer() []string {
 		add(&r1, K.Reply, "comment")
 		add(&r1, K.PCAgent, "agent")
 		add(&r1, K.PCTerm, "Terminal")
+		add(&r1, K.Open, "link")
 		add(&r1, "enter", "in browser")
 		add(&r1, "esc", "desk")
 	case vTheme:
@@ -1563,6 +1572,7 @@ func (m model) footer() []string {
 			add(&r1, K.Reply, "comment → new agent")
 			add(&r1, "1-3", "review / merge / close")
 			add(&r1, key(K.Older)+key(K.Newer), "scroll")
+			add(&r1, K.Open, "link")
 			add(&r1, "enter", "in browser")
 			add(&r1, "esc", "close")
 		} else {
@@ -1620,7 +1630,7 @@ func (m model) footer() []string {
 		add(&r1, key(K.Older)+key(K.Newer), "scroll")
 		add(&r1, K.Zoom, "zoom")
 		add(&r1, strings.Replace(key(K.Waiting), "␣", "␣␣", 1), "longest input")
-		add(&r1, K.Open+" a-i", "open file")
+		add(&r1, K.Open, "open file/link")
 		add(&r1, K.Goto, "go to window")
 		add(&r1, K.Here, "bring here")
 		add(&r1, K.Dismiss, "dismiss")

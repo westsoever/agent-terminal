@@ -105,6 +105,7 @@ type model struct {
 	nwDir      nwFolder            // where that folder came from and what is there (the box shows it)
 	bgScr      map[string]Prompt   // sid -> the menu on a background agent's screen (rebuilt from claude logs)
 	files      *fileHistory        // the FL view: the last files the agents mentioned
+	openLinks  []string            // the links o numbered on screen; 1-9 opens one (D72)
 	find       findState           // the FIND view: the search on the screen
 	asked      map[string]askSeen  // sid -> when its menu first showed: a busy agent's wait starts there
 	ticks      int
@@ -793,6 +794,21 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case mOpen:
 		m.mode = mKeys
+		if ks == "esc" {
+			return m, nil
+		}
+		if len(ks) == 1 && ks[0] >= '1' && ks[0] <= '9' {
+			if i := int(ks[0] - '1'); i < len(m.openLinks) {
+				if err := linkOpen(m.openLinks[i]); err != nil {
+					m.setErr(err.Error())
+				} else {
+					m.setStatus("opened " + m.openLinks[i])
+				}
+				return m, nil
+			}
+			m.setErr("no such link")
+			return m, nil
+		}
 		if len(ks) == 1 && ks[0] >= 'a' && ks[0] <= 'i' {
 			l := m.last(m.sel())
 			i := int(ks[0] - 'a')
@@ -918,8 +934,9 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = mTyping
 		return m, m.ed.open(a.SID, a.Cwd, m.editorWidth())
 	case ks == K.Open:
-		if len(m.last(m.sel()).Files) == 0 {
-			m.setErr("no files mentioned")
+		m.openLinks = screenLinks(m.View())
+		if len(m.last(m.sel()).Files) == 0 && len(m.openLinks) == 0 {
+			m.setErr("no files or links to open")
 		} else {
 			m.mode = mOpen
 		}

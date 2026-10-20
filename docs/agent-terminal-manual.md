@@ -44,6 +44,7 @@ The right hand does the most frequent work: `j` goes up, `l` goes down, `k` open
 | `a` | When the agent asks questions: take the recommended answer of each question and send all. Refer to section 6.3. |
 | `k` | Write a message to the selected agent. `Enter` sends it. `Esc` keeps it as a draft. Refer to section 1.4. |
 | `o`, then `a` to `i` | Open the file with that letter. |
+| `o`, then `1` to `9` | Open the link with that number in the default browser. After `o`, each link on the screen shows its number on its first character. Refer to section 6.8. |
 | `g` | Show the Terminal window of the selected agent, where it is. For a background agent, open a new Terminal window that is attached to it. |
 | `h` | Bring the window of the selected agent to monitor 1 and into focus, so that you can write in it. Drag it back to monitor 2 to put it back in its position. |
 | `x` | Remove the selected agent from the waiting list. You do not send an answer. |
@@ -127,7 +128,7 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | `PC` | `x` | Decline a list of choices or of suggested tasks. |
 | `PC` | `r` | Decline it with a reason. The box opens. |
 | `PC` | `←`, `→` | Go to the previous or next question, or item. |
-| `PC` | `o` | Write your own answer to a question. |
+| `PC` | `o` | Write your own answer to a question. When the question has no own answer, `o` shows a number on each link. Refer to section 6.8. |
 | `PC` | `a` | Give the recommended answer to every question and send. Agent Terminal refuses if one question has none. |
 | `PC` | `n`, `p` | Show the next or previous page of a long list. |
 | `PC` | `↑`, `↓` | Scroll the row on the right: its description, its thread and the full request. |
@@ -228,7 +229,7 @@ The screen has five parts, from the top to the bottom:
 
 The usage comes from the statusline: `~/.claude/statusline-command.sh` writes the `rate_limits` of each session to `~/.agent/usage/<session id>.json` when they change, and Agent Terminal shows the newest file. Before any session has updated its statusline, the bar says `no statusline reading yet`. If it stays that way, check that your statusline script has the lines that write `~/.agent/usage/<session id>.json`: without them no file exists and Agent Terminal has nothing to read.
 
-Links in the text (`http://` and `https://`) are real links. Push `Cmd` and click on one in your terminal to open it in the default browser. A link that is too long for the line shows cut with `…`, but the click opens the whole address.
+Links in the text (`http://` and `https://`) are real links. To open one with the keyboard, push `o`, then the number that the link shows (refer to section 6.8). This works in every terminal. In a terminal that knows OSC 8 links (for example iTerm2 or Ghostty), you can also push `Cmd` and click on a link. Terminal.app ignores OSC 8 links, so there a click does nothing. A link that is too long for the line shows cut with `…`, but `o` and the click open the whole address.
 
 ### 4.2 The agent list
 
@@ -296,7 +297,7 @@ Agent Terminal has four modes. The command line shows the current mode.
 | Key mode | This is the normal mode. | Each key does an action. | – |
 | Command mode | Push `/`. | You write a code. | `Enter` does the code. `Esc` cancels. |
 | Write mode | Push `k`. | You write a message. Refer to section 1.4. | `Enter` sends it. `Esc` keeps it as a draft. |
-| File mode | Push `o`. | You select a file. | Push the letter of the file. Any other key cancels. |
+| Open mode | Push `o`. | You select a file or a link. Each link on the screen shows its number. | Push the letter of the file or the number of the link. Any other key cancels. |
 
 In command mode and write mode:
 
@@ -377,7 +378,7 @@ For a command, write `/` at the start of the message, then some letters. Select 
 4. Write your question about the image.
 5. Push `Enter`. The agent opens the image file.
 
-### 6.8 Open a file that an agent wrote about
+### 6.8 Open a file or a link that an agent wrote about
 
 1. Select the agent.
 2. Find the file in `FILES IT MENTIONED`.
@@ -387,6 +388,14 @@ For a command, write `/` at the start of the message, then some letters. Select 
 The file opens in its default application. A folder opens in Finder.
 
 To see the files of all agents, go to the files view (`/FL`). Select a file. Push `Enter`.
+
+To open a link (`http://` or `https://`):
+
+1. Make sure that the link is on the screen. If necessary, scroll with `↑` and `↓`.
+2. Push `o`. Each link on the screen shows a number on its first character, in the accent color.
+3. Push the number of the link.
+
+The link opens in the default browser. This also works in the panel of a pull request (`PR`) and of a Paperclip row (`PC`). When there are more than 9 links on the screen, the lowest 9 get a number. In `PC`, when the question has your own answer, `o` writes your own answer instead.
 
 ### 6.9 Go to the Terminal window of an agent
 
