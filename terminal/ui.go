@@ -567,6 +567,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		m.ticks++
 		m.refresh()
+		m.selectFile()
 		cmds := []tea.Cmd{tick()}
 		if c := m.closeShorts(); c != nil {
 			cmds = append(cmds, c)

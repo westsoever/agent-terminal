@@ -83,6 +83,7 @@ assert_eq "agent-terminal symlink points at the kit" "$KITP" "$(readlink "$D/age
 assert_eq "handoff command linked" "$KITP/commands/handoff.md" "$(readlink "$D/commands/handoff.md")"
 assert_eq "next command linked" "$KITP/commands/next.md" "$(readlink "$D/commands/next.md")"
 assert_eq "dash command linked" "$KITP/commands/dash.md" "$(readlink "$D/commands/dash.md")"
+assert_eq "cl linked next to agterm (D73)" "$KITP/bin/cl" "$(readlink "$HOME/.local/bin/cl")"
 assert_file "optional ~/.agent-repos created" "$AGENT_REPOS_FILE"
 assert_not_contains "~/.agent-repos starts with no active repo" "$(grep -v '^#' "$AGENT_REPOS_FILE")" "/"
 
@@ -177,6 +178,11 @@ assert_eq "uninstall: the converse allowlist entries are left in place" "mcp__pe
 assert_contains "uninstall: says the allowlist entries stay" "$out" "permissions.allow"
 assert_no_file "uninstall removes the watcher plist" "$HOME/Library/LaunchAgents/org.agent-terminal.watch.plist"
 assert_contains "uninstall boots the watcher out (last launchctl call)" "$(tail -1 "$WORK/launchctl.log")" "bootout gui/"
+if [ -L "$HOME/.local/bin/cl" ]; then fail "uninstall removes the cl link" "  still there: $HOME/.local/bin/cl"; else pass "uninstall removes the cl link"; fi
+# a cl that isn't ours is left alone, by install and by uninstall
+printf '#!/bin/sh\n' >"$WORK/other-cl"; ln -s "$WORK/other-cl" "$WORK/other-cl-link"
+out=$(CL_LINK=$WORK/other-cl inst --dry-run); assert_contains "install leaves a cl that isn't ours" "$out" "$WORK/other-cl exists and is not our symlink"
+out=$(CL_LINK=$WORK/other-cl-link inst --uninstall --dry-run); assert_not_contains "uninstall leaves a cl link that isn't ours" "$out" "remove the symlink"
 
 # a failed launchctl bootstrap must not leave a plist that makes the next run say "nothing to do"
 n=$(wc -l <"$WORK/launchctl.log")

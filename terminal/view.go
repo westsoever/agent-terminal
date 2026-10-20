@@ -1415,6 +1415,7 @@ func (m model) helpLines() []string {
 			"folder: a path, a folder in ~/bbq, or an agent's name; left out: the selected agent's\n"+
 			"options after it, in any order: a model (opus sonnet haiku fable) · an effort (low … max) · a mode (plan auto bypass accept manual dontask)\n"+
 			"e.g. NW soii sonnet high"),
+		row2("cl in a shell", "cl [name] [prompt]: a background agent in that folder, on NW's options; agterm selects it when it shows"),
 		row2("FIND words", "find a session: by its name, then by what was said in it (one message with all the words), then Claude picks (s)\nmore: Find below"),
 		row2("STOP", "stop the selected background agent (its conversation stays)"),
 		row2("ALL group", "one message to a group of agents: waiting (INPUT and WAITING), input, idle or working\nagents with a menu on screen are left out"),

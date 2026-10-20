@@ -9,9 +9,10 @@ One keyboard-only screen for every coding agent running on your Mac: who is work
 ```sh
 git clone https://github.com/westsoever/agent-terminal.git ~/agent-terminal   # the repo is private: you need access, and `gh auth login` (or an SSH key) first
 cd ~/agent-terminal
-./install.sh              # hooks, links and the launchd watcher; shows the diff and asks before changing anything
+./install.sh              # hooks, links (also ~/.local/bin/cl) and the launchd watcher; shows the diff and asks before changing anything
 terminal/build.sh         # builds the terminal into ~/.local/bin/agterm (needs Go)
 agterm                    # open it (if the shell says "command not found": export PATH="$HOME/.local/bin:$PATH")
+cl                        # in any folder: start a background session there; agterm selects it
 ```
 
 Press `?` in the terminal for every key, `HELP` for the same on the command line, and `ctrl+c` to quit. The full manual is `docs/agent-terminal-manual.md`.
