@@ -1418,6 +1418,9 @@ func (m model) helpLines() []string {
 		row2("cl in a shell", "cl [name] [prompt]: a background agent in that folder, on NW's options; agterm selects it when it shows"),
 		row2("FIND words", "find a session: by its name, then by what was said in it (one message with all the words), then Claude picks (s)\nmore: Find below"),
 		row2("STOP", "stop the selected background agent (its conversation stays)"),
+		row2("BG", "move the selected Terminal session to the background: /exit, then claude --bg --resume with its id, name, model and mode; its tab closes\n"+
+			"only when idle with an empty box and no menu · BG ALL moves every idle one and lists the skipped ones\n"+
+			"lost: its background shells, a running /loop, subagents in flight, permissions given for this session, its scrollback"),
 		row2("ALL group", "one message to a group of agents: waiting (INPUT and WAITING), input, idle or working\nagents with a menu on screen are left out"),
 		row2("A3 or name", "select agent 3, or the first agent whose name starts so"),
 		row2("CL", "the changelog: what changed, newest first, from DECISIONS.md (also CHANGELOG)"),

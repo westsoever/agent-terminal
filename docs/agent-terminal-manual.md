@@ -22,6 +22,7 @@ Push `/`, write the code, then push `Enter`.
 | `NW` | New agent | Start a background agent. You can add a folder, a model, an effort and a mode, for example `NW soii sonnet high`. Refer to section 6.15. |
 | `ALL` | Write to a group | Write one message to a group of agents: `ALL waiting`, `ALL input`, `ALL idle` or `ALL working`. Refer to section 6.17. |
 | `STOP` | – | Stop the selected background agent. Its conversation stays. |
+| `BG` | – | Move the selected Terminal session to the background. `BG ALL` moves every idle one. Refer to section 6.15. |
 | `A3` | Agent 3 | The desk, with agent 3 selected. Use a number from 1 to 9. |
 | `ching` | An agent by name | The desk, with the first agent whose name starts with these letters. |
 | `CL` | Changelog | What changed, newest first: one line per decision in `DECISIONS.md`, read each time you open it. `CHANGELOG` does the same. Scroll like the help page. |
@@ -570,6 +571,18 @@ If Claude Code is logged out, the footer shows `Claude Code is logged out · /LO
 3. `cl` shows the id of the agent. Agent Terminal selects the agent when it shows in the list (in a few seconds).
 
 `cl` uses the same model, effort and mode as `NW` (`nw_model`, `nw_effort`, `nw_permission` in `keys.toml`, section 7.6). If the folder is not trusted, `cl` shows Claude Code's message and Agent Terminal selects nothing. `claude` without `cl` still starts a session in the Terminal window.
+
+#### Move a Terminal session to the background
+
+A session that runs in a Terminal window can become a background agent. It keeps its conversation, its id and its name.
+
+1. Select the session. It must be idle: not working, no menu on its screen, and no text that you typed in its box and did not send.
+2. Push `/`, write `BG`, push `Enter`. Agent Terminal writes `/exit` in the session, waits until it ends, starts it again in the background with the same model, effort and permission mode, and closes its Terminal tab.
+3. The command line shows `moved <name> to the background`. The session shows in the list as a background agent.
+
+To move every idle Terminal session, write `BG ALL`. The command line lists the sessions it did not move and why (`busy`, `menu`, `draft`).
+
+A moved session loses what only its running process had: background shells and monitors that it started, a running `/loop`, subagents that were working, permissions that you gave "for this session", and its scrollback. Its first turn after the move costs more tokens once (the prompt cache is cold). If the session does not end within 20 s, Agent Terminal leaves it as it is: look at its tab. If the start in the background fails, the command line shows Claude Code's message; write `claude --resume <id>` in a terminal to open it by hand.
 
 ### 6.16 Look at the open pull requests
 
