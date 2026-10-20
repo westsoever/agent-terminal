@@ -699,6 +699,9 @@ func (m *model) treeKey(ks string) tea.Cmd {
 
 // confirmKey answers "No local folder. Open it on GitHub?": enter or y opens it, any other key does not.
 func (m model) confirmKey(ks string) (tea.Model, tea.Cmd) {
+	if t := m.trust; t != nil {
+		return m, m.trustKey(*t, ks == "enter" || ks == "y")
+	}
 	u := m.confirmURL
 	m.mode, m.confirmURL = mKeys, ""
 	if ks == "enter" || ks == "y" {

@@ -8,6 +8,8 @@
 //   tabs                 every Terminal tab as "tty window_id tab_index" (1-based), one per line
 //   tabgroups            macOS window tabs (Window > Merge All Windows: each tab is its own window): one line per
 //                        tab bar, its tab titles in order, tab-separated (read through System Events)
+//   closeidle TTY        close that tab's window when nothing runs in it any more (a short-lived window whose shell
+//                        ended): "ok" when closed or gone, "busy" while something runs
 //   screen TTY           what the tab shows now (its visible text), for reading a menu the agent shows
 //   answer TTY N TEXT    in a menu, pick option N (its "Type something." line) and type TEXT; the newline that
 //                        do script adds submits it, so no extra Enter
@@ -87,7 +89,7 @@ function press(t, win, tab, keys) {
 function run(argv) {
   const [cmd, tty] = argv;
   const t = Application('Terminal');
-  if (!t.running()) return cmd === 'ttys' || cmd === 'tabs' || cmd === 'tabgroups' ? '' : 'error: Terminal not running';
+  if (!t.running()) return cmd === 'closeidle' ? 'ok' : cmd === 'ttys' || cmd === 'tabs' || cmd === 'tabgroups' ? '' : 'error: Terminal not running';
   if (cmd === 'tabgroups') {
     const out = [];
     try {
@@ -120,6 +122,12 @@ function run(argv) {
     return out.join('\n');
   }
   const [win, tab] = findTab(t, tty || '');
+  if (cmd === 'closeidle') {
+    if (!win) return 'ok';
+    if (tab.processes().length > 0) return 'busy'; // the shell, claude attach: still in use
+    win.close();
+    return 'ok';
+  }
   if (!win) return 'error: no Terminal tab for ' + tty;
   try {
     if (cmd === 'text') {

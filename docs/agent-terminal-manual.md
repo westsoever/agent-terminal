@@ -45,8 +45,8 @@ The right hand does the most frequent work: `j` goes up, `l` goes down, `k` open
 | `k` | Write a message to the selected agent. `Enter` sends it. `Esc` keeps it as a draft. Refer to section 1.4. |
 | `o`, then `a` to `i` | Open the file with that letter. |
 | `o`, then `1` to `9` | Open the link with that number in the default browser. After `o`, each link on the screen shows its number on its first character. Refer to section 6.8. |
-| `g` | Show the Terminal window of the selected agent, where it is. For a background agent, open a new Terminal window that is attached to it. |
-| `h` | Bring the window of the selected agent to monitor 1 and into focus, so that you can write in it. Drag it back to monitor 2 to put it back in its position. |
+| `g` | Show the Terminal window of the selected agent, where it is. For a background agent, show its own screen in a short-lived Terminal window. Push `Ctrl+Z` there to close it; the agent keeps running. |
+| `h` | Bring the window of the selected agent to monitor 1 and into focus, so that you can write in it. Drag it back to monitor 2 to put it back in its position. For a background agent, the same as `g`. |
 | `x` | Remove the selected agent from the waiting list. You do not send an answer. |
 | `z` | Show the selected agent on the full screen: its recap, its conversation and the message box. `↑` and `↓` scroll a third of a page. Push `z` or `Esc` to go back. |
 | `Enter`, `←`, `→` | When the agent asks a question: confirm, or go to the previous or next question. |
@@ -133,7 +133,7 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | `PC` | `n`, `p` | Show the next or previous page of a long list. |
 | `PC` | `↑`, `↓` | Scroll the row on the right: its description, its thread and the full request. |
 | `PC` | `b` | Hand the issue to a new background agent. Refer to section 6.14. |
-| `PC` | `t` | Hand the issue to a new session in a Terminal window. |
+| `PC` | `t` | Hand the issue to a new background agent, and open its screen in a short-lived window. |
 | `PC` | `Enter` | Open the row in Paperclip in your browser. |
 | `PC` | `k` | Write a comment on the row. `Enter` sends it. |
 | `RP` | `Enter` | Open the folder of the repo. A repo without a local folder asks `No local folder. Open it on GitHub?`: push `Enter` or `y` to open it, any other key to stop. |
@@ -165,7 +165,7 @@ When a tile shows on the full screen, the number keys send answers, as on the de
 | `l`, `j` | Select the next or previous result. |
 | `Enter` | For a live session: go to the desk with that agent selected. For a session that ended: show the messages that match, on a page that you can only read. |
 | `s` | Ask Claude which sessions fit the words. |
-| `r` | Resume the selected session that ended. A new Terminal window opens and starts `claude --resume`. |
+| `r` | Resume the selected session that ended, in the background, in its folder (`claude --bg --resume`). It shows in the list like any other agent. |
 | `l`, `j` on the page | Scroll the page one line down or up. `PgDn` and `PgUp` scroll one page. `Home` and `End` go to the start and the end. |
 | `Esc` | Close the page. Push `Esc` again to go back to the desk. |
 
@@ -489,7 +489,7 @@ Only a person can approve a proposal. An agent cannot approve it.
 **Hand an issue to an agent with your permissions.** The agents of Paperclip have restricted permissions. Some work they cannot finish: for example, set a status, or write outside their folder. A session that you start has your permissions. Use it to look over the work and to finish it.
 
 1. Select the issue.
-2. Push `b` for a new background agent. Push `t` for a new session in a Terminal window.
+2. Push `b` for a new background agent. Push `t` for the same, with its screen open in a short-lived window.
 3. The message box opens. Write the task, or leave the box empty. An empty box sends this task: look over the issue and finish what the Paperclip agents could not.
 4. To give the issue to a session that already runs, write `@` and its name at the start of the box. Example: `@miso check the pull request`. The session gets the issue and the text after the name.
 5. Push `Enter`.
@@ -547,17 +547,19 @@ A background agent is a Claude Code session without a window. It does the work w
    - the start of a name: `NW mis` fits the folders in `~/bbq` and the agents. If it fits more than one folder, Agent Terminal lists them: write more of the name. An agent in a worktree stands for the main folder of its repo.
    The message box shows the folder, its branch, and how Agent Terminal found it (`folder: the selected agent miso`). An orange `⚠` line warns when the folder is the home folder, is not a git repo, or is a worktree. Press `Esc` and write `NW` again if the folder is wrong.
 3. To choose the model, the effort or the permission mode, write them after `NW`, in any place: a model (`opus`, `sonnet`, `haiku`, `fable`, or a full name), an effort (`low`, `medium`, `high`, `xhigh`, `max`), a mode (`plan`, `auto`, `bypass`, `accept`, `manual`, `dontask`). Example: `NW soii sonnet high`. The defaults are `nw_model`, `nw_effort` and `nw_permission` in `keys.toml` (section 7.6).
-4. The message box opens with `new background agent in <folder>` and the options. Write the task.
-5. Push `Enter`. The command line shows `✓ background agent <id> started`. Agent Terminal selects the new agent when it shows in the list.
+4. The message box opens with `new background agent in <folder>` and the options. Write the task. To start a session without a task, write nothing.
+5. Push `Enter`. The command line shows `✓ background agent <id> started`. Agent Terminal selects the new agent when it shows in the list. With an empty box, its screen opens in a short-lived window too, so you can work in it (section 1.2, `g`).
 6. Answer it as any other agent: push `k`, or a number key. Its questions and menus show in the agent panel like those of other agents. Quick approve (`a`) works too.
 
 To change the model of a running agent, write `/model sonnet` as a message. The agent asks `Switch model?`. The agent panel shows the question. Push `1` to confirm.
 
-To see its own screen, push `g`. A new Terminal window opens and shows the agent. Closing that window does not stop the agent.
+To see its own screen, push `g`. A short-lived Terminal window opens and shows the agent: use every key and `/` command of Claude Code there. Push `Ctrl+Z` to leave; Agent Terminal closes the window, and the agent keeps running. Push `g` again while the window is open to bring it to the front: an agent never gets a second window. (`←` in that window goes to Claude Code's list of agents, and the window stays open.)
 
 To stop it, select it, push `/`, write `STOP`, push `Enter`. To open it again later, write `claude --resume <id>` in a terminal.
 
-The folder must be trusted by Claude Code. If the command line shows `Workspace not trusted`, write `claude` in that folder once and accept.
+The folder must be trusted by Claude Code. If it is not, the command line asks `Claude Code does not trust <folder> yet. Trust it?`. Push `Enter` or `y`: a short-lived window opens Claude Code in that folder. Answer its trust question, then write `/exit`. The window closes, and Agent Terminal starts the agent again. Push `Esc` to start nothing.
+
+If Claude Code is logged out, the footer shows `Claude Code is logged out · /LOGIN` instead of the usage. Write `/LOGIN`: a short-lived window runs `claude auth login`. Agent Terminal checks every 5 minutes.
 
 #### Start a background agent from a shell
 
@@ -647,7 +649,7 @@ Use this procedure when you know what you or an agent said, but not in which ses
 6. Push `l` or `j` to select a result. Push `Enter`:
    - For a live agent, Agent Terminal goes to the desk with that agent selected.
    - For a session that ended, Agent Terminal shows the newest 4 messages that match. Each one has the message before it and the message after it. Push `l` or `j` to scroll. Push `Esc` to close the page.
-7. To continue a session that ended, push `r`. Agent Terminal opens a new Terminal window. The window goes to the folder where the session started and runs `claude --resume <session id>`. Agent Terminal does this only when you push `r`.
+7. To continue a session that ended, push `r`. Agent Terminal continues it as a background agent in the folder where the session started (`claude --bg --resume <session id>`), on the model it ran on, and selects it when it shows in the list. Push `g` on it to see its own screen. Agent Terminal does this only when you push `r`.
 
 Step 3 starts by itself when steps 1 and 2 find nothing. The top line then shows `asking Claude…`. This takes approximately 10 seconds. To ask Claude when steps 1 and 2 found results, push `s`. The results of Claude show at the top of the list.
 
@@ -760,7 +762,7 @@ Agent Terminal only does these things to an agent window:
 - It pushes `Enter` or a number key in the window. For this, the window comes to the front for approximately 0.1 seconds.
 - When you push `g`, it brings the window to the front.
 
-Agent Terminal starts a new agent session only when you write `NW` (section 6.15). That agent runs in the background, without a window. `g` on a background agent opens one new Terminal window for it.
+Agent Terminal starts a new agent session only when you write `NW` (section 6.15), push `r` in FIND, or hand over a PC issue. That agent runs in the background, without a window. `g` on a background agent opens its screen in a short-lived window, which closes when you leave it with `Ctrl+Z`.
 
 ## 9. How Agent Terminal sends text
 

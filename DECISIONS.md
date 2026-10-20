@@ -2,6 +2,18 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D75 (2026-10-20): every start is a background one: FIND r, an empty NW, PC t, the trust question, LOGIN (no-Terminal phase 2)
+
+**Decision (owner):** "build it" for the no-Terminal design with its recommended defaults (plan Task 2): no session gets a Terminal window of its own; trust is answered in a short-lived window (agterm never writes `~/.claude.json`); PC `t` stays as "background session, then its short-lived window at once".
+
+**Built (`start.go`):** FIND `r` runs `claude --bg --resume <id>` in the session's folder, on the model its transcript names when `nw_model` is unset (phase 0: the id, job and name stay). `NW` with an empty box starts the agent with no first message (`nwOpts.args("")` passes no `--`) and opens its screen (D74). PC `t` is PC `b` plus its screen. A start that Claude Code refuses as "not trusted" (NW, FIND `r`) asks `Trust it?`; yes opens `cd <folder> && claude` in a short-lived window, and when that window closes the start runs again (`m.after`). `/LOGIN` opens `claude auth login` in one; `claude auth status` runs at start and every 5 minutes, and logged out replaces the usage in the footer. Gone: `resumeWindow`, `termStart`, `termCommand`. Other starts (PR, RP, @helpers, PC `b`) still report "not trusted" as an error.
+
+## D74 (2026-10-20): g and h on a background agent open its screen in a short-lived window (no-Terminal phase 1)
+
+**Decision (owner):** Claude Code's full screen opens in "a short-lived Terminal window that closes when you leave it, NOT inside agterm's own window" (design `docs/superpowers/specs/2026-10-20-no-terminal-design.md`, decision 2; plan `docs/superpowers/plans/2026-10-20-no-terminal.md`, Task 1).
+
+**Built:** `g` and `h` on a background agent run `claude attach <job>; exit` in a new Terminal window (`bg.go` `shortWindow`, `termShort`) and keep its tty. `Ctrl+Z` ends the attach (phase 0: exit 0, the session keeps running) and so the shell; Terminal keeps the window open by default, so every tick asks `send.js closeidle <tty>`, which closes the window once its tab runs no process and leaves it while anything runs (`←` goes to Claude Code's agent view and keeps the attach running). `g` again raises the open window; a second `g` while it opens does nothing. Before, `g` opened a window that stayed after the attach ended. Tests: `bg_test.go`.
+
 ## D73 (2026-10-20): cl starts a background session from a shell and selects it in agterm
 
 **Decision (owner, no-Terminal design decision 3):** sessions started by hand use "a new `cl` shell command that starts a background session and selects it in agterm".

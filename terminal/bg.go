@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/creack/pty"
 )
 
@@ -161,6 +162,7 @@ var bgStartedRe = regexp.MustCompile(`backgrounded\s+·\s+([0-9a-f]+)`)
 type nwOpts struct {
 	Dir, Model, Effort, Perm string
 	Name                     string // the session's name in the list ("" for Claude Code's own)
+	Resume                   string // the id of an ended session to continue ("" for a new one)
 }
 
 var (
@@ -212,6 +214,9 @@ func (o nwOpts) summary() string {
 // args are the claude flags for the options; the prompt follows after "--", so it may start with "/" or "-".
 func (o nwOpts) args(prompt string) []string {
 	a := []string{"--bg"}
+	if o.Resume != "" {
+		a = append(a, "--resume", o.Resume)
+	}
 	if o.Name != "" {
 		a = append(a, "-n", o.Name)
 	}
@@ -223,6 +228,9 @@ func (o nwOpts) args(prompt string) []string {
 	}
 	if o.Perm != "" {
 		a = append(a, "--permission-mode", o.Perm)
+	}
+	if prompt == "" { // no first message: the session waits (phase 0)
+		return a
 	}
 	return append(a, "--", prompt)
 }
@@ -253,12 +261,83 @@ func bgStop(job string) string {
 	return "ok"
 }
 
-// bgAttachWindow opens a new Terminal window attached to the session, for the owner to type in it.
-func bgAttachWindow(job string) string {
-	return termWindow(shQuote(claudeBin()) + " attach " + shQuote(job))
+// shortWindow opens the session's own screen in a short-lived Terminal window: claude attach, which ctrl+z ends
+// (the session keeps running), and then the window closes (D74). It returns the window's tty.
+func shortWindow(job string) (string, error) {
+	return termShort(shQuote(claudeBin()) + " attach " + shQuote(job))
+}
+
+// termShort opens a new Terminal window running the shell line cmd and then exit, so nothing is left in it once
+// cmd ends and the tick closes it (closeIdleFn): Terminal's own setting may keep it open. Returns its tty (ttys012).
+func termShort(cmd string) (string, error) {
+	out, err := osascriptRun("tell application \"Terminal\"\n\tactivate\n\tset t to do script " + asString(cmd+"; exit") +
+		"\n\treturn tty of t\nend tell")
+	s := strings.TrimSpace(string(out))
+	if err != nil {
+		return "", errors.New(firstLine(s))
+	}
+	return strings.TrimPrefix(s, "/dev/"), nil
 }
 
 func firstLine(t string) string {
 	t, _, _ = strings.Cut(t, "\n")
 	return t
+}
+
+// shortMsg: a short-lived window opened (tty) or did not (err).
+type shortMsg struct{ job, tty, err string }
+
+// shortClosedMsg: job -> tty of the short-lived windows that the tick closed.
+type shortClosedMsg map[string]string
+
+// openShort shows a background agent's own screen in its short-lived window: a new one, or the open one raised, so
+// a session never gets two (D74).
+func (m *model) openShort(a Agent) tea.Cmd {
+	job := a.Job
+	m.setStatus("opening the screen of " + a.Name + " · ctrl+z there closes it")
+	return m.openShortCmd(job, a.Name, func() (string, error) { return shortWindow(job) })
+}
+
+// openShortCmd opens the short-lived window that key names (a job, "login", "trust:<dir>") with open, or raises
+// it when it is open already.
+func (m *model) openShortCmd(key, name string, open func() (string, error)) tea.Cmd {
+	if tty, ok := m.short[key]; ok {
+		if tty == "" {
+			return nil // still opening
+		}
+		return func() tea.Msg { return sentMsg{"", name, "go to its window", raiseTabFn(tty)} }
+	}
+	if m.short == nil {
+		m.short = map[string]string{}
+	}
+	m.short[key] = ""
+	return func() tea.Msg {
+		tty, err := open()
+		if err != nil {
+			return shortMsg{job: key, err: err.Error()}
+		}
+		return shortMsg{job: key, tty: tty}
+	}
+}
+
+// closeShorts: on each tick, the short-lived windows whose attach ended are closed.
+func (m *model) closeShorts() tea.Cmd {
+	open := map[string]string{}
+	for job, tty := range m.short {
+		if tty != "" {
+			open[job] = tty
+		}
+	}
+	if len(open) == 0 {
+		return nil
+	}
+	return func() tea.Msg {
+		closed := shortClosedMsg{}
+		for job, tty := range open {
+			if closeIdleFn(tty) {
+				closed[job] = tty
+			}
+		}
+		return closed
+	}
 }
