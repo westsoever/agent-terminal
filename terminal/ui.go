@@ -104,6 +104,7 @@ type model struct {
 	nw         nwOpts              // what /NW is starting: its folder, model, effort and permission mode
 	nwDir      nwFolder            // where that folder came from and what is there (the box shows it)
 	bgScr      map[string]Prompt   // sid -> the menu on a background agent's screen (rebuilt from claude logs)
+	short      map[string]string   // job -> the tty of its short-lived window, "" while it opens (D74)
 	files      *fileHistory        // the FL view: the last files the agents mentioned
 	openLinks  []string            // the links o numbered on screen; 1-9 opens one (D72)
 	find       findState           // the FIND view: the search on the screen
@@ -561,6 +562,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ticks++
 		m.refresh()
 		cmds := []tea.Cmd{tick()}
+		if c := m.closeShorts(); c != nil {
+			cmds = append(cmds, c)
+		}
 		if c := m.readPrompt(0); c != nil {
 			cmds = append(cmds, c)
 		}
@@ -664,8 +668,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.sentAll(msg)
 	case helpersMsg:
 		return m, m.helpersStarted(msg)
+	case shortMsg:
+		if msg.err != "" {
+			delete(m.short, msg.job)
+			m.setErr("could not open its screen: " + msg.err)
+		} else {
+			m.short[msg.job] = msg.tty
+		}
+		return m, nil
+	case shortClosedMsg:
+		for job, tty := range msg {
+			if m.short[job] == tty {
+				delete(m.short, job)
+			}
+		}
+		return m, nil
 	case bgStartedMsg:
-		m.setStatus("✓ background agent " + msg.job + " started in " + tildify(msg.dir) + " · g attaches a window")
+		m.setStatus("✓ background agent " + msg.job + " started in " + tildify(msg.dir) + " · g opens its screen")
 		m.pendingJob = msg.job
 		m.refresh()
 		return m, nil
@@ -940,6 +959,8 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.mode = mOpen
 		}
+	case (ks == K.Here || ks == K.Goto) && m.sel() != nil && m.sel().Bg: // its own screen, in a short-lived window
+		return m, m.openShort(*m.sel())
 	case ks == K.Here && (m.view == vDesk || m.view == vWall):
 		a := m.sel()
 		if a == nil || a.TTY == "" || !a.InTerminal {
@@ -951,9 +972,6 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return sentMsg{"", name, "bring here", raiseTab(tty)} }
 		}
 		return m, func() tea.Msg { return sentMsg{"", name, "bring here", bringHere(sid, tty)} }
-	case ks == K.Goto && m.sel() != nil && m.sel().Bg: // a background session has no window: open one attached to it
-		job, name := m.sel().Job, m.sel().Name
-		return m, func() tea.Msg { return sentMsg{"", name, "attach in a new window", bgAttachWindow(job)} }
 	case ks == K.Goto:
 		if a := m.sel(); a != nil && a.TTY != "" {
 			tty := a.TTY

@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/creack/pty"
 )
 
@@ -253,12 +254,77 @@ func bgStop(job string) string {
 	return "ok"
 }
 
-// bgAttachWindow opens a new Terminal window attached to the session, for the owner to type in it.
-func bgAttachWindow(job string) string {
-	return termWindow(shQuote(claudeBin()) + " attach " + shQuote(job))
+// shortWindow opens the session's own screen in a short-lived Terminal window: claude attach, which ctrl+z ends
+// (the session keeps running), and then the window closes (D74). It returns the window's tty.
+func shortWindow(job string) (string, error) {
+	return termShort(shQuote(claudeBin()) + " attach " + shQuote(job))
+}
+
+// termShort opens a new Terminal window running the shell line cmd and then exit, so nothing is left in it once
+// cmd ends and the tick closes it (closeIdleFn): Terminal's own setting may keep it open. Returns its tty (ttys012).
+func termShort(cmd string) (string, error) {
+	out, err := osascriptRun("tell application \"Terminal\"\n\tactivate\n\tset t to do script " + asString(cmd+"; exit") +
+		"\n\treturn tty of t\nend tell")
+	s := strings.TrimSpace(string(out))
+	if err != nil {
+		return "", errors.New(firstLine(s))
+	}
+	return strings.TrimPrefix(s, "/dev/"), nil
 }
 
 func firstLine(t string) string {
 	t, _, _ = strings.Cut(t, "\n")
 	return t
+}
+
+// shortMsg: a short-lived window opened (tty) or did not (err).
+type shortMsg struct{ job, tty, err string }
+
+// shortClosedMsg: job -> tty of the short-lived windows that the tick closed.
+type shortClosedMsg map[string]string
+
+// openShort shows a background agent's own screen in its short-lived window: a new one, or the open one raised, so
+// a session never gets two (D74).
+func (m *model) openShort(a Agent) tea.Cmd {
+	job, name := a.Job, a.Name
+	if tty, ok := m.short[job]; ok {
+		if tty == "" {
+			return nil // still opening
+		}
+		return func() tea.Msg { return sentMsg{"", name, "go to its screen", raiseTabFn(tty)} }
+	}
+	if m.short == nil {
+		m.short = map[string]string{}
+	}
+	m.short[job] = ""
+	m.setStatus("opening the screen of " + name + " · ctrl+z there closes it")
+	return func() tea.Msg {
+		tty, err := shortWindow(job)
+		if err != nil {
+			return shortMsg{job: job, err: err.Error()}
+		}
+		return shortMsg{job: job, tty: tty}
+	}
+}
+
+// closeShorts: on each tick, the short-lived windows whose attach ended are closed.
+func (m *model) closeShorts() tea.Cmd {
+	open := map[string]string{}
+	for job, tty := range m.short {
+		if tty != "" {
+			open[job] = tty
+		}
+	}
+	if len(open) == 0 {
+		return nil
+	}
+	return func() tea.Msg {
+		closed := shortClosedMsg{}
+		for job, tty := range open {
+			if closeIdleFn(tty) {
+				closed[job] = tty
+			}
+		}
+		return closed
+	}
 }

@@ -45,8 +45,8 @@ The right hand does the most frequent work: `j` goes up, `l` goes down, `k` open
 | `k` | Write a message to the selected agent. `Enter` sends it. `Esc` keeps it as a draft. Refer to section 1.4. |
 | `o`, then `a` to `i` | Open the file with that letter. |
 | `o`, then `1` to `9` | Open the link with that number in the default browser. After `o`, each link on the screen shows its number on its first character. Refer to section 6.8. |
-| `g` | Show the Terminal window of the selected agent, where it is. For a background agent, open a new Terminal window that is attached to it. |
-| `h` | Bring the window of the selected agent to monitor 1 and into focus, so that you can write in it. Drag it back to monitor 2 to put it back in its position. |
+| `g` | Show the Terminal window of the selected agent, where it is. For a background agent, show its own screen in a short-lived Terminal window. Push `Ctrl+Z` there to close it; the agent keeps running. |
+| `h` | Bring the window of the selected agent to monitor 1 and into focus, so that you can write in it. Drag it back to monitor 2 to put it back in its position. For a background agent, the same as `g`. |
 | `x` | Remove the selected agent from the waiting list. You do not send an answer. |
 | `z` | Show the selected agent on the full screen: its recap, its conversation and the message box. `↑` and `↓` scroll a third of a page. Push `z` or `Esc` to go back. |
 | `Enter`, `←`, `→` | When the agent asks a question: confirm, or go to the previous or next question. |
@@ -553,7 +553,7 @@ A background agent is a Claude Code session without a window. It does the work w
 
 To change the model of a running agent, write `/model sonnet` as a message. The agent asks `Switch model?`. The agent panel shows the question. Push `1` to confirm.
 
-To see its own screen, push `g`. A new Terminal window opens and shows the agent. Closing that window does not stop the agent.
+To see its own screen, push `g`. A short-lived Terminal window opens and shows the agent: use every key and `/` command of Claude Code there. Push `Ctrl+Z` to leave; Agent Terminal closes the window, and the agent keeps running. Push `g` again while the window is open to bring it to the front: an agent never gets a second window. (`←` in that window goes to Claude Code's list of agents, and the window stays open.)
 
 To stop it, select it, push `/`, write `STOP`, push `Enter`. To open it again later, write `claude --resume <id>` in a terminal.
 
