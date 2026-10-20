@@ -24,6 +24,7 @@ Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are rec
 - `CL` (or `CHANGELOG`) on the command line opens a scrolling page, newest first: a heading per day, one line per decision (`D70`, its title) from `DECISIONS.md`. It has no tab, like FIND, and scrolls like HELP (same keys, `esc` goes back).
 - `DECISIONS.md` is read from the kit folder each time CL opens, so a merged decision shows without rebuilding agterm.
 - HELP and the manual list it.
+- Backticks are dropped from the titles (the page shows no markdown), and the footer of CL and HELP shows the scroll keys (↑↓, pgup pgdown, home end, esc) instead of the desk's.
 
 **Not built:** the Built/Not built text of each decision (the title is the changelog line; `DECISIONS.md` has the rest), a separate CHANGELOG.md to maintain.
 

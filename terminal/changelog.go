@@ -34,7 +34,7 @@ func changelogLines(path string) []string {
 			day = g[2]
 			lines = append(lines, "## "+day)
 		}
-		lines = append(lines, g[1]+"\t"+g[3])
+		lines = append(lines, g[1]+"\t"+strings.ReplaceAll(g[3], "`", ""))
 	}
 	if len(lines) == 0 {
 		return []string{"No changelog: " + path + " has no decisions."}
