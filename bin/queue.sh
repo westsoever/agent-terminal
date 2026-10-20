@@ -25,7 +25,8 @@
 #   return  agent-terminal sent that agent an answer: a window the queue moved to the main display (by its event, show
 #           or a drag) goes back to its cell, also while agent-terminal is open; not while another tab of it waits (D42).
 #   retile  a session started (session-start.sh): lay out the grid again, in the background.
-#   tile    the same now, for a hotkey; prints how many windows moved.
+#   tile    the same now, for a hotkey; prints how many windows moved. `tile auto` is for AgentTerminalBar's checker (the
+#           set of Terminal windows changed while agterm is open, D69): the same, but queue_tile=off keeps it from tiling.
 #   status  the waiting tabs and the parked windows.
 # Config ($AGENT_HOME/config): queue=off turns it off; queue_tile=off keeps the queue without tiling;
 # queue_park_frame=X,Y,W,H is where a parked window goes on the main display, X,Y from the display's top-left
@@ -210,6 +211,15 @@ single_mode() {
   kill -0 "$pid" 2>/dev/null
 }
 
+# agterm's own window is the controller, not one of the agents: it holds no cell on the other display, so a record
+# that parked it (dragged to the main display by hand) is dropped and the grid is sized by the agents alone (D69).
+release_own_window() {
+  local win
+  single_mode || return 0
+  win=$(window_of "$(open_get self_tty)")
+  [ -z "$win" ] || rm -f "$PARKED/${win%% *}"
+}
+
 # reconcile: move windows so the main display holds what it should now, then flush (the grid comes along).
 #   agent-terminal open (D37): nothing comes over or goes back on its own; agent-terminal's list is the inbox. The grid
 #           on the other displays is still laid out (D68), and a move already asked for (send_back) is applied.
@@ -221,6 +231,7 @@ reconcile() {
   local want="" win f id target t
   [ -n "$(main_display)" ] || return 0
   prune
+  release_own_window
   if single_mode; then flush >/dev/null; return 0; fi
   for f in "$COME"/*; do
     [ -f "$f" ] || continue
@@ -425,7 +436,8 @@ case "$CMD" in
   tile)
     lock || { echo "Queue busy, try again"; exit 0; }
     load_windows
-    TILE=1
+    release_own_window
+    [ "$NAME_ARG" = auto ] || TILE=1   # auto: AgentTerminalBar's checker; queue_tile=off still means no tiling
     n=$(flush)
     if [ "$n" = 1 ]; then echo "Tiled: 1 window moved"; else echo "Tiled: $n windows moved"; fi ;;
   status)

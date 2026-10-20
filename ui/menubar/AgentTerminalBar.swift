@@ -393,6 +393,42 @@ enum TerminalLauncher {
 
 // MARK: - Drags
 
+/// When to lay out the second display's grid while agterm is open (D69): queue.sh only does it when a session starts,
+/// so a Terminal window opened or closed by hand, or shown by switching desktops, would keep an old layout. One tick
+/// per call; true means run `queue.sh tile auto`. It fires once agterm has just opened, and once the set of on-screen
+/// Terminal windows has changed and then held still for `settleTicks` ticks (a new window gets its size first). The
+/// tiling itself moves windows but never changes the set, so it cannot trigger itself, and a window you resize by
+/// hand is left alone until the set changes again.
+struct TileTrigger {
+    var settleTicks = 2
+    private var known: Set<Int>?
+    private var wasOpen = false
+    private var quiet = 0
+    private var pending = false
+
+    mutating func tick(windows: Set<Int>, agtermOpen: Bool) -> Bool {
+        defer { known = windows }
+        guard agtermOpen else { wasOpen = false; pending = false; return false }
+        if !wasOpen { wasOpen = true; pending = true; quiet = 0 }
+        if let known, known != windows { pending = true; quiet = 0 }
+        guard pending else { return false }
+        quiet += 1
+        guard quiet >= settleTicks else { return false }
+        pending = false
+        return true
+    }
+
+    /// `--tile-check`: stdin lines "open|closed id,id,..." (one tick each) -> "tile" or "-" per line.
+    static func check(_ input: String) -> String {
+        var t = TileTrigger()
+        return input.split(separator: "\n").map { line -> String in
+            let f = line.split(separator: " ", maxSplits: 1).map(String.init)
+            let ids = Set((f.count > 1 ? f[1] : "").split(separator: ",").compactMap { Int($0) })
+            return t.tick(windows: ids, agtermOpen: f.first == "open") ? "tile" : "-"
+        }.joined(separator: "\n")
+    }
+}
+
 @MainActor
 final class DragWatcher {
     private struct Seen { var frame: CGRect; var display: Int }
@@ -400,8 +436,19 @@ final class DragWatcher {
     private var timer: Timer?
     private var settled: [Int: Seen] = [:]   // window number -> where it last stood still
     private var last: [Int: CGRect] = [:]    // window number -> frame at the previous tick
+    private var tileTrigger = TileTrigger()
 
     init(paths: AgentTerminalPaths) { self.paths = paths }
+
+    /// agterm is open when $AGENT_HOME/terminal/open holds the pid of a live process (what queue.sh's single_mode reads).
+    private func agtermOpen() -> Bool {
+        let url = paths.agentHome.appendingPathComponent("terminal/open")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return false }
+        for line in text.split(separator: "\n") where line.hasPrefix("pid=") {
+            if let pid = Int32(line.dropFirst(4)), pid > 0 { return kill(pid, 0) == 0 }
+        }
+        return false
+    }
 
     func start() {
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -439,6 +486,7 @@ final class DragWatcher {
         guard NSEvent.pressedMouseButtons == 0 else { return }   // a drag in progress: wait for the drop
         let displays = Self.displays()
         let now = Self.terminalWindows()
+        if tileTrigger.tick(windows: Set(now.keys), agtermOpen: agtermOpen()) { runQueue(["tile", "auto"]) }
         for (n, f) in now {
             defer { last[n] = f }
             guard last[n] == f else { continue }                 // still moving (or first sight): next tick
@@ -453,10 +501,15 @@ final class DragWatcher {
     }
 
     private func report(_ n: Int, _ f: CGRect) {
+        runQueue(["dragged", String(n)] + [f.minX, f.minY, f.width, f.height].map { String(Int($0.rounded())) })
+    }
+
+    /// `queue.sh ARGS` in the background, with nothing attached to a terminal.
+    private func runQueue(_ args: [String]) {
         guard FileManager.default.fileExists(atPath: paths.queue.path) else { return }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = [paths.queue.path, "dragged", String(n)] + [f.minX, f.minY, f.width, f.height].map { String(Int($0.rounded())) }
+        p.arguments = [paths.queue.path] + args
         var vars = ProcessInfo.processInfo.environment
         vars["AGENT_HOME"] = paths.agentHome.path
         p.environment = vars
@@ -714,8 +767,13 @@ struct AgentTerminalBarMain {
             print(HotkeyBinding.check(agentHome: AgentTerminalPaths.fromEnvironment(env).agentHome))
             exit(0)
         }
+        if args.contains("--tile-check") {   // when the window checker would tile: stdin "open|closed id,id" per tick
+            let input = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+            print(TileTrigger.check(input))
+            exit(0)
+        }
         if let bad = args.first(where: { !$0.hasPrefix("-psn_") }) {
-            FileHandle.standardError.write(Data("AgentTerminalBar: unknown argument \(bad) (only --status-once, --hotkeys-check)\n".utf8))
+            FileHandle.standardError.write(Data("AgentTerminalBar: unknown argument \(bad) (only --status-once, --hotkeys-check, --tile-check)\n".utf8))
             exit(64)
         }
         MainActor.assumeIsolated {

@@ -2,6 +2,16 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D69 (2026-10-20): AgentTerminalBar re-tiles monitor 2 while agterm is open, and agterm's own window holds no cell (amends D68)
+
+**Decision (owner):** "Currently, the agent-terminal window resizing doesn't work. Why is that happening again? Make sure that whenever agterm is running, the windows on the other screen get resized and ordered correctly. For that, you can even use a checker in the AgentTerminalBar."
+
+**Why it happened again:** D68 fixed the session-start path and was merged to `origin/main` (PR #14), but `~/.claude/agent-terminal` links to the main checkout, and its `main` was still at the commit before D68. The fix was merged, not live. D68 also named two gaps it did not close: a window opened or closed with no session start (and a desktop switched to) is not laid out until the next session start or hotkey; and a window agterm itself sits in, once dragged to the main display, stayed parked with a reserved cell on monitor 2, so 3 agent windows got a 2x2 grid with a hole.
+
+**Built:** `TileTrigger` in `AgentTerminalBar.swift`, run by the 0.5 s window watcher: while agterm is open (a live pid in `~/.agent/terminal/open`) it runs `queue.sh tile auto` once agterm has just opened, and once the set of on-screen Terminal windows has changed and held still for 2 ticks. Tiling moves windows but never changes the set, so it cannot trigger itself; a window you resize by hand stays until the set changes again. `tile auto` is `tile` that honours `queue_tile=off` (the hotkey, plain `tile`, still tiles then). `queue.sh` drops the parked record of agterm's own window (`self_tty` in the open file) before it lays out. Tests: `tests/t_queue.sh` (tile auto, own window), `tests/t_menubar.sh` (`--tile-check`).
+
+**Not built:** the checker does nothing while agterm is closed (the session-start retile covers that case, as before).
+
 ## D68 (2026-10-20): the grid on monitor 2 is laid out while agterm is open too (amends D38)
 
 **Decision (owner):** "Sometimes (e.g. now) the resizing of the terminals doesn't happen, tell me why that's the case and fix it."
