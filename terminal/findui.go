@@ -355,7 +355,7 @@ func findPanelCmd(seq int, h findHit, terms []string) tea.Cmd {
 	}
 }
 
-// findResume opens a new Terminal window that resumes the selected ended session (the explicit r key).
+// findResume continues the selected ended session in the background (the explicit r key, D75).
 func (m *model) findResume() tea.Cmd {
 	h, ok := m.selectedHit()
 	if !ok {
@@ -369,21 +369,17 @@ func (m *model) findResume() tea.Cmd {
 		m.setErr("cannot resume " + m.label(h) + ": its folder " + tildify(h.Cwd) + " is gone")
 		return nil
 	}
-	cwd, id, name := h.Cwd, h.ID, m.label(h)
-	m.setStatus("opening " + name + " in a new window…")
-	return func() tea.Msg { return sentMsg{"", name, "resume in a new window", resumeWindow(cwd, id)} }
+	o := parseNW("", m.cfg)
+	if l := readLast(h.Path, h.Cwd); o.Model == "" && l.Model != "" { // the model it ran on, as keys.toml does not say
+		o.Model = l.Model
+	}
+	o.Dir, o.Resume = h.Cwd, h.ID
+	m.setStatus("resuming " + m.label(h) + " in the background…")
+	return bgStartCmd(o, "", false)
 }
 
 // osascriptRun runs AppleScript; a variable so a test can see the script.
 var osascriptRun = func(script string) ([]byte, error) { return exec.Command("osascript", "-e", script).CombinedOutput() }
-
-// resumeWindow opens a new Terminal window running `cd <cwd> && claude --resume <id>`. "ok" or "error: ...".
-func resumeWindow(cwd, id string) string { return termWindow(resumeCmd(claudeBin(), cwd, id)) }
-
-// resumeCmd is the shell line for resumeWindow, every word in single quotes.
-func resumeCmd(bin, cwd, id string) string {
-	return "cd " + shQuote(cwd) + " && " + shQuote(bin) + " --resume " + shQuote(id)
-}
 
 // termWindow opens a new Terminal window running the shell line cmd (its words shQuoted). "ok" or "error: ...".
 func termWindow(cmd string) string {

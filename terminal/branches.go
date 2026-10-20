@@ -480,7 +480,7 @@ func (m *model) branchStart(act, task string) tea.Cmd {
 		if err != nil {
 			return sentMsg{"", r.Name + ":" + br.Name, "start", "error: " + err.Error()}
 		}
-		return bgStartedMsg{job, dir}
+		return bgStartedMsg{job, dir, false}
 	}
 }
 

@@ -212,6 +212,10 @@ func (m model) commandLine() string {
 		left = append(left, s(" · esc", cGrey))
 	case mConfirm:
 		left = []seg{s(" No local folder. Open it on GitHub? ", cOrange), s("enter/y yes · esc no", cGrey)}
+		if m.trust != nil {
+			left = []seg{s(" Claude Code does not trust "+tildify(m.trust.dir)+" yet. Trust it? ", cOrange),
+				s("enter/y opens Claude Code there: answer it, then /exit · esc no", cGrey)}
+		}
 	default:
 		code := tabs[0].code
 		for _, t := range tabs {
@@ -1283,7 +1287,7 @@ func (m model) pcPanel(w, h int) []string {
 		if K.Older == "up" && K.Newer == "down" {
 			scroll = "↑↓"
 		}
-		hint := K.Reply + " comment · " + K.PCAgent + " agent · " + K.PCTerm + " Terminal session · enter opens in Paperclip · " + scroll + " scroll"
+		hint := K.Reply + " comment · " + K.PCAgent + " agent · " + K.PCTerm + " agent with its screen · enter opens in Paperclip · " + scroll + " scroll"
 		if loaded && d.Ask != nil && len(d.Ask.Options) > 0 {
 			hint = pcAnswerHint(d.Ask) + hint
 		}
@@ -1402,7 +1406,7 @@ func (m model) helpLines() []string {
 		row2("PO", "proposals: enter shows · a approve · x reject · z hide 7 days\nthe tab is orange while some are open"),
 		row2("PC", "Paperclip issues and company approvals, the selected one's thread on the right\n"+
 			"1-9 answer what it asks (approve, decline, …) · "+K.Reply+" comment\n"+
-			K.PCAgent+" / "+K.PCTerm+" hand the issue to a new background agent / Terminal session (@Name: a running one)\n"+
+			K.PCAgent+" / "+K.PCTerm+" hand the issue to a new background agent / one with its screen open (@Name: a running one)\n"+
 			"enter opens it in the browser · the tab is orange while one needs you · more keys: Paperclip requests below"),
 		"",
 		"## Commands",
@@ -1444,7 +1448,7 @@ func (m model) helpLines() []string {
 		row2(strings.Replace(k(K.Waiting), "space", "space space", 1), "the agent in INPUT that has waited the longest (it was space alone)"),
 		row2(K.Dismiss, "takes a waiting agent off the list, a background one too\nit keeps running and comes back when it has something new; it does not close the session (STOP stops a background agent)"),
 		row2("NW, "+K.PCAgent+", "+K.PCTerm, "agents that agterm starts run on "+nwDefault+" (nw_model, nw_effort, nw_permission in keys.toml)\nwords after NW win"),
-		row2(K.PCAgent+" / "+K.PCTerm+" in PC", "hand the selected issue to a new background agent / Terminal session with your permissions\na box text that starts with @Name goes to a session that already runs"),
+		row2(K.PCAgent+" / "+K.PCTerm+" in PC", "hand the selected issue to a new background agent / the same with its screen open, with your permissions\na box text that starts with @Name goes to a session that already runs"),
 		row2("i in RP", "copy the path of the repo's folder, or of the selected file or folder"),
 		row2("DONE", "an agent that finished with nothing left sits in its own section at the end of the list, below IDLE"),
 		"",
@@ -1500,7 +1504,8 @@ func (m model) helpLines() []string {
 		row2(k(K.Next)+" / "+k(K.Prev), "next / previous result"),
 		row2("enter", "a live session: go to it on the desk\nan ended one: read the messages that match, with the message before and after (esc closes)"),
 		row2("s", "ask Claude which sessions fit (it runs by itself when names and text find nothing)"),
-		row2("r", "resume an ended session in a new Terminal window: cd to its folder, claude --resume"),
+		row2("r", "resume an ended session in the background, in its folder (claude --bg --resume)"),
+		row2("LOGIN", "log Claude Code in, in a short-lived window (the footer says when it is logged out)"),
 		"",
 		"## Wall (push " + K.Wall + ")",
 		row2("1-9", "select that tile"),
@@ -1650,6 +1655,9 @@ func (m model) footer() []string {
 	}
 	// the Claude usage on the right of the two key rows; the keys give way
 	u := usageRows(m.usage, time.Now())
+	if m.loggedOut {
+		u[0] = []seg{s("Claude Code is logged out · /LOGIN", cOrange)}
+	}
 	uw := max(segsWidth(u[0]), segsWidth(u[1]))
 	if kw := m.w - uw - 3; kw >= 20 {
 		fit := func(segs []seg) []seg { // whole hints only: drop the last key and label while they don't fit
