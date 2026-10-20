@@ -14,7 +14,7 @@ Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are rec
 
 **Not built:** mouse clicks and trackpad scrolling; links in the list views (they have `enter`). In PC, while a question takes your own answer, `o` stays "own answer" and the links can't be picked.
 
-**Design only (not built):** `docs/superpowers/specs/2026-10-20-no-terminal-design.md`: what still needs a Terminal.app window today and how agterm could take each over (every new session a background one, adopting Terminal sessions), with a phased order and the questions for the owner. It waits for the owner's approval.
+**Design only (not built):** `docs/superpowers/specs/2026-10-20-no-terminal-design.md`: what still needs a Terminal.app window today and how agterm could take each over (every new session a background one, adopting Terminal sessions), with a phased order. The owner decided: move idle Terminal sessions to the background (`B`, `BG ALL`); Claude Code's full screen opens in "a short-lived Terminal window that closes when you leave it, NOT inside agterm's own window"; a `cl` shell command starts a background session and selects it in agterm. The other questions carry a recommended default; building waits for the owner's approval.
 
 ## D71 (2026-10-20): CL opens the changelog
 
