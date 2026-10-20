@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# cl [name] [prompt...]   start a Claude Code session in the background in this folder and select it in agterm (D73)
+# Runs `claude --bg -n <name>` (default name: the folder's name) with the nw_model, nw_effort and nw_permission of
+# $AGENT_HOME/terminal/keys.toml when set, and the prompt after "--" when given. On success it prints the session's
+# job id and writes "<job> <unix time>" to $AGENT_HOME/terminal/select; agterm selects the session once it shows in
+# the list and deletes the file (or drops it after 30 s). On failure it prints claude's words, writes nothing and
+# exits with claude's code. Plain `claude` still starts a Terminal session as before.
+# install.sh links it as ~/.local/bin/cl.
+set -euo pipefail
+
+case "${1:-}" in -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;; esac
+
+AH=${AGENT_HOME:-$HOME/.agent}
+KEYS=$AH/terminal/keys.toml
+
+nw() { # key -> its value in keys.toml's top level (before the first [table]), '' when unset
+  [ -f "$KEYS" ] || return 0
+  awk -v k="$1" '/^[[:space:]]*\[/ { exit }
+    $0 ~ "^[[:space:]]*" k "[[:space:]]*=" { sub(/^[^=]*=[[:space:]]*"/, ""); sub(/".*/, ""); print; exit }' "$KEYS"
+}
+
+name=${1:-$(basename "$PWD")}
+[ $# -eq 0 ] || shift
+args=(--bg -n "$name")
+model=$(nw nw_model); effort=$(nw nw_effort); perm=$(nw nw_permission)
+case "$perm" in   # the words keys.toml takes, as /NW does (bg.go nwPerms)
+  bypass) perm=bypassPermissions ;; accept) perm=acceptEdits ;; dontask) perm=dontAsk ;;
+esac
+[ -z "$model" ] || args+=(--model "$model")
+[ -z "$effort" ] || args+=(--effort "$effort")
+[ -z "$perm" ] || args+=(--permission-mode "$perm")
+[ $# -eq 0 ] || args+=(-- "$*")
+
+rc=0
+out=$(claude "${args[@]}" 2>&1) || rc=$?
+job=$(printf '%s\n' "$out" | grep -oE 'backgrounded[[:space:]]+·[[:space:]]+[0-9a-f]+' | head -1 | awk '{print $NF}' || true)
+if [ "$rc" -ne 0 ] || [ -z "$job" ]; then
+  printf '%s\n' "$out" | sed $'s/\033\\[[0-9;]*[A-Za-z]//g' >&2
+  [ "$rc" -ne 0 ] || rc=1
+  exit "$rc"
+fi
+mkdir -p "$AH/terminal"
+printf '%s %s\n' "$job" "$(date +%s)" >"$AH/terminal/select.$$"
+mv "$AH/terminal/select.$$" "$AH/terminal/select"
+echo "cl: $name runs in the background; agterm selects it (g opens its screen)" >&2
+printf '%s\n' "$job"

@@ -2,6 +2,19 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D73 (2026-10-20): cl starts a background session from a shell and selects it in agterm
+
+**Decision (owner, no-Terminal design decision 3):** sessions started by hand use "a new `cl` shell command that starts a background session and selects it in agterm".
+
+**Built:**
+- `bin/cl [name] [prompt...]` runs `claude --bg -n <name>` in the current folder (name left out: the folder's name), with `nw_model`, `nw_effort` and `nw_permission` from `keys.toml` when set (the same words as `NW`; `bypass` becomes `bypassPermissions`), and the prompt after `--` when given. With no prompt the session starts and waits.
+- On success it prints the job id and writes `<job> <unix time>` to `~/.agent/terminal/select`. On failure (a folder Claude Code doesn't trust yet, for example) it prints Claude Code's words, exits with its code and writes nothing.
+- agterm reads the select file on every tick (`selectfile.go`): it selects the background session with that job once it is listed and deletes the file; an entry older than 30 s, or one it can't read, is deleted without selecting anything, so a start that failed later never moves the selection.
+- `install.sh` links `~/.local/bin/cl` (next to `agterm`) to `bin/cl`; `--uninstall` removes that link when it leads to this kit. A `cl` that isn't ours is left alone.
+- Plain `claude` still starts a Terminal session as before.
+
+**Not built:** opening the session's screen from `cl` (`g` in agterm does that); a `cl` for other CLIs.
+
 ## D72 (2026-10-20): o numbers the links on screen and 1-9 opens one; a plan to drop Terminal windows (design only)
 
 **Decision (owner):** clicking links in agterm does nothing. "If we end up managing all sessions in agent-terminal and have no open terminals, that's completely fine." Trackpad scrolling is not a priority; drag-to-select text must keep working.
