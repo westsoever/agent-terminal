@@ -1645,6 +1645,9 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 	case c == "LOGIN":
 		m.setStatus("log in in the new window; it closes when that is done")
 		return m, m.openShortCmd("login", "login", func() (string, error) { return termShort(shQuote(claudeBin()) + " auth login") })
+	case c == "BG": // move the selected Terminal session, or every idle one, to the background (move.go)
+		_, arg, _ := strings.Cut(strings.TrimSpace(code), " ")
+		return m, m.bgCommand(arg)
 	case c == "STOP":
 		a := m.sel()
 		if a == nil || !a.Bg {

@@ -2,6 +2,22 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D76 (2026-10-20): BG moves a Terminal session to the background; BG ALL moves every idle one (no-Terminal phase 3)
+
+**Decision (owner, no-Terminal design decision 1):** move running Terminal sessions to the background, "idle sessions only, accepting the losses you listed" (plan Task 4). Only the `BG` command, no `B` key, so the desk keys stay free.
+
+**Built (`move.go`):**
+- `BG` on the selected Terminal session. Agent Terminal refuses (the command line says why) when the session is busy, shows a menu, has text typed in its box and not sent (`/exit` would join that text), is already in the background, or is not Claude Code. The screen is read fresh, and the session's busy state is read again from `~/.claude/sessions/<pid>.json` right before anything is typed.
+- The move: type `/exit` into the tab, wait up to 20 s for the process to end (its session record goes), run `claude --bg --resume <id>` in its folder with its own name and the model, effort and permission mode that its transcript names last (keys.toml's `nw_*` only fill what the transcript doesn't say), then close the tab once only the shell runs in it (`send.js closetab`: the window when it is its only tab, else the shell is told to `exit`, so the other tabs of a window stay). It shows in the list as `bg` with the same id and name.
+- `BG ALL` moves every idle Terminal session in turn and reports `moved N to the background · skipped: name (busy), name (menu)`. The moves run one after the other in a command, never in Update.
+- A session that does not end within 20 s is left as it is (its tab shows why, for example a question of Claude Code's); a resume that fails reports Claude Code's words and `claude --resume <id>` to open it by hand. Nothing is lost but the running process.
+
+**What a moved session loses (the owner accepted this):** background shells and monitors it started, a running `/loop`, subagents in flight, permissions granted "for this session", its scrollback. The conversation, memory files and its folder stay. Its next turn starts with a cold prompt cache.
+
+**Checked live:** a throwaway `claude --model haiku` Terminal session in this repo moved in 1.6 s. It came back as `bg` with the same id, name and job, its window closed, and its next turn ran on `claude-haiku-5-5` with `bypassPermissions`.
+
+**Not built:** a `B` key; moving opencode sessions or the voice dispatcher.
+
 ## D75 (2026-10-20): every start is a background one: FIND r, an empty NW, PC t, the trust question, LOGIN (no-Terminal phase 2)
 
 **Decision (owner):** "build it" for the no-Terminal design with its recommended defaults (plan Task 2): no session gets a Terminal window of its own; trust is answered in a short-lived window (agterm never writes `~/.claude.json`); PC `t` stays as "background session, then its short-lived window at once".
