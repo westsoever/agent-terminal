@@ -2,6 +2,12 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D74 (2026-10-20): g and h on a background agent open its screen in a short-lived window (no-Terminal phase 1)
+
+**Decision (owner):** Claude Code's full screen opens in "a short-lived Terminal window that closes when you leave it, NOT inside agterm's own window" (design `docs/superpowers/specs/2026-10-20-no-terminal-design.md`, decision 2; plan `docs/superpowers/plans/2026-10-20-no-terminal.md`, Task 1).
+
+**Built:** `g` and `h` on a background agent run `claude attach <job>; exit` in a new Terminal window (`bg.go` `shortWindow`, `termShort`) and keep its tty. `Ctrl+Z` ends the attach (phase 0: exit 0, the session keeps running) and so the shell; Terminal keeps the window open by default, so every tick asks `send.js closeidle <tty>`, which closes the window once its tab runs no process and leaves it while anything runs (`←` goes to Claude Code's agent view and keeps the attach running). `g` again raises the open window; a second `g` while it opens does nothing. Before, `g` opened a window that stayed after the attach ended. Tests: `bg_test.go`.
+
 ## D72 (2026-10-20): o numbers the links on screen and 1-9 opens one; a plan to drop Terminal windows (design only)
 
 **Decision (owner):** clicking links in agterm does nothing. "If we end up managing all sessions in agent-terminal and have no open terminals, that's completely fine." Trackpad scrolling is not a priority; drag-to-select text must keep working.

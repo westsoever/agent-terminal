@@ -83,6 +83,12 @@ func sendKeys(tty string, keys ...string) string {
 	return osa(append([]string{"keys", tty}, keys...)...)
 }
 func raiseTab(tty string) string { return osa("raise", tty) }
+
+// raiseTabFn and closeIdleFn are raiseTab and closeIdle; tests replace them.
+var raiseTabFn, closeIdleFn = raiseTab, closeIdle
+
+// closeIdle closes a short-lived window once nothing runs in it; true when it is closed or gone (D74).
+func closeIdle(tty string) bool  { return osa("closeidle", tty) == "ok" }
 func screenOf(tty string) string { return osa("screen", tty) }
 func answerTyped(tty string, n int, text string) string {
 	return osa("answer", tty, strconv.Itoa(n), text)

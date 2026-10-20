@@ -641,7 +641,7 @@ func (m model) agentPanel(w, h int) []string {
 		}
 		tail = append(tail, m.ed.lines(in)...)
 	case a.Bg:
-		tail = append(tail, row(in, s("> ", cOrange), s(m.cfg.Keys.Reply+" to write · "+m.cfg.Keys.Goto+" attaches a window · /STOP stops it", cDark)))
+		tail = append(tail, row(in, s("> ", cOrange), s(m.cfg.Keys.Reply+" to write · "+m.cfg.Keys.Goto+" opens its screen (ctrl+z there closes it) · /STOP stops it", cDark)))
 	case !a.InTerminal:
 		tail = append(tail, row(in, s("not a Terminal tab: look only", cDark)))
 	default:
@@ -1461,8 +1461,8 @@ func (m model) helpLines() []string {
 		row2(K.Reply, "write a message (keys below)\nesc keeps it as a draft; sending it sends a window on monitor 1 back"),
 		row2(K.Open+" then a-i", "open that file"),
 		row2(K.Open+" then 1-9", "open a link in the browser: "+K.Open+" puts a number on each link on screen\n(Terminal.app ignores cmd+click on links); works in the PR and PC panels too"),
-		row2(K.Goto, "show the agent's own Terminal window, where it is\na background agent (◦) gets a new window attached to it"),
-		row2(K.Here, "bring its window to monitor 1 and into focus, to type in it\na prompt sends it back"),
+		row2(K.Goto, "show the agent's own Terminal window, where it is\na background agent (◦): its screen in a short-lived window; ctrl+z there closes it, the agent keeps running"),
+		row2(K.Here, "bring its window to monitor 1 and into focus, to type in it\na prompt sends it back; a background agent: as "+K.Goto),
 		row2(K.Dismiss, "remove a waiting or idle agent (a background one too) from the list, no answer\nit keeps running and comes back when it has something new"),
 		row2(K.Refresh, "read all data again"),
 		"",
