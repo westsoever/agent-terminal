@@ -902,7 +902,7 @@ func TestResumeScript(t *testing.T) {
 		{"/tmp/$HOME `x` ; rm -rf", "claude", "id", `do script "cd '/tmp/$HOME ` + "`x`" + ` ; rm -rf' && 'claude' --resume 'id'"`},
 	}
 	for _, c := range cases {
-		got := resumeScript(c.bin, c.cwd, c.id)
+		got := termScript(resumeCmd(c.bin, c.cwd, c.id))
 		if !strings.Contains(got, c.wantDo) || !strings.HasPrefix(got, "tell application \"Terminal\"\n\tactivate\n") || !strings.HasSuffix(got, "\nend tell") {
 			t.Errorf("resumeScript(%q):\n%s\nwant to contain %s", c.cwd, got, c.wantDo)
 		}

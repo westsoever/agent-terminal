@@ -41,6 +41,13 @@ printf 'nonl=1' >>"$SESS_DIR/meta"   # a last line without a newline is not glue
 meta_set after_nonl yes
 assert_eq "last line without newline: kept" "1" "$(meta_get "$SESS_DIR/meta" nonl)"
 assert_eq "last line without newline: new key on its own line" "yes" "$(meta_get "$SESS_DIR/meta" after_nonl)"
+# several pairs in one call: each key replaced once, the others kept
+meta_set w1k1 multi w2k2 "two words" fresh ""
+assert_eq "pairs: first key replaced" "multi" "$(meta_get "$SESS_DIR/meta" w1k1)"
+assert_eq "pairs: value with a space" "two words" "$(meta_get "$SESS_DIR/meta" w2k2)"
+assert_eq "pairs: empty value written" "1" "$(grep -c '^fresh=$' "$SESS_DIR/meta")"
+assert_eq "pairs: one line per key" "1" "$(grep -c '^w2k2=' "$SESS_DIR/meta")"
+assert_eq "pairs: other keys kept" "yes" "$(meta_get "$SESS_DIR/meta" after_nonl)"
 
 # a live holder is waited for: the write lands after the holder lets go, and the holder's key is kept
 hold_lock 1.5 held

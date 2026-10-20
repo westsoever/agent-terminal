@@ -2,3 +2,5 @@
 .remember/
 vendor-eval/
 .superpowers/
+terminal/agent-terminal
+terminal/kaching-terminal

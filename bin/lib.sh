@@ -31,6 +31,15 @@ name_for() { # cwd root -> short display name: repo/worktree dir, "~" for home, 
   else basename "$1"; fi
 }
 
+# sid_dir RAW: set SID_NAME to the folder under sessions/ for session id RAW. An id that could leave it ("..", "/",
+# a leading dot, odd bytes, very long) becomes sid-<hash of the raw id>, stable per id and distinct from other ids.
+# (A variable, not output: dash.sh calls it per live session.)
+sid_dir() {
+  SID_NAME=$1
+  case "$1" in .*|*..*|*[!A-Za-z0-9._-]*) SID_NAME="sid-$(printf '%s' "$1" | shasum | cut -c1-16)" ;; esac
+  [ "${#SID_NAME}" -le 128 ] || SID_NAME="sid-$(printf '%s' "$1" | shasum | cut -c1-16)"
+}
+
 # hook_init: read hook JSON from stdin (unless a tty) and set INPUT CWD SID ROOT NAME WORK_DIR.
 hook_init() {
   INPUT=""
@@ -40,10 +49,7 @@ hook_init() {
   if [ -d "$CWD" ]; then CWD=$(cd "$CWD" && pwd -P); fi
   SID=$(jget session_id)
   [ -n "$SID" ] || SID="nosession-$(printf '%s' "$CWD" | shasum | cut -c1-8)"
-  # SID names a directory under sessions/: one that could leave it ("..", "/", a leading dot, odd bytes,
-  # very long) becomes sid-<hash of the raw id>, stable per id and distinct from other ids.
-  case "$SID" in .*|*..*|*[!A-Za-z0-9._-]*) SID="sid-$(printf '%s' "$SID" | shasum | cut -c1-16)" ;; esac
-  [ "${#SID}" -le 128 ] || SID="sid-$(printf '%s' "$SID" | shasum | cut -c1-16)"
+  sid_dir "$SID"; SID=$SID_NAME
   ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null || true)
   NAME=$(name_for "$CWD" "$ROOT")
   WORK_DIR=${ROOT:-$CWD}
@@ -62,8 +68,8 @@ resolve_state() {
   fi
 }
 
-# meta_set key value : single-line key=value registry for the current session. The hooks and the watcher
-# write the same file, so the whole read-modify-write is one perl call holding flock on .meta.flock (perl's
+# meta_set key value [key value]... : single-line key=value registry for the current session. The hooks and the
+# watcher write the same file, so the whole read-modify-write is one perl call holding flock on .meta.flock (perl's
 # flock works on macOS, which has no flock(1)). The kernel drops the lock when its holder dies, so there are
 # no stale locks. A holder that hangs is waited for 2 s at most (UserPromptSubmit hooks get 5 s), then the
 # write goes ahead. The key is matched literally. Fails (non-zero) when the session dir cannot be written.
@@ -71,20 +77,40 @@ meta_set() {
   mkdir -p "$SESS_DIR" 2>/dev/null || return 1
   perl -e '
     use Fcntl qw(:flock);
-    my ($d, $k, $v) = @ARGV;
+    my ($d, @kv) = @ARGV;
+    my @k = @kv[grep { $_ % 2 == 0 } 0 .. $#kv];
     open(my $l, ">>", "$d/.meta.flock") or exit 1;
     for (1 .. 200) { last if flock($l, LOCK_EX | LOCK_NB); select undef, undef, undef, 0.01 }
     my @keep;
     if (open(my $in, "<", "$d/meta")) {
-      for (<$in>) { next if index($_, "$k=") == 0; $_ .= "\n" unless /\n\z/; push @keep, $_ }
+      for my $l (<$in>) { next if grep { index($l, "$_=") == 0 } @k; $l .= "\n" unless $l =~ /\n\z/; push @keep, $l }
       close $in;
     }
     my $tmp = "$d/.meta.$$";
     open(my $out, ">", $tmp) or exit 1;
-    print $out @keep, "$k=$v\n";
+    print $out @keep, map { "$kv[2 * $_]=$kv[2 * $_ + 1]\n" } 0 .. $#k;
     close $out and rename($tmp, "$d/meta") and exit 0;
     unlink $tmp; exit 1;
-  ' "$SESS_DIR" "$1" "$2" 2>/dev/null
+  ' "$SESS_DIR" "$@" 2>/dev/null
+}
+
+# lock_fd9 LOCKFILE [SECS]: take an flock on LOCKFILE through fd 9 and keep it until `exec 9>&-` or the shell exits.
+# perl locks the open file that this shell keeps on fd 9, so the lock outlives perl, and the kernel drops it when
+# the holder dies: no stale lock to take over. Waits SECS (default 10), then fails (1). One lock per shell (fd 9);
+# a child that outlives the work keeps the lock unless it is started with 9>&-.
+lock_fd9() {
+  { exec 9>>"$1"; } 2>/dev/null || return 1
+  perl -e 'use Fcntl ":flock"; open(my $l, ">&=", 9) or exit 1;
+    for (1 .. $ARGV[0] * 50) { exit 0 if flock($l, LOCK_EX | LOCK_NB); select undef, undef, undef, 0.02 } exit 1' "${2:-10}" && return 0
+  exec 9>&-; return 1
+}
+# with_lock LOCKFILE CMD...: run CMD (a function too) holding lock_fd9 on LOCKFILE; CMD's status, 1 on timeout.
+# The local has an odd name: CMD sees it (bash scoping is dynamic), and a plain `rc` hid the caller's.
+with_lock() {
+  local _with_lock_rc
+  lock_fd9 "$1" || return 1
+  shift; "$@"; _with_lock_rc=$?
+  exec 9>&-; return "$_with_lock_rc"
 }
 
 meta_get() { # file key

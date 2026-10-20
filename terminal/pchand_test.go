@@ -234,7 +234,7 @@ func TestTermCommand(t *testing.T) {
 			t.Errorf("command lacks %q:\n%s", want, cmd)
 		}
 	}
-	if out, err := exec.Command("osacompile", "-e", termScript, "-o", filepath.Join(t.TempDir(), "t.scpt")).CombinedOutput(); err != nil {
+	if out, err := exec.Command("osacompile", "-e", termScript(cmd), "-o", filepath.Join(t.TempDir(), "t.scpt")).CombinedOutput(); err != nil {
 		t.Errorf("the AppleScript does not compile: %v %s", err, out)
 	}
 }

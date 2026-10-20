@@ -76,6 +76,9 @@ func (m *model) noteFiles() {
 	changed := false
 	for i := range m.agents {
 		a := &m.agents[i]
+		if a.Busy { // its transcript grows every tick; the turn's files are noted once it ends
+			continue
+		}
 		for _, f := range m.last(a).Mentions {
 			if m.files.add(f.Path, a.Name, f.At) {
 				changed = true

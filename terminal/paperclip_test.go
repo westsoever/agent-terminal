@@ -108,6 +108,25 @@ func TestLoadPaperclip(t *testing.T) {
 	}
 }
 
+// A reload that puts a new issue above the selected one keeps the selection on that issue, so a verdict key
+// never lands on an issue the owner did not read.
+func TestPCSelectionFollowsIssue(t *testing.T) {
+	m := newModel()
+	m.view = vPaperclip
+	m.pc = PCState{Items: []PCItem{{ID: "a"}, {ID: "b"}}}
+	m.listSel = 1
+	mm, _ := m.Update(pcMsg(PCState{Items: []PCItem{{ID: "new"}, {ID: "a"}, {ID: "b"}}}))
+	m = mm.(model)
+	if got := m.pcSelected(); got == nil || got.ID != "b" {
+		t.Fatalf("selected %+v, want b", got)
+	}
+	mm, _ = m.Update(pcMsg(PCState{Items: []PCItem{{ID: "a"}}}))
+	m = mm.(model)
+	if got := m.pcSelected(); got == nil || got.ID != "a" {
+		t.Fatalf("after b went: selected %+v, want a", got)
+	}
+}
+
 func TestLoadPaperclipDown(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	base := srv.URL

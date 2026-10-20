@@ -15,6 +15,22 @@ import (
 
 // What the owner sent shows in the conversation however Claude Code wrapped it: a paste, a slash command with
 // its arguments, a ! command. Machinery around it (reminders, command output, notifications) does not.
+// The caches keep what the listed agents need and nothing of the ones that are gone.
+func TestForgetGone(t *testing.T) {
+	m := newModel()
+	m.agents = []Agent{{SID: "live", Transcript: "/t/live.jsonl"}}
+	m.lastCache["/t/live.jsonl"], m.lastCache["/t/gone.jsonl"] = cachedLast{}, cachedLast{}
+	m.prompts["live"], m.prompts["gone"] = Prompt{}, Prompt{}
+	m.bgScr["gone"] = Prompt{}
+	m.forgetGone()
+	if len(m.lastCache) != 1 || len(m.prompts) != 1 || len(m.bgScr) != 0 {
+		t.Fatalf("lastCache %v prompts %v bgScr %v", m.lastCache, m.prompts, m.bgScr)
+	}
+	if _, ok := m.prompts["live"]; !ok {
+		t.Error("the live agent's prompt went")
+	}
+}
+
 func TestPromptText(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"plain words", "plain words"},

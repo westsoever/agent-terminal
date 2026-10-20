@@ -98,6 +98,24 @@ func TestPRPrompt(t *testing.T) {
 	}
 }
 
+// While a pull request's panel is being read, moving onto it again starts no second gh; the answer frees it.
+func TestPRDetailOneAtATime(t *testing.T) {
+	m := newModel()
+	m.view, m.prOpen = vPulls, true
+	m.pulls = PullsState{Items: []PullReq{{URL: "u"}}}
+	if m.prDetailCmd(time.Minute) == nil {
+		t.Fatal("first read not started")
+	}
+	if m.prDetailCmd(0) != nil {
+		t.Fatal("second read started while the first runs")
+	}
+	mm, _ := m.Update(prDetailMsg(PRDetail{URL: "u", At: time.Now()}))
+	m = mm.(model)
+	if m.prDetailCmd(0) == nil {
+		t.Fatal("no read after the first answered")
+	}
+}
+
 // k opens the panel, k again the comment box for that pull request; esc closes the box, then the panel; a number
 // with the panel closed answers nothing.
 func TestPRPanelKeys(t *testing.T) {

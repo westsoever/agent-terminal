@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -78,23 +77,7 @@ type askInput struct {
 
 func readLast(path, cwd string) Last {
 	var l Last
-	f, err := os.Open(path)
-	if err != nil {
-		return l
-	}
-	defer f.Close()
-	st, _ := f.Stat()
-	off := int64(0)
-	if st != nil && st.Size() > tailBytes {
-		off = st.Size() - tailBytes
-	}
-	_, _ = f.Seek(off, io.SeekStart)
-	data, _ := io.ReadAll(f)
-	if off > 0 { // drop the partial first line
-		if i := bytes.IndexByte(data, '\n'); i >= 0 {
-			data = data[i+1:]
-		}
-	}
+	data := readEnd(path, tailBytes, nil)
 	var lastText string
 	var chat []Turn
 	var openAsk *askInput

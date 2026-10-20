@@ -1,32 +1,76 @@
 package main
 
 import (
+	"context"
 	_ "embed"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
 )
 
 //go:embed send.js
 var sendJS []byte
 
+var sendOnce sync.Once
+
 // sendScript writes the embedded send.js next to the config once per run and returns its path, so the
-// binary is self-contained.
+// binary is self-contained. Written to a temp file and renamed, so a parallel osascript never runs half of it.
 func sendScript() string {
 	p := filepath.Join(agentHome(), "terminal", "send.js")
-	if b, err := os.ReadFile(p); err != nil || string(b) != string(sendJS) {
+	sendOnce.Do(func() {
+		if b, err := os.ReadFile(p); err == nil && string(b) == string(sendJS) {
+			return
+		}
 		_ = os.MkdirAll(filepath.Dir(p), 0o755)
-		_ = os.WriteFile(p, sendJS, 0o644)
-	}
+		if os.WriteFile(p+".tmp", sendJS, 0o644) == nil {
+			_ = os.Rename(p+".tmp", p)
+		}
+	})
 	return p
 }
 
-// osa runs send.js with args and returns its one-line answer ("ok", "error: ...", or data).
+// cmdCtx is exec.CommandContext with a WaitDelay: a leftover child (ssh, git-remote-https) holding the pipe
+// must not keep the call waiting past the kill.
+func cmdCtx(ctx context.Context, name string, args ...string) *exec.Cmd {
+	c := exec.CommandContext(ctx, name, args...)
+	c.WaitDelay = 2 * time.Second
+	return c
+}
+
+// runFor runs a command for at most d, so a hung osascript, keychain dialog or `claude logs` can't pile up a
+// new process every tick. combined adds stderr to the output.
+func runFor(d time.Duration, combined bool, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	c := cmdCtx(ctx, name, args...)
+	run := c.Output
+	if combined {
+		run = c.CombinedOutput
+	}
+	out, err := run()
+	if ctx.Err() != nil {
+		return out, fmt.Errorf("timeout after %s", d)
+	}
+	return out, err
+}
+
+// osa runs send.js with args and returns its one-line answer ("ok", "error: ...", or data). Typing waits up
+// to ~5s inside send.js for the text to leave the input box, so it gets longer than the reads.
 func osa(args ...string) string {
-	out, err := exec.Command("osascript", append([]string{"-l", "JavaScript", sendScript()}, args...)...).CombinedOutput()
+	d := 5 * time.Second
+	if len(args) > 0 && (args[0] == "text" || args[0] == "keys" || args[0] == "answer") {
+		d = 15 * time.Second
+	}
+	out, err := runFor(d, true, "osascript", append([]string{"-l", "JavaScript", sendScript()}, args...)...)
+	if err != nil && strings.HasPrefix(err.Error(), "timeout") {
+		return "error: " + err.Error()
+	}
 	s := strings.TrimSpace(string(out))
 	if err != nil && s == "" {
 		return "error: " + err.Error()
