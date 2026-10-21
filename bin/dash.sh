@@ -29,8 +29,12 @@
 # Git sync (bin/sync-check.sh writes $AGENT_HOME/sync-check.md): the default view ends with one `sync:` line when the
 #   snapshot lists repos that need attention, or is older than 24 h; --inbox ends with a SYNC lane, oldest first, that
 #   shows the snapshot age ("stale snapshot" over 24 h, "never run" without one). No snapshot: the default view is unchanged.
+# Paperclip (the COS Vault company on $DASH_PC_URL): the default view ends with one `paperclip:` line counting its open
+#   issues that are blocked, in review, or whose latest run failed. Nothing when all three are 0, or when Paperclip
+#   doesn't answer within 2 s.
 # Notes come from the STATE.md checkpoint `blocker:` (unless none), else the first "## Blocked" bullet.
 # Env: AGENT_HOME CLAUDE_DIR AGENT_REPOS_FILE DASH_NOW (epoch, tests) DASH_ACTIVE_MINS (30) DASH_FOCUS_MAX_AGE (600) DASH_PS_TTY_CMD
+#   DASH_PC_URL (http://127.0.0.1:3100)
 set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
@@ -437,6 +441,25 @@ sync_line() { # the default view's last line: nothing without a snapshot, and no
     *) [ "$SYNC_N" -eq 0 ] || printf 'sync: %s - bin/dash.sh --inbox\n' "$(sync_what)" ;;
   esac
 }
+PC_URL=${DASH_PC_URL:-http://127.0.0.1:3100}
+PC_COMPANY=8c7a6c1c-ab5a-41f6-9eb1-840e800c588a
+pc_line() { # the default view's Paperclip line: open issues blocked, in review, or whose latest run failed
+  local base="$PC_URL/api/companies/$PC_COMPANY" counts
+  curl -sf -m 2 "$base/issues?status=todo,in_progress,in_review,blocked" -o "$TMP/pc.issues" 2>/dev/null || return 0
+  curl -sf -m 2 "$base/heartbeat-runs?limit=100" -o "$TMP/pc.runs" 2>/dev/null || return 0
+  # runs come newest first, so an issue's first run is its latest (as in terminal/paperclip.go)
+  counts=$(jq -nr --slurpfile is "$TMP/pc.issues" --slurpfile rs "$TMP/pc.runs" '
+    ($is[0] | if type == "array" then . else .issues end) as $issues
+    | (reduce $rs[0][] as $r ({}; ($r.contextSnapshot.issueId // "") as $id
+        | if $id == "" or has($id) then . else .[$id] = $r.status end)) as $latest
+    | [($issues | map(select(.status == "blocked")) | length),
+       ($issues | map(select(.status == "in_review")) | length),
+       ($issues | map(select($latest[.id] == "failed" or $latest[.id] == "timed_out")) | length)] | @tsv' 2>/dev/null) || return 0
+  # shellcheck disable=SC2086 # three numbers
+  set -- $counts
+  [ $# -eq 3 ] && [ $(($1 + $2 + $3)) -gt 0 ] || return 0
+  printf 'paperclip: %s blocked, %s in review, %s failed run%s - %s\n' "$1" "$2" "$3" "$([ "$3" -eq 1 ] || echo s)" "$PC_URL"
+}
 sync_lane() { # --inbox's last lane
   local name needs h
   sync_load
@@ -480,7 +503,7 @@ case "$MODE" in
     exit 0 ;;
 
   table)
-    if [ "$total" -eq 0 ]; then echo "no Claude sessions seen in the last ${HOURS}h"; sync_line; exit 0; fi
+    if [ "$total" -eq 0 ]; then echo "no Claude sessions seen in the last ${HOURS}h"; sync_line; pc_line; exit 0; fi
     while IFS=$'\037' read -r upd sid cwd name branch state note src ctx tok stalled imp nexta; do
       label=$(label_of "$name" "$branch")
       [ "$src" = worktree ] || label="$label ${sid:0:7}"
@@ -490,6 +513,7 @@ case "$MODE" in
     echo "-- $total session(s), $active active"
     if [ "$active" -gt 5 ]; then echo "WARNING: $active active sessions; the plan caps this at about 5. Park some behind their STATE.md."; fi
     sync_line
+    pc_line
     exit 0 ;;
 
   inbox)

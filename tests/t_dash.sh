@@ -396,6 +396,33 @@ assert_contains "proposals: one waiting is singular" "$(prdash --speak)" "1 prop
 assert_not_contains "proposals: the default view does not list them" "$(prdash)" "no-version-bump"
 assert_not_contains "proposals: dash never sends a notification (it does not call notify.sh)" "$(grep -v '^#' "$BIN/dash.sh")" "notify.sh"
 
+# ---------- Paperclip: one line in the default view (a fake API served from files) ----------
+PCS="$WORK/pc-srv"; PCO="$PCS/api/companies/8c7a6c1c-ab5a-41f6-9eb1-840e800c588a"; mkdir -p "$PCO"
+PCPORT=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+(cd "$PCS" && exec python3 -m http.server --bind 127.0.0.1 "$PCPORT" >/dev/null 2>&1) & PCPID=$!
+for _ in $(seq 1 30); do curl -s -m 1 "http://127.0.0.1:$PCPORT/" >/dev/null 2>&1 && break; sleep 0.1; done
+pcset() { printf '%s' "$1" >"$PCO/issues"; printf '%s' "$2" >"$PCO/heartbeat-runs"; }
+pcdash() { DASH_PC_URL="http://127.0.0.1:$PCPORT" sydash "$@"; }
+# runs are newest first: t1 and b1 last failed (b1 timed out); r1 failed once but its latest run succeeded
+pcset '[{"id":"b1","status":"blocked"},{"id":"b2","status":"blocked"},{"id":"r1","status":"in_review"},{"id":"t1","status":"todo"}]' \
+  '[{"status":"failed","contextSnapshot":{"issueId":"t1"}},{"status":"succeeded","contextSnapshot":{"issueId":"r1"}},
+    {"status":"timed_out","contextSnapshot":{"issueId":"b1"}},{"status":"succeeded","contextSnapshot":{"issueId":"t1"}},
+    {"status":"failed","contextSnapshot":{"issueId":"r1"}},{"status":"failed","contextSnapshot":{}}]'
+assert_eq "paperclip: the default view ends with the counts" \
+  "paperclip: 2 blocked, 1 in review, 2 failed runs - http://127.0.0.1:$PCPORT" "$(pcdash | tail -1)"
+assert_contains "paperclip: also without sessions" "$(DASH_PC_URL="http://127.0.0.1:$PCPORT" prdash)" "paperclip: 2 blocked"
+assert_not_contains "paperclip: --speak leaves it out" "$(pcdash --speak)" "paperclip"
+assert_not_contains "paperclip: --inbox leaves it out" "$(pcdash --inbox)" "paperclip"
+pcset '{"issues":[{"id":"t1","status":"todo"}]}' '[{"status":"failed","contextSnapshot":{"issueId":"t1"}}]'
+assert_eq "paperclip: one failed run is singular (and {issues: [...]} is read too)" \
+  "paperclip: 0 blocked, 0 in review, 1 failed run - http://127.0.0.1:$PCPORT" "$(pcdash | tail -1)"
+pcset '[{"id":"t1","status":"todo"}]' '[]'
+assert_not_contains "paperclip: nothing to count, no line" "$(pcdash)" "paperclip"
+pcset '<html>proxy error</html>' '[]'
+assert_not_contains "paperclip: an answer that is not JSON, no line" "$(pcdash)" "paperclip"
+kill "$PCPID" 2>/dev/null; wait "$PCPID" 2>/dev/null || true
+assert_not_contains "paperclip: not answering, no line" "$(pcdash)" "paperclip"
+
 # ---------------- --route: the dispatcher's routing list (live Claude Code sessions only) ----------------
 # Its own AGENT_HOME and CLAUDE_DIR so the registry fixtures above do not leak in. Live pids are background
 # sleeps (each needs its own tty for the focus tests); the tty lookup is a fake ps (DASH_PS_TTY_CMD) that maps
