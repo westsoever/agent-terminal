@@ -44,6 +44,7 @@ The right hand does the most frequent work: `j` goes up, `l` goes down, `k` open
 | `1` to `9` | Send the answer with that number to the selected agent. |
 | `a` | When the agent asks questions: take the recommended answer of each question and send all. Refer to section 6.3. |
 | `k` | Write a message to the selected agent. `Enter` sends it. `Esc` keeps it as a draft. Refer to section 1.4. |
+| `Esc` | When the selected agent works: stop its turn, as `Esc` does in Claude Code. A message that waits in its queue then runs at once. `Esc` closes a zoom or a panel first. It does nothing to an agent that shows a menu. Refer to section 6.20. |
 | `o`, then `a` to `i` | Open the file with that letter. |
 | `o`, then `1` to `9` | Open the link with that number in the default browser. After `o`, each link on the screen shows its number on its first character. Refer to section 6.8. |
 | `g` | Show the Terminal window of the selected agent, where it is. For a background agent, show its own screen in a short-lived Terminal window. Push `Ctrl+Z` there to close it; the agent keeps running. |
@@ -83,6 +84,7 @@ You can change these keys and messages. Refer to section 7.
 | `/` at the start, then letters | Show the commands and skills that agree with the letters, with their descriptions: Claude Code commands, your commands and skills, the commands and skills of the agent folder and its parent folders, and the enabled plugins. A command that opens a screen of its own in Claude Code (`/config`, `/model` without a name, `/mcp`, `/permissions`, `/agents`, `/hooks`, `/plugin`, `/memory`, `/resume`, `/rewind`, `/status`, `/context`, `/doctor`, `/login`), sent to a background agent, also opens the agent's screen in a short-lived window, so that you can use it there. |
 | `Tab` or `Enter` | Put the selected suggestion into the message. |
 | `↑`, `↓` | Select a suggestion. When there are no suggestions, move between lines. |
+| `↑` in an empty box | Show the last message that you sent to this agent, so that you can change it. Push `↑` again for the message before it, and `↓` to go back. `Enter` sends the text as a new message. |
 | `Ctrl+V` | Paste an image from the clipboard. Agent Terminal saves it as a file and writes its path. The agent opens the file. If the clipboard has no image, Agent Terminal pastes the text. |
 | `Cmd+V` | Paste text. Line breaks stay. |
 | `←`, `→`, `Option+←`, `Option+→` | Move by one letter or by one word. |
@@ -90,6 +92,7 @@ You can change these keys and messages. Refer to section 7.
 | `Option+Backspace`, `Ctrl+W` | Remove the word before the cursor. |
 | `Ctrl+K`, `Ctrl+U` | Remove the text after or before the cursor. |
 | `Esc` or `Ctrl+C` | Close the box. Agent Terminal keeps the text as a draft for this agent. Push `k` to open it again. |
+| `Esc` while the agent works | Stop the turn of the agent. The box stays open with your text, so that you can send the new instruction at once. Push `Esc` again or `Ctrl+C` to close the box. |
 
 The top line does not show your message. It shows only the name of the agent that gets the message.
 
@@ -275,6 +278,7 @@ The agent panel shows the selected agent:
 - The text is the conversation: your prompts and its messages, the newest at the bottom. Your prompts start with `›` and have a lighter background, so you can find them easily. Tables show as tables (see 7.5).
 - The numbered lines are the answers that it asks you to select from.
 - `FILES IT MENTIONED` shows the files that its last message names. Each file has a letter.
+- A message that you send shows at the bottom at once, in grey, with `sending…`, then `sent`. To an agent that works, it shows `queued` until the agent takes it up. When the conversation shows the message, the grey copy goes.
 - The `reply` line shows the text that you write.
 
 An orange frame shows that the agent waits for you.
@@ -361,6 +365,8 @@ Agent Terminal reads the questions of all agents in the same way, also for backg
 5. Make sure that the command line shows `✓ <name> is on it`.
 
 To stop before step 4, push `Esc`. Agent Terminal keeps your text as a draft. When you push `k` again for this agent, the draft comes back.
+
+You can send a message while the agent works. Claude Code keeps it in a queue and starts it when the turn ends; the message shows `queued` until then. If a send fails, the text becomes the draft again.
 
 ### 6.6 Refer to a file or a command in a message
 
@@ -674,6 +680,18 @@ Notes:
 - Agent Terminal does not search the claude-mem observer sessions or the sessions of sub-agents that an agent started.
 - Step 3 uses your Claude usage. It makes one small call with the model Haiku. The call sends the name, folder, date, first prompt and last reply of the last 120 sessions to Claude. Agent Terminal cuts each prompt and reply to 200 characters.
 - The call does not run your hooks. It does not save a session, and it does not add a folder to `~/.agent/sessions`. While it runs, Claude Code lists it as a session in `claude agents`. Agent Terminal does not show it in the agent list.
+
+### 6.20 Stop an agent while it works
+
+1. Select the agent that works.
+2. Push `Esc`. Agent Terminal pushes `Esc` in the agent, as you do in Claude Code. The turn stops.
+3. Write the new instruction: push `k`, write, push `Enter`.
+
+If you sent a message that is still `queued`, the agent starts it as soon as the turn stops. So to change the course of an agent: send the new instruction (it is queued), then push `Esc`.
+
+You can also push `Esc` while you write in the box. The box stays open with your text.
+
+A second `Esc` within 5 seconds does not go to the agent. Two `Esc` presses in Claude Code open its rewind menu.
 
 ## 7. Change the keys and the fixed messages
 

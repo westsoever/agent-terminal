@@ -69,6 +69,9 @@ type model struct {
 	status     string
 	statusErr  bool
 	expect     map[string]time.Time // sid -> when we sent; cleared when it turns busy
+	out        map[string][]outMsg  // sid -> messages sent that its transcript doesn't show yet (echo.go, D79)
+	stopped    map[string]time.Time // sid -> when esc last went to it (echo.go)
+	recall     recallState          // what up last put into the box
 	lastCache  map[string]cachedLast
 	pc         PCState
 	pcDet      map[string]PCDetail // issue id -> its side panel (PC view)
@@ -193,6 +196,7 @@ func (m *model) refresh() {
 	m.usage = loadUsage()
 	m.applyPrompts()
 	m.noteFiles()
+	m.settleEchoes()
 	for sid, at := range m.expect {
 		for _, a := range m.agents {
 			if a.SID == sid && (a.Busy || transcriptAfter(a.Transcript, at)) {
@@ -243,6 +247,7 @@ func (m *model) forgetGone() {
 	prune(m.asked, live)
 	prune(m.bgScr, live)
 	prune(m.askProg, live)
+	prune(m.stopped, live)
 }
 
 func prune[V any](m map[string]V, keep map[string]bool) {
@@ -296,7 +301,7 @@ func bringHere(sid, tty string) string {
 // goes back to its cell (queue.sh return, D42). Moving around inside a menu is no answer.
 func returnWindow(sid, what string) tea.Cmd {
 	switch what {
-	case "key left", "key right", "key tab", "key up", "key down":
+	case "key left", "key right", "key tab", "key up", "key down", "interrupt":
 		return nil
 	}
 	return func() tea.Msg {
@@ -527,6 +532,9 @@ func (m *model) deliverAs(label, what string, keys []string) tea.Cmd {
 		}
 	}
 	m.setStatus("sending to " + name + "…")
+	if keys == nil {
+		m.addEcho(sid, what) // it shows in the conversation now, not once the transcript has it (D79)
+	}
 	return func() tea.Msg {
 		return sentMsg{sid, name, label, transmitFn(ag, what, keys)}
 	}
@@ -753,11 +761,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case sentMsg:
+		kept := m.echoSent(msg.sid, msg.what, msg.res == "ok")
 		if msg.res == "ok" {
 			m.setStatus("sent " + msg.what + " → " + msg.name)
-			m.expect[msg.sid] = time.Now()
+			if msg.what == "interrupt" { // no "is on it" after it: busy now is the turn that stops
+				m.setStatus("stopped " + msg.name + "'s turn (esc) · a queued message runs now")
+			} else {
+				m.expect[msg.sid] = time.Now()
+			}
 		} else {
 			m.setErr(msg.name + ": " + msg.res)
+			if kept {
+				m.setErr(msg.name + ": " + msg.res + " · your text is kept as the draft (" + m.cfg.Keys.Reply + ")")
+			}
 			delete(m.askProg, msg.sid) // a failed key: the menu may be elsewhere, start from the first question
 		}
 		delete(m.prompts, msg.sid)
@@ -902,6 +918,8 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.zoom = false
 		} else if m.view == vPulls && m.prOpen {
 			m.prOpen = false
+		} else if m.view == vDesk && m.canStop(m.sel()) { // nothing left to close: stop the working agent (D79)
+			return m, m.interrupt()
 		} else {
 			m.view = vDesk
 		}
@@ -1108,6 +1126,12 @@ func (m *model) sawAsk(sid string, now time.Time) {
 // typingKey: every key while writing goes to the editor; enter sends to the agent (or the Paperclip issue).
 func (m model) typingKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	w := m.editorWidth()
+	if ks := k.String(); ks == "esc" && len(m.ed.comp) == 0 && m.ed.target == m.selSID && m.canStop(m.sel()) {
+		return m, m.interrupt() // the box stays open with the text: the new instruction goes out next (D79)
+	}
+	if m.recallKey(k.String()) {
+		return m, nil
+	}
 	if ks := k.String(); m.ed.scrolls(ks) {
 		dir := map[string]string{"up": m.cfg.Keys.Older, "down": m.cfg.Keys.Newer}[ks]
 		if dir == "" {

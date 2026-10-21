@@ -2,6 +2,24 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D79 (2026-10-21): esc stops a working agent; a sent message shows at once, queued until Claude Code takes it; ↑ brings back what was sent
+
+**Asked (owner, 2026-10-20):** four things still sent the owner to Terminal: "If I'm in the terminal and hit Esc, it interrupts the current session and i can prompt it differently. If I hit up while the prompt is loading, I can edit what I've just sent and on enter, it resends it again. I can queue prompts, without interrupting the session. The text shows up instantly, and there's no delay between Enter and seeing it in the chat." The open question (daily note 2026-10-20) was whether plain `Esc` or a separate key like `.` interrupts.
+
+**Decision (made by the overnight agent; the owner was asleep and asked for the recommended option):** plain `Esc`, as in Claude Code and as the owner described it. `.` would be one more key to learn for the one thing Esc already means in the tool the owner came from. On the desk, Esc had nothing left to do once the zoom, panel or view was closed, so it takes nothing away there. The risk of stopping an agent by accident is kept small: Esc closes a zoom, panel or view first; it goes only to an agent that works (not to one that shows a menu, nor an idle one); only to Claude Code (opencode's Esc works differently); and a second Esc within 5 s sends nothing (two Escs on Claude Code's idle prompt open its rewind menu). In the box, Esc on a working agent stops the turn and the box stays open with the text, so the new instruction goes out next; Esc again or ctrl+c closes it.
+
+**Checked live (a throwaway `claude --bg --model haiku` session, 2.1.306):** text pasted through `claude attach` while it works is queued (`queue-operation` `enqueue` with the text in the transcript); Esc through the attach writes `[Request interrupted by user]`, and the queued message is taken up at once as the next prompt. So "queue the new instruction, then Esc" is "stop and do this instead".
+
+**Built (`echo.go`):**
+- Instant echo: every text agterm sends to an agent (the box, the fixed messages, `@Name` messages, a numbered answer typed as text) shows at the bottom of its conversation the moment it goes out, in grey, with `sending…`, then `sent`, or `queued · it runs when this turn ends · esc stops the turn, then it runs` while the agent works. The grey copy goes once the transcript has a prompt with that text written after it was sent (each prompt takes one copy). A sent copy the transcript never shows (a command with no prompt line) goes after a minute while the agent does not work. A send that fails takes the copy away and puts the text back as the agent's draft, unless the box holds something for it already.
+- Queue: Claude Code already queued what agterm typed while it worked; now it is visible.
+- ↑: in an empty box, ↑ puts the last message sent to the agent into the box (the ones on their way first, then the transcript's prompts, without Claude Code's `[Request interrupted` lines); ↑ again goes one older, ↓ back to the newest and then the empty box. It walks only while the text is unchanged; once edited, ↑ moves the cursor or scrolls as before. Enter sends the text as a new message. An agent with nothing sent keeps ↑ as a scroll key; PgUp and PgDn always scroll.
+- The box under a working agent says `it works: ⏎ queues it · esc stops its turn · ctrl+c closes the box · ↑ last message`; the desk footer shows `esc stop its turn` while the selected agent works. HELP, the manual (1.2, 1.4, 4.3, 6.5, 6.20) and the README say so.
+
+Tests: `echo_test.go` (Esc on the desk and in the box, the echo states, a failed send, the give-up, ↑/↓), `TestTypingScroll` (↑ in an empty box recalls now).
+
+**Not built:** taking a queued message back out of Claude Code's queue to edit it (Claude Code's own ↑ does that in its window); a recalled message that is still queued is sent again as another message, and the command line says so. The echo for `/ALL` messages. Esc for opencode sessions.
+
 ## D78 (2026-10-21): / suggestions anywhere in a message, not only at its start
 
 **Decision (owner):** "Commands only work when they are at the beginning of the conversation but they should also be (as in the terminal) recognized when they are mid-text of a prompt" (`cos/00-Inbox/2026-10-21-fix-for-agent-terminal.md`).

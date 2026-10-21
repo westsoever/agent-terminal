@@ -379,8 +379,9 @@ func TestChatScroll(t *testing.T) {
 
 func itoa(i int) string { return strconv.Itoa(i) }
 
-// With the reply box open, ↑ on the first row and ↓ on the last row of the draft scroll the conversation; inside
-// a draft of several lines they move the cursor; with a suggestion list open they pick in it; pgup always scrolls.
+// With the reply box open, ↑ in an empty box recalls the last prompt; ↑ on the first row and ↓ on the last row of
+// the draft scroll the conversation; inside a draft of several lines they move the cursor; with a suggestion list
+// open they pick in it; pgup always scrolls.
 func TestTypingScroll(t *testing.T) {
 	t.Setenv("AGENT_HOME", t.TempDir())
 	cfg, _, _ := loadConfig()
@@ -401,14 +402,20 @@ func TestTypingScroll(t *testing.T) {
 		m = nm.(model)
 		m.View()
 	}
-	press(tea.KeyUp)
-	if m.scroll.off != max(3, m.scroll.page/3) {
-		t.Fatalf("empty draft: up did not scroll (off %d)", m.scroll.off)
+	press(tea.KeyUp) // an empty draft: up brings back the last prompt (D79), down empties the box again
+	if m.scroll.off != 0 || m.ed.ta.Value() != "prompt 40" {
+		t.Fatalf("empty draft: up did not recall (off %d, %q)", m.scroll.off, m.ed.ta.Value())
 	}
 	press(tea.KeyDown)
-	if m.scroll.off != 0 {
+	if m.ed.ta.Value() != "" {
+		t.Fatalf("down did not empty the box: %q", m.ed.ta.Value())
+	}
+	press(tea.KeyPgUp)
+	press(tea.KeyDown)
+	if m.scroll.off != max(1, m.scroll.page-1)-max(3, m.scroll.page/3) {
 		t.Fatalf("empty draft: down did not scroll back (off %d)", m.scroll.off)
 	}
+	m.scroll.off = 0
 	m.ed.ta.SetValue("line one\nline two") // the cursor ends on the second line
 	press(tea.KeyUp)
 	if m.scroll.off != 0 || m.ed.ta.Line() != 0 {
