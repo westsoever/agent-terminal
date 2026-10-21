@@ -45,6 +45,7 @@ export QUEUE_TTY="${QUEUE_TTY:-none}"                        # nor reads the tty
 export HID_IDLE_CMD="${HID_IDLE_CMD:-echo 99999}"            # away from the keyboard
 export VOICEMODE_CONCH="${VOICEMODE_CONCH:-$WORK/no-such-conch}"
 export IOREG_CMD="${IOREG_CMD:-true}"                        # prints nothing: unreadable
+export DASH_PC_URL="${DASH_PC_URL:-http://127.0.0.1:9}"         # dash.sh never asks the real Paperclip; t_dash sets a fake
 export SYNC_CHECK_CMD="${SYNC_CHECK_CMD:-true}"                  # the watcher starts no real git sync check in a test; t_watch and t_sync set their own
 
 pass() { printf 'PASS\t%s\t%s\n' "$TNAME" "$1" >>"$RESULTS"; }
