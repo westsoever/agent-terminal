@@ -2,6 +2,14 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D78 (2026-10-21): / suggestions anywhere in a message, not only at its start
+
+**Decision (owner):** "Commands only work when they are at the beginning of the conversation but they should also be (as in the terminal) recognized when they are mid-text of a prompt" (`cos/00-Inbox/2026-10-21-fix-for-agent-terminal.md`).
+
+**Built:** `editor.go` `complete`: a `/word` after a space or new line gets suggestions like `@Name` does (D70), the last word of the text. Later in the text only the skills and commands of the folder and the owner are offered, since Claude Code runs its own commands (`/compact`) only at the start of a message. A word with a second `/` is a path (`/Users/x`), not a command, and gets no suggestions at the start either. The text is still typed into the session unchanged, so Claude Code itself runs the skill. Test: `TestEditorSlashSuggestionsMidText`.
+
+**Not built:** a colour for a recognised command inside the sent text.
+
 ## D77 (2026-10-20): a / command with a screen of its own, sent to a background agent, opens its screen (no-Terminal phase 4)
 
 **Decision (owner):** "build it" for the no-Terminal design (plan Task 5, spec D).
