@@ -312,13 +312,22 @@ func (e *editor) suggest() {
 			items = append(items, rank(e.cwdFiles(), tok[1:], "@")...)
 		}
 		e.compKind = '@'
-	case strings.HasPrefix(tok, "/") && tok == v:
-		cmds := slashCommands(e.cwd)
-		names := make([]string, len(cmds))
+	// a command anywhere in the text, as in Claude Code; later in the text only skills and commands, since Claude
+	// Code runs its own (/compact) only at the start. A path (/Users/x) is no command.
+	case strings.HasPrefix(tok, "/") && !strings.Contains(tok[1:], "/"):
+		builtin := map[string]bool{}
+		if tok != v {
+			for _, b := range builtinSlash {
+				builtin[b[0]] = true
+			}
+		}
+		var names []string
 		e.compDesc = map[string]string{}
-		for i, c := range cmds {
-			names[i] = c.name
-			e.compDesc["/"+c.name] = c.desc
+		for _, c := range slashCommands(e.cwd) {
+			if !builtin[c.name] {
+				names = append(names, c.name)
+				e.compDesc["/"+c.name] = c.desc
+			}
 		}
 		if tok == "/" {
 			sort.Strings(names)
