@@ -299,3 +299,18 @@ func TestUpRecallsSent(t *testing.T) {
 		t.Fatalf("recalled with nothing sent: %q", m.ed.ta.Value())
 	}
 }
+
+// An idle agent that starts the message it was just sent is not queueing it: only a message sent while the agent
+// already worked shows as queued.
+func TestEchoNotQueuedWhenIdleAtSend(t *testing.T) {
+	fakeTransmit(t)
+	tr := writeTranscript(t, promptLine("earlier", time.Now().Add(-time.Minute)))
+	m := echoModel(t, Agent{SID: "i", Name: "idler", Cwd: "/tmp", InTerminal: true, State: "idle", Transcript: tr})
+	m, _ = pressKey(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(m.cfg.Keys.Reply)})
+	m.ed.ta.SetValue("do the thing")
+	m = run(pressKey(m, tea.KeyMsg{Type: tea.KeyEnter}))
+	m.agents[0].Busy = true // it takes this very message up before the transcript tick has read it
+	if v := panelText(m); !strings.Contains(v, "› do the thing") || strings.Contains(v, "queued") {
+		t.Fatalf("an idle agent's own turn shows as queued:\n%s", v)
+	}
+}
