@@ -143,13 +143,16 @@ cat >"$WORK/forker.sh" <<'EOS'
 echo "$!" >"$1"
 wait
 EOS
-gone() { local i; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do kill -0 "$1" 2>/dev/null || return 0; sleep 0.2; done; return 1; }
+gone() { local end=$((SECONDS + 30)); while [ "$SECONDS" -lt "$end" ]; do kill -0 "$1" 2>/dev/null || return 0; sleep 0.2; done; return 1; }   # the sleepers run 300 s
+# bare: what one quick test-escalate.sh run costs under the current load, in ms; the time limits below are on top
+bare_run_ms() { local s; s=$(ms); AGENT_TERMINAL_TEST_MODELS="" "$BIN/test-escalate.sh" -C "$R" --timeout 5 -- true >/dev/null 2>&1; echo $(( $(ms) - s )); }
 PGF="$WORK/pg-sleeper"; rm -f "$PGF"; : >"$CALLS"
-s=$(date +%s)
+bare=$(bare_run_ms); : >"$CALLS"
+s=$(ms)
 out=$(AGENT_TERMINAL_TEST_MODELS="" "$BIN/test-escalate.sh" -C "$R" --timeout 1 -- bash "$WORK/forker.sh" "$PGF" 2>&1); rc=$?
-e=$(date +%s)
+e=$(ms)
 assert_eq "timeout: exit code 142" "142" "$rc"
-assert_eq "timeout: ends within a few seconds" "1" "$([ $((e - s)) -le 5 ] && echo 1 || echo 0)"
+assert_eq "timeout: ends within a few seconds (took $((e - s)) ms, a quick run $bare ms)" "1" "$([ $((e - s - bare)) -le 5000 ] && echo 1 || echo 0)"
 pg_pid=$(cat "$PGF" 2>/dev/null || echo 0)
 if [ "$pg_pid" -gt 0 ] && gone "$pg_pid"; then pass "timeout: the forked TERM-ignoring sleeper is gone"; else fail "timeout: the forked TERM-ignoring sleeper is gone" "  pid $pg_pid"; fi
 [ "$pg_pid" -gt 0 ] && kill -9 "$pg_pid" 2>/dev/null
@@ -167,10 +170,11 @@ sleep 300
 EOS
 chmod +x "$WORK/slow-claude"
 export SLOW_ARGS="$WORK/slow-args" SLOW_PIDS="$WORK/slow-pids"; : >"$SLOW_ARGS"; : >"$SLOW_PIDS"; rm -f "$R/fixed"
-s=$(date +%s)
+bare=$(bare_run_ms)
+s=$(ms)
 out=$(AGENT_TERMINAL_CLAUDE_BIN="$WORK/slow-claude" AGENT_TERMINAL_TEST_CALL_TIMEOUT=1 AGENT_TERMINAL_TEST_LADDER_DAILY=100 "$BIN/test-escalate.sh" -C "$R" -- "${T[@]}" 2>&1); rc=$?
-e=$(date +%s)
-assert_eq "call limit: two hanging calls end in seconds" "1" "$([ $((e - s)) -le 8 ] && echo 1 || echo 0)"
+e=$(ms)
+assert_eq "call limit: two hanging calls end in seconds (took $((e - s)) ms, a quick run $bare ms)" "1" "$([ $((e - s - bare)) -le 8000 ] && echo 1 || echo 0)"
 assert_eq "call limit: the tests' exit code is kept" "1" "$rc"
 assert_eq "call limit: both models were tried" "2" "$(grep -c '^-p --model' "$SLOW_ARGS")"
 assert_contains "call limit: model-timeout logged" "$(cat "$AGENT_TERMINAL_TEST_LOG")" "model-timeout model=cheap limit=1s"
@@ -197,7 +201,7 @@ assert_contains "deadline passed: logged" "$(cat "$AGENT_TERMINAL_TEST_LOG")" "d
 # clean up), nobody waits for the result and the user may be working in the repo. Checked before every call.
 : >"$CALLS"; rm -f "$R/fixed"
 bash -c '"$0" -C "$1" -- bash -c "sleep 1; exit 1" >/dev/null 2>&1 & exit 0' "$BIN/test-escalate.sh" "$R"
-for i in $(seq 1 50); do grep -q 'reason=parent-gone' "$AGENT_TERMINAL_TEST_LOG" && break; sleep 0.1; done
+end=$((SECONDS + 30)); while [ "$SECONDS" -lt "$end" ]; do grep -q 'reason=parent-gone' "$AGENT_TERMINAL_TEST_LOG" && break; sleep 0.1; done
 assert_contains "parent gone: the ladder stops, logged" "$(cat "$AGENT_TERMINAL_TEST_LOG")" "ladder-skip model=cheap reason=parent-gone"
 assert_eq "parent gone: no model call" "0" "$(ncalls)"
 
@@ -217,10 +221,11 @@ assert_file "report: written even then" "$REP"
 if command -v script >/dev/null 2>&1; then
   for how in stdin tty; do
     if [ "$how" = tty ]; then c='read -r x </dev/tty; echo "rc=$?"'; else c='read -r x; echo "rc=$?"'; fi
-    s=$(date +%s)
+    bare=$(bare_run_ms)
+    s=$(ms)
     script -q /dev/null env AGENT_TERMINAL_TEST_MODELS="" "$BIN/test-escalate.sh" -C "$R" --timeout 8 -- bash -c "$c" </dev/null >/dev/null 2>&1
-    e=$(date +%s)
-    assert_eq "under a terminal, a $how read in the test run does not hang until the timeout" "1" "$([ $((e - s)) -lt 5 ] && echo 1 || echo 0)"
+    e=$(ms)
+    assert_eq "under a terminal, a $how read in the test run does not hang until the timeout (took $((e - s)) ms, a quick run $bare ms)" "1" "$([ $((e - s - bare)) -lt 5000 ] && echo 1 || echo 0)"
   done
 else
   echo "script(1) missing: tty tests skipped" >>"$T_ROOT/skipped.t_escalate"

@@ -284,33 +284,42 @@ assert_not_contains "no remote: nor 'no upstream'" "$(sec noremote)" "no upstrea
 mkdir -p "$WORK/shim"
 cat >"$WORK/shim/git" <<'EOF'
 #!/bin/bash
-# test shim: a git whose fetch is slow (SHIM_SLEEP seconds); everything else is the real git
-for a in "$@"; do if [ "$a" = fetch ]; then sleep "${SHIM_SLEEP:-3}"; break; fi; done
+# test shim: a git whose fetch is slow (SHIM_SLEEP seconds), or with SHIM_HOLD set waits until that file exists
+# (60 s at most); everything else is the real git
+for a in "$@"; do
+  [ "$a" = fetch ] || continue
+  if [ -n "${SHIM_HOLD:-}" ]; then end=$((SECONDS + 60)); while [ ! -e "$SHIM_HOLD" ] && [ "$SECONDS" -lt "$end" ]; do sleep 0.1; done
+  else sleep "${SHIM_SLEEP:-3}"; fi
+  break
+done
 exec /usr/bin/git "$@"
 EOF
 chmod +x "$WORK/shim/git"
 R=$(mk hang1); dirty "$R"; new_ah hang; repos "$R"
+HANG=$(own_sleep 123)   # longer than left_running's 30 s, and no other test's sleep
 t0=$(date +%s)
-PATH="$WORK/shim:$PATH" SHIM_SLEEP=23 SYNC_FETCH_TIMEOUT=1 scf --quiet
+PATH="$WORK/shim:$PATH" SHIM_SLEEP=$HANG SYNC_FETCH_TIMEOUT=1 scf --quiet
 t1=$(date +%s)
 assert_contains "timeout: reported as fetch failed" "$(sec hang1)" "fetch failed"
 assert_contains "timeout: the rest still reports" "$(sec hang1)" "1 untracked"
 assert_eq "timeout: the run was cut short (under 10 s)" "yes" "$([ $((t1 - t0)) -lt 10 ] && echo yes || echo no)"
-assert_eq "timeout: the hung fetch (and its sleep) is gone" "0" "$(pgrep -f 'sleep 23' | wc -l | tr -d ' ')"
+assert_eq "timeout: the hung fetch (and its sleep) is gone" "0" "$(left_running "$HANG")"
 # the time budget for all fetches together: 0 skips every fetch
 R=$(mk bud1); dirty "$R"; new_ah bud; repos "$R"
-PATH="$WORK/shim:$PATH" SHIM_SLEEP=23 SYNC_FETCH_BUDGET=0 scf --quiet
+PATH="$WORK/shim:$PATH" SHIM_SLEEP=$HANG SYNC_FETCH_BUDGET=0 scf --quiet
 assert_contains "fetch budget spent: the fetch is skipped, said so" "$(sec bud1)" "fetch skipped"
 assert_eq "fetch budget spent: event says skipped" "skipped" "$(evq bud1 '.data.fetch')"
 
 # ---------- the snapshot is replaced atomically ----------
 R=$(mk atom1); dirty "$R"; new_ah atom; repos "$R"
 printf 'generated: OLD SNAPSHOT\n' >"$SNAP"
-( PATH="$WORK/shim:$PATH" SHIM_SLEEP=3 scf --quiet ) &
+rm -f "$WORK/fetch-go"
+( PATH="$WORK/shim:$PATH" SHIM_HOLD="$WORK/fetch-go" scf --quiet ) &   # the run stays in its fetch until fetch-go
 bg=$!
-i=0; while [ ! -d "$AH/sync-check.lock" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
-sleep 0.5
+end=$((SECONDS + 30)); while [ ! -d "$AH/sync-check.lock" ] && [ "$SECONDS" -lt "$end" ]; do sleep 0.1; done
+assert_file "atomic: the run is under way (holds its lock)" "$AH/sync-check.lock"
 assert_eq "atomic: while the run works the old snapshot is intact" "generated: OLD SNAPSHOT" "$(cat "$SNAP")"
+: >"$WORK/fetch-go"
 wait "$bg"
 assert_contains "atomic: then it is the new one, whole" "$(head -1 "$SNAP")" "generated: 20"
 assert_eq "atomic: no temp files left behind" "0" "$(ls -A "$AH" | grep -c '^\.sync-check\|sync-check.md\.' || true)"

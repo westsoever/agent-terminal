@@ -139,4 +139,22 @@ tallow() {
   if [ -z "$out" ]; then pass "allow: $1"; else fail "allow: $1" "  input: $4"$'\n'"  guard said: $out"; fi
 }
 
+# ms: the wall clock in milliseconds. A test that bounds a duration compares it with the same work done without the
+# delay under test, measured just before (see t_meta.sh): on a loaded machine a fixed limit fails on load alone.
+ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
+
+# ---- leftover processes ----
+# own_sleep SECS: a sleep length only this test run uses (SECS.<pid of the test>), so a leftover check by command
+# line never sees the sleep of another test file or of another suite running at the same time. Keep SECS well
+# above left_running's 30 s, so a sleep that was really left behind is still there when the check gives up.
+own_sleep() { printf '%s.%s' "$1" "$$"; }
+# left_running SLEEP: how many `sleep SLEEP` processes are still alive once they had up to 30 s to go away (a
+# killed process can take a moment to disappear on a loaded machine). 0 is what a leftover check expects.
+left_running() {
+  local re n end=$((SECONDS + 30))
+  re="^sleep ${1//./\\.}\$"
+  while n=$(pgrep -f "$re" | wc -l | tr -d ' '); [ "$n" -gt 0 ] && [ "$SECONDS" -lt "$end" ]; do sleep 0.1; done
+  echo "$n"
+}
+
 link_kit() { ln -sfn "$KIT" "$CLAUDE_DIR/agent-terminal"; }   # hooks and pre-push hooks call $CLAUDE_DIR/agent-terminal/bin
