@@ -353,16 +353,21 @@ assert_eq "retile: one screens call" "1" "$(grep -c "^screens" "$FT/calls")"
 # the queue lock is an flock: a run waits for the holder instead of dropping its change, and a holder that dies
 # (kill -9) leaves no lock to wait for
 reset "401 2000 100 800 500 ttys400"
-( . "$BIN/lib.sh"; lock_fd9 "$QD/.queue.lock"; : >"$WORK/held1"; sleep 2 ) & hp=$!
+# the holder leaves "freed1" just before it lets go: a run that waited for it comes back after that file exists
+( . "$BIN/lib.sh"; lock_fd9 "$QD/.queue.lock"; : >"$WORK/held1"; sleep 2; : >"$WORK/freed1" ) & hp=$!
 while [ ! -f "$WORK/held1" ]; do sleep 0.05; done
-s=$SECONDS; QUEUE_SID=s400 QUEUE_NAME=l QUEUE_TTY=ttys400 "$Q" retile
-assert_ok "queue lock: a run waits for the holder" test $((SECONDS - s)) -ge 1
+QUEUE_SID=s400 QUEUE_NAME=l QUEUE_TTY=ttys400 "$Q" retile
+assert_file "queue lock: a run waits for the holder (comes back after it let go)" "$WORK/freed1"
 assert_eq "queue lock: the waiting run keeps its change" "ttys400 401 1 l" "$(cat "$TB/s400")"
 wait "$hp"
+# a dead holder: the run takes no longer than the same run with no holder at all, measured just before (on a loaded
+# machine a fixed limit fails on load alone)
+s=$(ms); QUEUE_SID=s401 QUEUE_NAME=m QUEUE_TTY=ttys400 "$Q" retile; bare=$(( $(ms) - s ))
+rm -f "$TB/s401"   # the run after the dead holder must write it again
 ( . "$BIN/lib.sh"; lock_fd9 "$QD/.queue.lock"; : >"$WORK/held2"; exec sleep 30 ) & hp=$!
 while [ ! -f "$WORK/held2" ]; do sleep 0.05; done
 kill -9 "$hp"; wait "$hp" 2>/dev/null
-s=$SECONDS; QUEUE_SID=s401 QUEUE_NAME=m QUEUE_TTY=ttys400 "$Q" retile
-assert_ok "queue lock: a dead holder does not block" test $((SECONDS - s)) -le 1
+s=$(ms); QUEUE_SID=s401 QUEUE_NAME=m QUEUE_TTY=ttys400 "$Q" retile; took=$(( $(ms) - s ))
+assert_ok "queue lock: a dead holder does not block (took $took ms, the same run without a holder $bare ms)" test $((took - bare)) -lt 1000
 assert_eq "queue lock: the run after a dead holder keeps its change" "ttys400 401 1 m" "$(cat "$TB/s401")"
 exit 0

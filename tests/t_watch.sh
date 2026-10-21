@@ -252,10 +252,17 @@ assert_eq "zero usage only: the record is still consumed" "$(wc -c <"$TZ3" | tr 
 # A fake command records every invocation. The watcher must start it detached (never wait for it), keep its
 # own stamp, and turn a failure of the check into a line in watch.log, never into a failed watcher run.
 SAH="$WORK/sync-ah"; SREC="$WORK/sync-rec.log"
+HANG=$(own_sleep 125)   # the hanging check's sleep: longer than left_running's 30 s, and no other test's sleep
+SLOW_GO="$WORK/slow-go"; SLOW_DONE="$WORK/slow-done"
+# slow: runs until SLOW_GO exists (60 s at most), then leaves SLOW_DONE
 cat >"$WORK/sync-fake.sh" <<EOF
 #!/usr/bin/env bash
 printf '%s|%s\n' "\$AGENT_HOME" "\$*" >>"$SREC"
-case "\${FAKE_MODE:-}" in fail) exit 3 ;; hang) sleep 25.31 ;; slow) sleep 4 ;; esac
+case "\${FAKE_MODE:-}" in
+  fail) exit 3 ;;
+  hang) sleep $HANG ;;
+  slow) end=\$((SECONDS + 60)); while [ ! -e "$SLOW_GO" ] && [ "\$SECONDS" -lt "\$end" ]; do sleep 0.1; done; : >"$SLOW_DONE" ;;
+esac
 exit 0
 EOF
 chmod +x "$WORK/sync-fake.sh"
@@ -263,8 +270,8 @@ export SYNC_CHECK_CMD="$WORK/sync-fake.sh"
 sreset() { rm -rf "$SAH"; mkdir -p "$SAH"; : >"$SREC"; }
 srun() { AGENT_HOME="$SAH" WATCH_NOW="${1:-$NOW}" "$W"; }          # watcher with a fake clock (default: now)
 scalls() { wc -l <"$SREC" | tr -d ' '; }
-swait() { local i=0; while [ "$(scalls)" -lt "$1" ] && [ "$i" -lt 60 ]; do sleep 0.1; i=$((i + 1)); done; }   # up to 6 s for N calls
-wlog_has() { local i=0; while ! grep -q "$1" "$SAH/watch.log" 2>/dev/null && [ "$i" -lt 60 ]; do sleep 0.1; i=$((i + 1)); done; grep -c "$1" "$SAH/watch.log" 2>/dev/null || true; }
+swait() { local end=$((SECONDS + 60)); while [ "$(scalls)" -lt "$1" ] && [ "$SECONDS" -lt "$end" ]; do sleep 0.1; done; }   # up to 60 s for N calls
+wlog_has() { local end=$((SECONDS + 60)); while ! grep -q "$1" "$SAH/watch.log" 2>/dev/null && [ "$SECONDS" -lt "$end" ]; do sleep 0.1; done; grep -c "$1" "$SAH/watch.log" 2>/dev/null || true; }
 
 sreset; srun; swait 1
 assert_eq "sync: the first tick starts the check once" "1" "$(scalls)"
@@ -300,12 +307,14 @@ sreset; printf 'junk\n' >"$SAH/sync-check.stamp"; srun; swait 1
 assert_eq "sync: a junk stamp counts as never run" "1" "$(scalls)"
 
 # the watcher does not wait for a slow check, and a failing one never fails the watcher
-sreset; t0=$(date +%s)
+sreset; rm -f "$SLOW_GO" "$SLOW_DONE"
 rc=0; out=$(FAKE_MODE=slow srun 2>&1) || rc=$?
-t1=$(date +%s)
-assert_eq "sync: a 4 s check does not make the tick wait (under 3 s)" "yes" "$([ $((t1 - t0)) -lt 3 ] && echo yes || echo no)"
-assert_eq "sync: the tick exits 0 and prints nothing" "0:" "$rc:$out"
 swait 1
+assert_eq "sync: a slow check does not make the tick wait (the tick is back, the check still runs)" "1:no" \
+  "$(scalls):$([ -e "$SLOW_DONE" ] && echo yes || echo no)"
+assert_eq "sync: the tick exits 0 and prints nothing" "0:" "$rc:$out"
+: >"$SLOW_GO"; end=$((SECONDS + 60)); while [ ! -e "$SLOW_DONE" ] && [ "$SECONDS" -lt "$end" ]; do sleep 0.1; done
+assert_file "sync: ... and the check then runs to its end" "$SLOW_DONE"
 sreset; rc=0; FAKE_MODE=fail srun || rc=$?
 assert_eq "sync: a failing check: the watcher still exits 0" "0" "$rc"
 assert_eq "sync: ... and watch.log records the failure" "1" "$(wlog_has 'sync-check: exited with status 3')"
@@ -316,8 +325,7 @@ assert_eq "sync: ... and watch.log says it" "1" "$(wlog_has 'cannot start')"
 sreset; rc=0; FAKE_MODE=hang SYNC_CHECK_MAX_SECS=1 srun || rc=$?
 assert_eq "sync: a hanging check: the watcher exits 0" "0" "$rc"
 assert_eq "sync: ... it is stopped at the time ceiling and watch.log says so" "1" "$(wlog_has 'stopped after 1s')"
-sleep 1
-assert_eq "sync: ... and nothing of it is left running" "0" "$(pgrep -f "sleep 25.31" | wc -l | tr -d ' ')"
+assert_eq "sync: ... and nothing of it is left running" "0" "$(left_running "$HANG")"
 # the real check under the ceiling: a fetch that hangs inside it goes down with it (its own session included)
 mkdir -p "$WORK/shim"
 cat >"$WORK/shim/git" <<'EOF'
@@ -327,10 +335,9 @@ exec /usr/bin/git "$@"
 EOF
 chmod +x "$WORK/shim/git"
 sreset; HR=$(mk_repo hangrepo); printf '%s\n' "$HR" >"$SAH/repos"
-AGENT_TERMINAL_INCLUDE_SANDBOX=1 AGENT_REPOS_FILE="$SAH/repos" PATH="$WORK/shim:$PATH" SHIM_SLEEP=23 SYNC_CHECK_CMD="$BIN/sync-check.sh" SYNC_CHECK_MAX_SECS=2 srun
+AGENT_TERMINAL_INCLUDE_SANDBOX=1 AGENT_REPOS_FILE="$SAH/repos" PATH="$WORK/shim:$PATH" SHIM_SLEEP=$HANG SYNC_CHECK_CMD="$BIN/sync-check.sh" SYNC_CHECK_MAX_SECS=2 srun
 assert_eq "sync: the real check is stopped at the ceiling while it fetches" "1" "$(wlog_has 'stopped after 2s')"
-sleep 2
-assert_eq "sync: ... and the hung fetch is not left behind" "0" "$(pgrep -f 'sleep 23' | wc -l | tr -d ' ')"
+assert_eq "sync: ... and the hung fetch is not left behind" "0" "$(left_running "$HANG")"
 # the rest of the tick is unaffected: a tick that launches the check still reads transcripts
 sreset
 T9="$WORK/t9.jsonl"; amsg k1 0 1000 0 33 >"$T9"

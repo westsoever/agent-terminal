@@ -77,10 +77,13 @@ meta_set() {
   mkdir -p "$SESS_DIR" 2>/dev/null || return 1
   perl -e '
     use Fcntl qw(:flock);
+    use Time::HiRes ();
     my ($d, @kv) = @ARGV;
     my @k = @kv[grep { $_ % 2 == 0 } 0 .. $#kv];
     open(my $l, ">>", "$d/.meta.flock") or exit 1;
-    for (1 .. 200) { last if flock($l, LOCK_EX | LOCK_NB); select undef, undef, undef, 0.01 }
+    # a wall-clock deadline: 200 tries of 10 ms stretch past 2.7 s on a loaded machine
+    my $end = Time::HiRes::time() + 2;
+    until (flock($l, LOCK_EX | LOCK_NB)) { last if Time::HiRes::time() >= $end; select undef, undef, undef, 0.01 }
     my @keep;
     if (open(my $in, "<", "$d/meta")) {
       for my $l (<$in>) { next if grep { index($l, "$_=") == 0 } @k; $l .= "\n" unless $l =~ /\n\z/; push @keep, $l }

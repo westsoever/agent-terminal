@@ -8,15 +8,23 @@
 
 SESS_DIR="$AGENT_HOME/sessions/meta-1"
 nkeys() { grep -c '=' "$SESS_DIR/meta" 2>/dev/null || echo 0; }
-ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
 LOCKF="$SESS_DIR/.meta.flock"
-# hold LOCKF for SECS in the background; with "held" also append held=1 to meta while holding it
+HOLD_READY="$WORK/hold.ready"; HOLD_FREED="$WORK/hold.freed"
+# hold LOCKF for SECS in the background; with "held" also append held=1 to meta while holding it. Returns once the
+# holder has the lock (HOLD_READY); just before letting go the holder writes the time in ms to HOLD_FREED.
 hold_lock() { # secs [held]
-  perl -e 'use Fcntl ":flock"; my ($l, $m, $t, $h) = @ARGV; open(my $fh, ">>", $l) or die; flock($fh, LOCK_EX) or die;
+  rm -f "$HOLD_READY" "$HOLD_FREED"
+  perl -MTime::HiRes=time -e 'use Fcntl ":flock"; my ($l, $m, $t, $h, $r, $f) = @ARGV;
+    open(my $fh, ">>", $l) or die; flock($fh, LOCK_EX) or die;
     if ($h) { open(my $o, ">>", $m) or die; print $o "held=1\n"; close $o }
-    select undef, undef, undef, $t;' "$LOCKF" "$SESS_DIR/meta" "$1" "${2:-}" &
-  sleep 0.3   # let it take the lock first
+    open(my $rd, ">", $r) or die; close $rd;
+    select undef, undef, undef, $t;
+    open(my $fr, ">", "$f.tmp") or die; printf $fr "%d\n", time * 1000; close $fr; rename "$f.tmp", $f;' \
+    "$LOCKF" "$SESS_DIR/meta" "$1" "${2:-}" "$HOLD_READY" "$HOLD_FREED" &
+  local i=0; while [ ! -e "$HOLD_READY" ] && [ "$i" -lt 600 ]; do sleep 0.05; i=$((i + 1)); done   # up to 30 s
 }
+# one uncontended meta_set, in ms: what a write costs under the current load, without any lock wait
+bare_write_ms() { local s e; s=$(ms); meta_set bare_write 1; e=$(ms); echo $((e - s)); }
 
 # 4 writers x 8 keys at once, 10 rounds: every round must keep all 32 keys (unlocked, the probe lost keys in 39 of 40)
 lost=0
@@ -51,24 +59,29 @@ assert_eq "pairs: other keys kept" "yes" "$(meta_get "$SESS_DIR/meta" after_nonl
 
 # a live holder is waited for: the write lands after the holder lets go, and the holder's key is kept
 hold_lock 1.5 held
-s=$(ms); meta_set after_hold yes; e=$(ms)
+meta_set after_hold yes; e=$(ms)
 wait
-assert_eq "live lock: meta_set waited for the holder (at least 1 s)" "1" "$([ $((e - s)) -ge 1000 ] && echo 1 || echo 0)"
+freed=$(cat "$HOLD_FREED" 2>/dev/null || echo 99999999999999)
+assert_eq "live lock: meta_set waited for the holder (returned after it let go)" "1" "$([ "$e" -ge "$freed" ] && echo 1 || echo 0)"
 assert_eq "live lock: the holder's key is kept" "1" "$(meta_get "$SESS_DIR/meta" held)"
 assert_eq "live lock: the waiting write landed" "yes" "$(meta_get "$SESS_DIR/meta" after_hold)"
 
-# a holder that hangs is waited for about 2 s at most (the UserPromptSubmit hook has 5 s), then the write goes ahead
+# a holder that hangs is waited for about 2 s at most (the UserPromptSubmit hook has 5 s), then the write goes ahead.
+# The wait is the time beyond an uncontended write taken just before: under the parallel suite a bare perl start
+# alone can cost hundreds of ms, which is load, not lock wait.
+bare=$(bare_write_ms)
 hold_lock 6
 s=$(ms); meta_set after_hang yes; e=$(ms)
-assert_eq "hung holder: the wait is capped (under 3 s)" "1" "$([ $((e - s)) -lt 3000 ] && echo 1 || echo 0)"
+assert_eq "hung holder: the wait is capped (under 3 s; took $((e - s)) ms, an uncontended write $bare ms)" "1" "$([ $((e - s - bare)) -lt 3000 ] && echo 1 || echo 0)"
 assert_eq "hung holder: the write landed" "yes" "$(meta_get "$SESS_DIR/meta" after_hang)"
 kill %1 2>/dev/null; wait
 
 # a holder that dies holds nothing: the kernel drops the lock with the process, so there is no stale lock
 hold_lock 60; pid=$!
 kill -9 "$pid"; wait "$pid" 2>/dev/null
+bare=$(bare_write_ms)
 s=$(ms); meta_set after_death yes; e=$(ms)
-assert_eq "dead holder: no wait (under 0.5 s)" "1" "$([ $((e - s)) -lt 500 ] && echo 1 || echo 0)"
+assert_eq "dead holder: no wait (under 0.5 s; took $((e - s)) ms, an uncontended write $bare ms)" "1" "$([ $((e - s - bare)) -lt 500 ] && echo 1 || echo 0)"
 assert_eq "dead holder: the write landed" "yes" "$(meta_get "$SESS_DIR/meta" after_death)"
 
 # a leftover mkdir lock directory from the previous meta_set does not block anything
