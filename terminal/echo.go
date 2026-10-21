@@ -18,6 +18,9 @@ type outMsg struct {
 	text string
 	at   time.Time
 	sent bool // typed in; false while it is being typed
+	// queued: the agent was already working when it was sent, so it waits for the turn to end (an idle agent
+	// that starts this very message is not queueing it)
+	queued bool
 }
 
 // echoGiveUp: a sent message the transcript never shows (a command with no prompt line, a text Claude Code
@@ -36,7 +39,8 @@ func (m *model) addEcho(sid, text string) {
 	if m.out == nil {
 		m.out = map[string][]outMsg{}
 	}
-	m.out[sid] = append(m.out[sid], outMsg{text: text, at: time.Now()})
+	a := m.agentBySID(sid)
+	m.out[sid] = append(m.out[sid], outMsg{text: text, at: time.Now(), queued: a != nil && a.Group() == 1})
 }
 
 // echoSent: the send of text to sid ended. ok: it shows as sent (or queued). Failed: the copy goes and the text
@@ -117,7 +121,7 @@ func (m model) echoLines(a Agent, in int) []string {
 		}
 		state := "sending…"
 		switch {
-		case p.sent && a.Group() == 1:
+		case p.sent && p.queued && a.Group() == 1:
 			state = "queued · it runs when this turn ends · esc stops the turn, then it runs"
 		case p.sent:
 			state = "sent"
@@ -215,8 +219,11 @@ func (m *model) recallKey(ks string) bool {
 	m.recall.idx = min(m.recall.idx, len(h)-1)
 	m.recall.text = h[m.recall.idx]
 	m.setBox(m.recall.text)
-	if m.recall.idx < len(m.out[a.SID]) && m.out[a.SID][len(m.out[a.SID])-1-m.recall.idx].sent && a.Group() == 1 {
-		m.setStatus("still queued: enter sends this as another message")
+	for _, p := range m.out[a.SID] {
+		if p.sent && p.queued && a.Group() == 1 && strings.TrimSpace(p.text) == m.recall.text {
+			m.setStatus("still queued: enter sends this as another message")
+			break
+		}
 	}
 	return true
 }
