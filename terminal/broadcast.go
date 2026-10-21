@@ -226,6 +226,7 @@ func (m *model) routeMention(text string) (cmd tea.Cmd, handled bool) {
 		return nil, true
 	}
 	m.setStatus("sending to " + a.Name + "…")
+	m.addEcho(a.SID, rest)
 	return func() tea.Msg {
 		return sentMsg{a.SID, a.Name, rest, transmitFn(a, rest, nil)}
 	}, true
@@ -328,5 +329,6 @@ func (m *model) helpersStarted(msg helpersMsg) tea.Cmd {
 		saveDrafts(m.ed.drafts)
 	}
 	m.setStatus("started " + strings.Join(msg.names, ", ") + " · sending to " + a.Name + "…")
+	m.addEcho(a.SID, msg.text)
 	return func() tea.Msg { return sentMsg{a.SID, a.Name, msg.text, transmitFn(a, msg.text, nil)} }
 }

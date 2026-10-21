@@ -643,7 +643,11 @@ func (m model) agentPanel(w, h int) []string {
 		if _, names := m.helpers(a.SID, m.ed.ta.Value()); len(names) > 0 { // what enter will start first (D70)
 			tail = append(tail, row(in, s("@"+strings.Join(names, " @")+" → new background agent in "+tildify(a.Cwd), cOrange)))
 		}
-		tail = append(tail, m.ed.lines(in)...)
+		el := m.ed.lines(in)
+		if m.canStop(a) && len(m.ed.comp) == 0 { // the hint under the box: what esc and enter do while it works (D79)
+			el[len(el)-1] = row(in, s("it works: ⏎ queues it · esc stops its turn · ctrl+c closes the box · ↑ last message", cDark))
+		}
+		tail = append(tail, el...)
 	case a.Bg:
 		tail = append(tail, row(in, s("> ", cOrange), s(m.cfg.Keys.Reply+" to write · "+m.cfg.Keys.Goto+" opens its screen (ctrl+z there closes it) · /STOP stops it", cDark)))
 	case !a.InTerminal:
@@ -668,7 +672,7 @@ func (m model) agentPanel(w, h int) []string {
 	if avail < 1 {
 		avail = 1
 	}
-	msg := chatLines(l, in, m.cfg.Tables)
+	msg := append(chatLines(l, in, m.cfg.Tables), m.echoLines(*a, in)...)
 	// bottom-anchored: off lines back from the newest; the scroll keys move off, this drawing sets its limits
 	most := max(0, len(msg)-avail)
 	off := 0
@@ -1427,6 +1431,12 @@ func (m model) helpLines() []string {
 		row2("HELP", "this page"),
 		row2("QUIT", "stop agterm (ctrl+c also stops it)"),
 		"",
+		"## New on 2026-10-21",
+		row2("esc", "the selected agent works: stop its turn, as esc in Claude Code (a zoom or panel closes first; a menu gets none)\n"+
+			"in the box too: the box stays open with your text · a queued message runs as soon as the turn stops · a second esc within 5 s closes the box"),
+		row2("instant", "a message shows in the conversation the moment you push enter, grey: sending…, sent, or queued while the agent works\nit goes once the transcript has it; a failed send becomes the draft again"),
+		row2("↑ in the box", "an empty box: the last message sent to the agent, ready to edit (↑ again: the one before, ↓ back)\nenter sends it as a new message; pgup / pgdown scroll"),
+		"",
 		"## New on 2026-10-19",
 		row2(K.Dismiss+" on IDLE", "an idle agent can be dismissed too, for a clean list\nit comes back when it works again"),
 		row2("REMOTE", "below DONE: the connected sessions on other machines (Remote Control), active ones only, read every 30 s\n"+
@@ -1467,6 +1477,7 @@ func (m model) helpLines() []string {
 		row2(K.Quick, "an agent asks questions: take the recommended answer (★, the one the agent marks) of every question and submit\nit refuses when a question has none"),
 		row2("enter, ←, →", "when the agent asks: confirm, previous / next part"),
 		row2(K.Reply, "write a message (keys below)\nesc keeps it as a draft; sending it sends a window on monitor 1 back"),
+		row2("esc", "stop the selected agent's turn while it works (D79)"),
 		row2(K.Open+" then a-i", "open that file"),
 		row2(K.Open+" then 1-9", "open a link in the browser: "+K.Open+" puts a number on each link on screen\n(Terminal.app ignores cmd+click on links); works in the PR and PC panels too"),
 		row2(K.Goto, "show the agent's own Terminal window, where it is\na background agent (◦): its screen in a short-lived window; ctrl+z there closes it, the agent keeps running"),
@@ -1475,7 +1486,9 @@ func (m model) helpLines() []string {
 		row2(K.Refresh, "read all data again"),
 		"",
 		"## Writing a message",
-		row2("enter", "send"),
+		row2("enter", "send; to a working agent it is queued"),
+		row2("↑ / ↓", "an empty box: the messages sent before, newest first"),
+		row2("esc", "keep the draft and close; while the agent works: stop its turn, the box stays open"),
 		row2("new line", "option+enter, ctrl+j, or \\ then enter"),
 		row2("option+key", "your layout's character: option+l @, option+5 [, option+8 {, option+7 |"),
 		row2("@ and /", "suggest the agent's files and the other sessions / commands; tab or enter takes one\na command with a screen of its own (/config, /mcp, /model with no name…) to a background agent opens its screen too"),
@@ -1637,6 +1650,9 @@ func (m model) footer() []string {
 		add(&r1, "esc", "desk")
 		add(&r1, K.Command, "command")
 	default:
+		if m.view == vDesk && !m.zoom && m.canStop(m.sel()) {
+			add(&r1, "esc", "stop its turn")
+		}
 		add(&r1, "1-9", "answer")
 		if a := m.sel(); a != nil && len(m.last(a).Ask) > 0 {
 			add(&r1, K.Quick, "quick approve")
