@@ -83,9 +83,35 @@ func TestEditorSlashSuggestions(t *testing.T) {
 	if got := e.ta.Value(); got != "/compact " {
 		t.Fatalf("got %q", got)
 	}
-	typeText(e, "now /x") // a slash later in the text is no command
+}
+
+// A command later in the text is suggested too, as in Claude Code, but only the skills and commands of the
+// folder and the owner: Claude Code runs its own commands (/compact) only at the start of a message. A path is no
+// command.
+func TestEditorSlashSuggestionsMidText(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := filepath.Join(home, "code", "repo")
+	os.MkdirAll(filepath.Join(repo, ".claude", "skills", "deploy"), 0o755)
+	os.WriteFile(filepath.Join(repo, ".claude", "skills", "deploy", "SKILL.md"), []byte("---\nname: deploy\ndescription: Deploy this package\n---\n"), 0o644)
+	e := testEditor(t, repo)
+	typeText(e, "then run /depl")
+	if len(e.comp) == 0 || e.comp[0] != "/deploy" {
+		t.Fatalf("suggestions %v", e.comp)
+	}
+	e.key(tea.KeyMsg{Type: tea.KeyTab}, 60)
+	if got := e.ta.Value(); got != "then run /deploy " {
+		t.Fatalf("got %q", got)
+	}
+	typeText(e, "and /comp")
+	for _, c := range e.comp {
+		if c == "/compact" {
+			t.Fatalf("a built-in command mid-text: %v", e.comp)
+		}
+	}
+	typeText(e, " see /Users/de")
 	if len(e.comp) != 0 {
-		t.Fatalf("no suggestions expected, got %v", e.comp)
+		t.Fatalf("a path is no command, got %v", e.comp)
 	}
 }
 
