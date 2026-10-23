@@ -36,8 +36,26 @@ func TestReadLastModel(t *testing.T) {
 	if tag := segsText(modelTag(l)); tag != "[Opus 5.5] high" {
 		t.Fatalf("tag %q", tag)
 	}
+	l.Ctx = 84000
+	if tag := segsText(modelTag(l)); tag != "[Opus 5.5] high ctx: 42%" {
+		t.Fatalf("tag %q", tag)
+	}
 	if modelTag(Last{}) != nil {
 		t.Fatal("no model, no tag")
+	}
+}
+
+// The context is the latest reply's input, cache read and cache creation tokens; a reply without usage (or with
+// zero totals, like an interrupt) leaves the earlier figure.
+func TestReadLastCtx(t *testing.T) {
+	l := readLast(writeTranscript(t,
+		`{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_read_input_tokens":90000,"cache_creation_input_tokens":10000,"output_tokens":5},"content":[{"type":"text","text":"a"}]}}`,
+		`{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":0,"output_tokens":0},"content":[{"type":"text","text":"b"}]}}`), "/")
+	if l.Ctx != 100010 || ctxPct(l.Ctx) != 50 {
+		t.Fatalf("ctx %d", l.Ctx)
+	}
+	if ctxPct(0) != -1 || ctxPct(300000) != 30 {
+		t.Fatal("window: 200k, 1M past it, none without usage")
 	}
 }
 

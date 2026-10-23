@@ -164,7 +164,20 @@ func dur(d time.Duration) string {
 	return fmt.Sprintf("%dm", m)
 }
 
-// modelTag is the top right of an agent's frame: "[Opus 5.5] high". nil when its transcript names no model.
+// ctxPct is the share of the context window in use, the way agent-terminal-watch.sh counts it: the window is
+// 200k tokens unless the context already exceeds it (then 1M). -1 when the transcript gave no usage.
+func ctxPct(tokens int) int {
+	if tokens <= 0 {
+		return -1
+	}
+	win := 200000
+	if tokens > win {
+		win = 1000000
+	}
+	return tokens * 100 / win
+}
+
+// modelTag is the top right of an agent's frame: "[Opus 5.5] high ctx: 42%". nil when its transcript names no model.
 func modelTag(l Last) []seg {
 	if l.Model == "" {
 		return nil
@@ -172,6 +185,13 @@ func modelTag(l Last) []seg {
 	tag := []seg{s("["+modelName(l.Model)+"]", cWhite)}
 	if l.Effort != "" {
 		tag = append(tag, s(" "+l.Effort, cGrey))
+	}
+	if pct := ctxPct(l.Ctx); pct >= 0 {
+		c := cGrey
+		if pct >= 80 {
+			c = cOrange
+		}
+		tag = append(tag, s(fmt.Sprintf(" ctx: %d%%", pct), c))
 	}
 	return tag
 }

@@ -274,7 +274,7 @@ A `◦` before the name shows a background agent: a session that runs without a 
 
 The agent panel shows the selected agent:
 
-- The top line shows its name, its folder and its git branch. On the right it shows the model and effort of its last reply, for example `[Opus 5.5] high`. The wall tiles show it too; a narrow tile shows only the model.
+- The top line shows its name, its folder and its git branch. On the right it shows the model, effort and context use of its last reply, for example `[Opus 5.5] high ctx: 42%`. The context turns orange from 80%. The wall tiles show it too; a narrow tile drops the context first, then the effort.
 - The text is the conversation: your prompts and its messages, the newest at the bottom. Your prompts start with `›` and have a lighter background, so you can find them easily. Tables show as tables (see 7.5).
 - The numbered lines are the answers that it asks you to select from.
 - `FILES IT MENTIONED` shows the files that its last message names. Each file has a letter.
