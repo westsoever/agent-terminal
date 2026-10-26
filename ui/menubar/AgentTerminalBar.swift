@@ -25,7 +25,8 @@
 // permission needed for frames). When a window has landed on another display by hand (mouse button up, frame
 // still for one tick), it runs `queue.sh dragged ID X Y W H` with the frame it had before; queue.sh decides
 // (park frame on the main display, its reserved cell or the grid on the other). Windows the queue moves itself
-// are reported too; queue.sh leaves those alone. AGENT_TERMINAL_BAR_DRAGS=off turns the watcher off.
+// are reported too; queue.sh leaves those alone, and it ignores every drag while agterm is closed (D80).
+// AGENT_TERMINAL_BAR_DRAGS=off turns the watcher off.
 //
 // Voice shortcut (dispatcher v2): Right Control + Left Option wakes the voice dispatcher; VoiceShortcut.swift has it
 // all (chord, Accessibility, the wake, --wake-once and --chord-test). Here: one menu line, its action, the hooks.

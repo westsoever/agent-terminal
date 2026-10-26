@@ -419,7 +419,7 @@ Use this procedure when an agent waits but you do not want to answer now.
 2. Push `x`.
 3. Make sure that the command line shows `Dismissed <name>`.
 
-The agent leaves the list. A background agent, which has no window, leaves it too. If the agent has a Terminal window that came over to the main display, the window goes back to its position on the second display. The agent does not get a message. When the agent finishes another turn or asks something new, it comes back to the list.
+The agent leaves the list. A background agent, which has no window, leaves it too. A Terminal window of the agent stays where it is. The agent does not get a message. When the agent finishes another turn or asks something new, it comes back to the list.
 
 ### 6.11 Look at all agents together
 

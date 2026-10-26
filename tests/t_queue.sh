@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# queue.sh: park moves a window from the other display to the main one and back on the next prompt; tabs of one
-# window move together; a window on the main display is never moved; next cycles oldest first; queue=off.
+# queue.sh: with agent-terminal closed no window moves on its own (D80); with it open, show (h) moves a window from
+# the other display to the main one and the next prompt sends it back; tabs of one window move together; a window
+# on the main display is never moved; next cycles oldest first; queue=off.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -29,30 +30,67 @@ win() { awk -v i="$1" '$1 == i { print $2, $3, $4, $5 }' "$FT/windows"; }
 mkdir -p "$QD/waiting" "$QD/parked"
 # the park frame is off (same size, cascaded) unless a test sets it: the last assignment wins
 setcfg() { printf '%s\n' queue_park_frame=off "$@" >"$AGENT_HOME/config"; }
-# the queue without tiling first; tiling (the default) is tested at the end
+moves() { grep -c '^move' "$FT/calls"; }
+# agent-terminal open: a live pid in terminal/open (self_tty: its own window); a dead pid or no file is closed
+mkdir -p "$AGENT_HOME/terminal"
+opened() { printf 'pid=%s\nself_tty=ttys999\nsid=\ntty=\n' "$$" >"$AGENT_HOME/terminal/open"; }
+reg() { QUEUE_SID=$1 QUEUE_NAME=$1 QUEUE_TTY=$2 "$Q" retile; }   # SID TTY: the session's line in the tabs map
+
+# ---------- agent-terminal closed (D80): no window moves on its own; the records are still kept ----------
+setcfg ""
+rm -f "$AGENT_HOME/terminal/open"
+R=$(mk_repo queuerepo)
+reset "1 2000 30 700 700 ttys001" "2 2800 30 700 700 ttys002"
+QUEUE_SID=c1 QUEUE_KIND=input QUEUE_TTY=ttys001 "$Q" park a
+assert_eq "closed: park keeps the waiting record" "c1 input a" "$(cut -d' ' -f2- "$QD/waiting/ttys001")"
+QUEUE_TTY=ttys002 "$Q" retile
+printf '%s' "$(hook_json SessionStart "$R" c2)" | QUEUE_TTY=ttys002 "$BIN/session-start.sh" >/dev/null
+printf '%s' "$(hook_json Notification "$R" c2)" | QUEUE_TTY=ttys002 "$BIN/notify.sh" input "Which one?"
+printf 'pid=999999\n' >"$AGENT_HOME/terminal/open"
+QUEUE_SID=c1 QUEUE_KIND=done QUEUE_TTY=ttys001 "$Q" park a
+awk '$1 == 2 { $2 = 500; $3 = 300 } { print }' "$FT/windows" >"$FT/w.tmp" && mv "$FT/w.tmp" "$FT/windows"
+"$Q" dragged 2 2800 30 700 700
+QUEUE_TTY=ttys001 "$Q" back
+assert_eq "closed: park, retile, session start, notify, drag and prompt move nothing" "0" "$(moves)"
+assert_eq "closed: the waiting window stays in its place" "2000 30 700 700" "$(win 1)"
+assert_eq "closed: a window dragged to the main display stays where it was dropped" "500 300 700 700" "$(win 2)"
+assert_eq "closed: nothing parked" "" "$(ls "$QD/parked")"
+assert_eq "closed: the tile hotkey still tiles" "Tiled: 1 window moved" "$("$Q" tile)"
+assert_eq "closed: tiled by the hotkey" "1920 -67 1920 1080" "$(win 1)"
+rm -f "$AGENT_HOME/terminal/open"
+
+# ---------- agent-terminal open, the queue without tiling first; tiling (the default) is tested further down ----------
+opened
 setcfg queue_tile=off
 
-# park: a window on the other display moves to the main one, keeping its size; back restores it
+# park only records the wait (D37); show (h) moves the window to the main one, keeping its size; back restores it
 reset "11 2879 484 961 529 ttys003" "12 0 30 961 979 ttys001"
-QUEUE_TTY=ttys003 "$Q" park worker
-assert_eq "park moves the window to the main display" "40 70 961 529" "$(win 11)"
-assert_eq "park saves the old frame" "2879 484 961 529" "$(cut -d' ' -f1-4 "$QD/parked/11")"
-QUEUE_TTY=ttys003 "$Q" park worker
-assert_eq "a second park of a parked window moves nothing" "1" "$(grep -c '^move' "$FT/calls")"
+reg s11 ttys003
+QUEUE_SID=s11 QUEUE_KIND=input QUEUE_TTY=ttys003 "$Q" park worker
+assert_eq "park: the window stays in its place" "2879 484 961 529" "$(win 11)"
+"$Q" show s11 >/dev/null
+assert_eq "show moves the window to the main display" "40 70 961 529" "$(win 11)"
+assert_eq "show saves the old frame" "2879 484 961 529" "$(cut -d' ' -f1-4 "$QD/parked/11")"
+"$Q" show s11 >/dev/null
+assert_eq "a second show of a parked window moves nothing" "1" "$(moves)"
 QUEUE_TTY=ttys003 "$Q" back
 assert_eq "back restores the old frame" "2879 484 961 529" "$(win 11)"
 assert_eq "back forgets the parked window" "" "$(ls "$QD/parked")"
 
-# a window already on the main display is yours: never moved, never queued for next
+# a window already on the main display is yours: never moved, raised by next
+reg s12 ttys001
 QUEUE_TTY=ttys001 "$Q" park main
+"$Q" show s12 >/dev/null
 assert_eq "main-display window is not moved" "0 30 961 979" "$(win 12)"
 assert_eq "next: a waiting tab on the main display is raised too" "main" "$("$Q" next)"
 
 # tabs of one window move together and stay until no tab waits
 reset "21 1920 -37 961 1043 ttys010,ttys011,ttys012"
+reg s21 ttys011
 QUEUE_TTY=ttys011 "$Q" park w1
 QUEUE_TTY=ttys012 "$Q" park w2
-assert_eq "grouped window parked once" "1" "$(grep -c '^move' "$FT/calls")"
+"$Q" show s21 >/dev/null
+assert_eq "grouped window moved once" "1" "$(moves)"
 assert_eq "a tall window is clamped to the display" "40 30 961 992" "$(win 21)"
 QUEUE_TTY=ttys011 "$Q" back
 assert_eq "stays parked while another tab waits" "40 30 961 992" "$(win 21)"
@@ -61,9 +99,11 @@ assert_eq "goes back when no tab waits" "1920 -37 961 1043" "$(win 21)"
 
 # next: oldest first, cycles, selects the waiting tab; cascade offsets the second window
 reset "31 2000 100 800 500 ttys020" "32 2100 200 800 500 ttys021,ttys022"
+reg s31 ttys020; reg s32 ttys022
 QUEUE_TTY=ttys020 "$Q" park first
 sleep 1
 QUEUE_TTY=ttys022 "$Q" park second
+"$Q" show s31 >/dev/null; "$Q" show s32 >/dev/null
 assert_eq "second parked window cascades" "72 102 800 500" "$(win 32)"
 assert_eq "next: oldest first, with the count" "first (1 more waiting)" "$("$Q" next)"
 assert_contains "next raises the window and tab" "$(cat "$FT/calls")" "raise 31 ttys020"
@@ -91,7 +131,8 @@ assert_eq "no tty: no Terminal call" "" "$(cat "$FT/calls")"
 # queue_main_display picks the other display by name
 reset "61 0 30 800 500 ttys050"
 setcfg queue_tile=off queue_main_display=sa240
-QUEUE_TTY=ttys050 "$Q" park x
+reg s61 ttys050
+"$Q" show s61 >/dev/null
 assert_eq "queue_main_display: parks onto the named display" "1960 -27 800 500" "$(win 61)"
 
 # queue=off: does nothing
@@ -101,20 +142,21 @@ QUEUE_TTY=ttys060 "$Q" park x
 assert_eq "queue=off: no Terminal call" "" "$(cat "$FT/calls")"
 setcfg queue_tile=off
 
-# hooks: notify.sh parks for a waiting kind, not for a budget alert; session-start.sh touch brings it back
-R=$(mk_repo queuerepo)
+# hooks: notify.sh records a waiting kind, not a budget alert; session-start.sh touch brings the window back
 reset "81 2000 100 800 500 ttys070"
 printf '%s' "$(hook_json Notification "$R" q1)" | QUEUE_TTY=ttys070 "$BIN/notify.sh" tokens
-assert_eq "notify tokens: not parked" "2000 100 800 500" "$(win 81)"
+assert_eq "notify tokens: not waiting" "nothing waiting" "$("$Q" status)"
 printf '%s' "$(hook_json Notification "$R" q1)" | QUEUE_TTY=ttys070 "$BIN/notify.sh" input "Which one?"
-assert_eq "notify input: parked" "40 70 800 500" "$(win 81)"
+assert_eq "notify input: the window stays" "2000 100 800 500" "$(win 81)"
 assert_contains "the HUD name is the repo" "$("$Q" status)" "queuerepo"
+"$Q" show q1 >/dev/null
+assert_eq "shown: on the main display" "40 70 800 500" "$(win 81)"
 printf '%s' "$(hook_json UserPromptSubmit "$R" q1)" | QUEUE_TTY=ttys070 "$BIN/session-start.sh" touch
 assert_eq "prompt: back on its display" "2000 100 800 500" "$(win 81)"
+assert_eq "prompt: no longer waiting" "nothing waiting" "$("$Q" status)"
 
 # ---------- tiling (the default) ----------
 setcfg ""
-moves() { grep -c '^move' "$FT/calls"; }
 # four on the other display: a 2x2 grid in reading order; the main display is never laid out
 reset "90 100 100 700 500 ttys079" "91 1950 -50 800 400 ttys080" "92 2900 -50 800 400 ttys081" \
       "93 1950 500 800 400 ttys082" "94 2900 500 800 400 ttys083"
@@ -126,9 +168,10 @@ assert_eq "2x2: bottom right" "2880 473 960 540" "$(win 94)"
 assert_eq "main display: your window untouched" "100 100 700 500" "$(win 90)"
 assert_eq "tile again: nothing to move" "Tiled: 0 windows moved" "$("$Q" tile)"
 
-# park: the bottom-left one comes over at its own size; the other three keep their cells, its cell stays empty
+# show: the bottom-left one comes over at its own size; the other three keep their cells, its cell stays empty
+reg s93 ttys082
 : >"$FT/calls"
-QUEUE_TTY=ttys082 "$Q" park w
+"$Q" show s93 >/dev/null
 assert_eq "park: same size on the main display" "40 70 960 540" "$(win 93)"
 assert_eq "park: only the parked window moves" "move 93 40 70 960 540" "$(grep '^move' "$FT/calls")"
 assert_eq "park: the others keep their cells" "2880 473 960 540" "$(win 94)"
@@ -136,7 +179,7 @@ QUEUE_TTY=ttys082 "$Q" back
 assert_eq "back: exactly its old cell" "1920 473 960 540" "$(win 93)"
 
 # a window closed while another is parked: the grid shrinks and the parked one's cell moves with it
-QUEUE_TTY=ttys082 "$Q" park w
+"$Q" show s93 >/dev/null
 awk '$1 != 92' "$FT/windows" >"$FT/w.tmp" && mv "$FT/w.tmp" "$FT/windows"
 QUEUE_TTY=ttys080 "$Q" retile
 assert_eq "3 left: three columns, first" "1920 -67 640 1080" "$(win 91)"
@@ -160,19 +203,22 @@ assert_eq "grow to 5: the new one takes the free cell" "2560 -67 640 540" "$(win
 # back restores each one's exact cell
 printf '%s\n' "" >"$AGENT_HOME/config"
 reset "161 1920 -67 960 1080 ttys150" "162 2880 -67 960 1080 ttys151"
-QUEUE_TTY=ttys150 "$Q" park a
-QUEUE_TTY=ttys151 "$Q" park b
+reg s161 ttys150; reg s162 ttys151
+"$Q" show s161 >/dev/null
+"$Q" show s162 >/dev/null
 assert_eq "park frame: first window" "320 70 690 948" "$(win 161)"
 assert_eq "park frame: second window stacks on it" "320 70 690 948" "$(win 162)"
 QUEUE_TTY=ttys151 "$Q" back
 assert_eq "park frame: back to its exact cell" "2880 -67 960 1080" "$(win 162)"
 setcfg queue_tile=off queue_park_frame=100,0,3000,2000
 reset "171 2000 100 800 500 ttys160"
-QUEUE_TTY=ttys160 "$Q" park c
+reg s171 ttys160
+"$Q" show s171 >/dev/null
 assert_eq "park frame: kept inside the display, below the menu bar" "0 30 1920 992" "$(win 171)"
 setcfg queue_tile=off queue_park_frame=12,x,3,4
 reset "181 2000 100 800 500 ttys170"
-QUEUE_TTY=ttys170 "$Q" park d
+reg s181 ttys170
+"$Q" show s181 >/dev/null
 assert_eq "park frame: a bad value falls back to same size, cascaded" "40 70 800 500" "$(win 181)"
 setcfg ""
 
@@ -191,17 +237,14 @@ reset "141 2000 30 700 700 ttys130" "142 2800 30 700 700 ttys131"
 setcfg queue_tile=off
 QUEUE_TTY=ttys131 "$Q" retile
 assert_eq "queue_tile=off: retile moves nothing" "0" "$(moves)"
-# agent-terminal open (D68): a session start still lays out the grid, but a waiting window does not come over
+# agent-terminal open (D68): a session start lays out the grid, but a waiting window does not come over
 setcfg ""
-mkdir -p "$AGENT_HOME/terminal"
-printf 'pid=%s\n' "$$" >"$AGENT_HOME/terminal/open"
 reset "143 2000 30 700 700 ttys132" "144 2800 30 700 700 ttys133"
 QUEUE_TTY=ttys133 "$Q" retile
 assert_eq "agent-terminal open: retile lays out the grid, left half" "1920 -67 960 1080" "$(win 143)"
 assert_eq "agent-terminal open: retile lays out the grid, right half" "2880 -67 960 1080" "$(win 144)"
 QUEUE_KIND=input QUEUE_TTY=ttys132 "$Q" park w
 assert_eq "agent-terminal open: a waiting window keeps its cell" "1920 -67 960 1080" "$(win 143)"
-rm -f "$AGENT_HOME/terminal/open"
 # agent-terminal open: `tile auto` (AgentTerminalBar's checker, when the set of Terminal windows changed) lays out
 # the grid like the hotkey, but honours queue_tile=off; agterm's own window holds no cell on monitor 2 even when
 # it was dragged to the main display and parked by hand
@@ -217,7 +260,7 @@ reset "393 2000 30 700 700 ttys393" "394 2800 30 700 700 ttys394"
 setcfg queue_tile=off
 assert_eq "tile auto: queue_tile=off moves nothing" "Tiled: 0 windows moved" "$("$Q" tile auto)"
 assert_eq "tile (the hotkey) still tiles with queue_tile=off" "Tiled: 2 windows moved" "$("$Q" tile)"
-rm -f "$AGENT_HOME/terminal/open"
+opened
 setcfg queue_tile=off
 
 # ---------- for agent-terminal: the tabs map, the waiting record, dismiss, single mode, show ----------
@@ -245,34 +288,31 @@ assert_eq "dismiss: back in its cell" "2100 600 800 400" "$(win 202)"
 assert_eq "dismiss: no longer waiting" "" "$(ls "$QD/waiting")"
 assert_eq "dismiss: unknown session" "Unknown session: nope" "$("$Q" dismiss nope)"
 
-# agent-terminal open (a live pid in terminal/open, D37): no window moves on its own; agent-terminal's list is the inbox. A prompt
-# still sends a window back (D43).
+# agent-terminal open (D37): no window moves on its own; agent-terminal's list is the inbox. A prompt sends a window
+# brought over by hand back (D43). Closed (D80): nothing moves at all, the prompt neither.
 reset "211 2000 100 800 500 ttys210" "212 2100 600 800 400 ttys211" "213 2900 100 800 400 ttys212"
-mkdir -p "$AGENT_HOME/terminal"
-QUEUE_SID=s212 QUEUE_TTY=ttys212 "$Q" park early             # waits before agent-terminal opens: comes over (normal mode)
-assert_eq "before agent-terminal: the waiting one comes over" "40 70 800 400" "$(win 213)"
-printf 'pid=%s\nself_tty=ttys999\nsid=\ntty=\n' "$$" >"$AGENT_HOME/terminal/open"
+reg s212 ttys212
+"$Q" show s212 >/dev/null
+assert_eq "shown: on the main display" "40 70 800 400" "$(win 213)"
 QUEUE_SID=s210 QUEUE_TTY=ttys210 "$Q" park a
 sleep 1
 QUEUE_SID=s211 QUEUE_TTY=ttys211 "$Q" park b
 assert_eq "agent-terminal open: a waiting window stays in its cell" "2000 100 800 500" "$(win 211)"
 assert_eq "agent-terminal open: the next one too" "2100 600 800 400" "$(win 212)"
-assert_eq "agent-terminal open: one parked before stays where it is (no moves at all)" "40 70 800 400" "$(win 213)"
 QUEUE_SID=s212 QUEUE_TTY=ttys212 "$Q" back
 assert_eq "agent-terminal open: prompted, it goes back to its cell (D43)" "2900 100 800 400" "$(win 213)"
 QUEUE_SID=s210 QUEUE_TTY=ttys210 "$Q" back
 assert_eq "agent-terminal open: nothing came over" "2100 600 800 400" "$(win 212)"
-# agent-terminal closed (a dead pid): no backlog comes over; only a window whose own event fires now
+"$Q" show s212 >/dev/null
 printf 'pid=999999\n' >"$AGENT_HOME/terminal/open"
-QUEUE_SID=s210 QUEUE_TTY=ttys210 "$Q" retile
-assert_eq "closed: a window that waited while agent-terminal was open stays in its cell" "2100 600 800 400" "$(win 212)"
-QUEUE_SID=s211 QUEUE_KIND=idle QUEUE_TTY=ttys211 "$Q" park b
-assert_eq "closed: the idle reminder brings nothing over" "2100 600 800 400" "$(win 212)"
 QUEUE_SID=s211 QUEUE_KIND=done QUEUE_TTY=ttys211 "$Q" park b
-assert_eq "closed: its own done event brings it over" "40 70 800 400" "$(win 212)"
-QUEUE_SID=s211 QUEUE_TTY=ttys211 "$Q" back
-assert_eq "closed: answered, back to its cell" "2100 600 800 400" "$(win 212)"
-rm -f "$AGENT_HOME/terminal/open"
+assert_eq "closed: its own done event brings nothing over" "2100 600 800 400" "$(win 212)"
+QUEUE_SID=s212 QUEUE_TTY=ttys212 "$Q" back
+assert_eq "closed: a shown window stays on the main display when prompted" "40 70 800 400" "$(win 213)"
+assert_eq "closed: and keeps its cell" "2900 100 800 400" "$(cut -d' ' -f1-4 "$QD/parked/213")"
+opened
+QUEUE_SID=s212 QUEUE_TTY=ttys212 "$Q" back
+assert_eq "open again, prompted: back to its cell" "2900 100 800 400" "$(win 213)"
 
 # ---------- dragged by hand (D38): the menu bar app reports a window that changed display ----------
 setcfg queue_park_frame=320,70,690,948
@@ -299,11 +339,12 @@ assert_eq "drag onto monitor 2: joins the grid" "2560 -67 640 540" "$(win 305)"
 assert_eq "drag onto monitor 2: the corners keep their corners" "1920 473 960 540" "$(win 303)"
 # a window the queue parked itself is left alone when the watcher reports its move
 reset "311 1920 -67 960 1080 ttys310" "312 2880 -67 960 1080 ttys311"
-QUEUE_SID=s310 QUEUE_TTY=ttys310 "$Q" park a
+reg s310 ttys310
+"$Q" show s310 >/dev/null
 : >"$FT/calls"
 "$Q" dragged 311 1920 -67 960 1080
 assert_eq "own park reported as a drag: nothing moves" "0" "$(moves)"
-assert_eq "own park reported as a drag: still auto" "auto" "$(cut -d' ' -f6 "$QD/parked/311")"
+assert_eq "own park reported as a drag: still parked" "hand" "$(cut -d' ' -f6 "$QD/parked/311")"
 # show SESSION_ID: as if dragged over
 QUEUE_SID=s311 QUEUE_NAME=b QUEUE_TTY=ttys311 "$Q" retile
 assert_eq "show: done" "Shown" "$("$Q" show s311)"
@@ -311,7 +352,6 @@ assert_eq "show: on the main display" "hand" "$(cut -d' ' -f6 "$QD/parked/312")"
 assert_eq "dragged: bad arguments" "2" "$("$Q" dragged 1 x >/dev/null 2>&1; echo $?)"
 # return SESSION_ID: agent-terminal sent the agent an answer; its window goes back to its cell, also while agent-terminal is
 # open (an action of the owner, not an automatic move)
-printf 'pid=%s\nself_tty=ttys999\nsid=\ntty=\n' "$$" >"$AGENT_HOME/terminal/open"
 cell=$(cut -d' ' -f1-4 "$QD/parked/312")
 assert_eq "return: done" "Returned" "$("$Q" return s311)"
 assert_eq "return: back in its cell" "$cell" "$(win 312)"
@@ -336,11 +376,11 @@ QUEUE_SID=s330 QUEUE_TTY=ttys330 "$Q" back
 # (tiling is on here: the one window on monitor 2 fills it)
 assert_eq "shown, then prompted with agent-terminal open: back on monitor 2" "1920 -67 1920 1080" "$(win 331)"
 assert_no_file "shown, then prompted: no longer parked" "$QD/parked/331"
-rm -f "$AGENT_HOME/terminal/open"
 awk '$1 == 331 { $2 = 500; $3 = 300 } { print }' "$FT/windows" >"$FT/w.tmp" && mv "$FT/w.tmp" "$FT/windows"
-"$Q" dragged 331 1920 -67 960 1080
+"$Q" dragged 331 1920 -67 1920 1080
+assert_eq "dragged to the main display: the park frame" "320 70 690 948" "$(win 331)"
 QUEUE_SID=s330 QUEUE_TTY=ttys330 "$Q" back
-assert_eq "dragged, then prompted with agent-terminal closed: back on monitor 2" "1920 -67 1920 1080" "$(win 331)"
+assert_eq "dragged, then prompted: back on monitor 2" "1920 -67 1920 1080" "$(win 331)"
 assert_no_file "dragged, then prompted: no longer parked" "$QD/parked/331"
 
 # one retile asks Terminal for the screens once (the cache used to be filled inside $(...) and lost)
@@ -370,4 +410,5 @@ kill -9 "$hp"; wait "$hp" 2>/dev/null
 s=$(ms); QUEUE_SID=s401 QUEUE_NAME=m QUEUE_TTY=ttys400 "$Q" retile; took=$(( $(ms) - s ))
 assert_ok "queue lock: a dead holder does not block (took $took ms, the same run without a holder $bare ms)" test $((took - bare)) -lt 1000
 assert_eq "queue lock: the run after a dead holder keeps its change" "ttys400 401 1 m" "$(cat "$TB/s401")"
+rm -f "$AGENT_HOME/terminal/open"
 exit 0

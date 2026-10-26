@@ -1,30 +1,28 @@
 #!/usr/bin/env bash
 # queue.sh park|back|forget [NAME] | retile | tile | dragged ID X Y W H | show SESSION_ID | dismiss SESSION_ID |
 #          return SESSION_ID | next | status
-# The monitor queue: a Terminal window whose session waits for you moves to the main display; when you prompt
-# it again it goes back to where it was. The main display holds only your own work plus what waits for you, so
-# nothing there but your own windows means every agent is busy. `next` (bind it to a hotkey) brings the waiting
-# windows to the front one at a time, oldest first, with the waiting tab selected.
-#   park    a session waits (called by notify.sh for done, input, blocked, ready, idle): remember its tab.
-#           When agent-terminal is closed and the kind is not idle, its window comes over: the window's frame is saved
-#           and it moves to the main display into the park frame (queue_park_frame; all parked windows share it,
-#           a stack). Only the window whose own event fired comes over, never a backlog (D38). A window on the
-#           main display is never moved (it is one of yours). With agent-terminal open nothing moves (D37).
+# The monitor queue: it keeps track of the Terminal tabs whose session waits for you (agent-terminal's inbox) and,
+# while agent-terminal is open, lays out the agent windows on the other display as a grid. A window you bring to
+# the main display (h / show, or a drag) goes back to its cell when you prompt it. `next` (bind it to a hotkey)
+# brings the waiting windows to the front one at a time, oldest first, with the waiting tab selected.
+# agent-terminal closed: no window moves on its own (D80). The hooks keep the records; only the hotkeys (`tile`,
+# `next`) act.
+#   park    a session waits (called by notify.sh for done, input, blocked, ready, idle): remember its tab. No window
+#           comes over to the main display on its own (D37, D80).
 #   back    the session was prompted (session-start.sh touch): forget its tab; when no other tab of a parked
-#           window still waits, move the window back to exactly the saved frame. That includes a window you
-#           brought over by hand (show / h, or a drag) and holds while agent-terminal is open (D43).
+#           window still waits and agent-terminal is open, move the window back to exactly the saved frame (D43).
 #   forget  the session ended (session-start.sh end): forget its tab and, when nothing else waits there, the
 #           parked window too, without moving it.
 #   next    raise the next waiting tab's window wherever it is (after the one shown last, wrapping, oldest
 #           first), select the tab, activate Terminal. Prints one line for a Raycast HUD.
 #   dragged the menu bar app saw window ID change display by hand; X Y W H is its frame before. Onto the main
-#           display: it takes the park frame and its cell stays reserved; it stays until you drag it back or
-#           its session is prompted (D43). Back onto the other display: into exactly its reserved cell. Any
-#           other window put on the other display joins the grid (D38).
+#           display: it takes the park frame (queue_park_frame) and its cell stays reserved; it stays until you
+#           drag it back or its session is prompted (D43). Back onto the other display: into exactly its reserved
+#           cell. Any other window put on the other display joins the grid (D38). Only while agent-terminal is open.
 #   show    put that agent's window on the main display now, as if dragged there.
 #   return  agent-terminal sent that agent an answer: a window the queue moved to the main display (by its event, show
 #           or a drag) goes back to its cell, also while agent-terminal is open; not while another tab of it waits (D42).
-#   retile  a session started (session-start.sh): lay out the grid again, in the background.
+#   retile  a session started (session-start.sh): lay out the grid again, in the background, while agent-terminal is open.
 #   tile    the same now, for a hotkey; prints how many windows moved. `tile auto` is for AgentTerminalBar's checker (the
 #           set of Terminal windows changed while agterm is open, D69): the same, but queue_tile=off keeps it from tiling.
 #   status  the waiting tabs and the parked windows.
@@ -36,7 +34,7 @@
 # Env: QUEUE_TERM (the Terminal helper; default osascript -l JavaScript queue-term.js), QUEUE_TTY (skip the
 #      tty lookup; "none" = no tty), QUEUE_SYNC=1 (no background fork), AGENT_HOME
 set -euo pipefail
-# Tiling (on unless queue_tile=off): every display but the main one is a grid of the Terminal windows that live
+# Tiling (on unless queue_tile=off; automatic only while agent-terminal is open): every display but the main one is a grid of the Terminal windows that live
 # there, parked ones included: a parked window keeps its cell (empty while it is away) and comes back to it, so
 # the grid only changes when a window is opened or closed. 1 fills the display, 2 side by side, 3 in three
 # columns, 4 as 2x2, more in ceil(sqrt(n)) columns (see queue-layout.pl). The main display is never laid out
@@ -62,10 +60,10 @@ case "$(config_get queue_tile on | tr '[:upper:]' '[:lower:]')" in off|0|no|fals
 QDIR="$AGENT_HOME/queue"
 WAITING="$QDIR/waiting"   # one file per waiting tab: <tty>, holding "epoch session_id kind name" (name may hold spaces)
 PARKED="$QDIR/parked"     # one file per moved window: <window id>, holding its old frame, when and how:
-                          # "x y w h epoch auto|hand" (hand: dragged over by you; a drag back or a prompt sends it back)
-COME="$QDIR/come"         # one file per tab whose own park event may bring its window over: <tty>
+                          # "x y w h epoch hand": brought over by you (h / show, or a drag); a drag back or a prompt
+                          # sends it back. Records from before D80 may say auto (it came over on its own event).
 TABS="$QDIR/tabs"         # one file per Terminal session: <session id>, holding "tty window_id tab_index name"
-mkdir -p "$WAITING" "$PARKED" "$TABS" "$COME"
+mkdir -p "$WAITING" "$PARKED" "$TABS"
 
 term() {
   if [ -n "${QUEUE_TERM:-}" ]; then $QUEUE_TERM "$@"; else osascript -l JavaScript "$SELF_DIR/queue-term.js" "$@"; fi
@@ -220,43 +218,14 @@ release_own_window() {
   [ -z "$win" ] || rm -f "$PARKED/${win%% *}"
 }
 
-# reconcile: move windows so the main display holds what it should now, then flush (the grid comes along).
-#   agent-terminal open (D37): nothing comes over or goes back on its own; agent-terminal's list is the inbox. The grid
-#           on the other displays is still laid out (D68), and a move already asked for (send_back) is applied.
-#   agent-terminal closed: the windows with a waiting tab whose own park event asked to come (come/<tty>) are parked;
-#           a window parked that way goes back to its cell once none of its tabs wants it. A window you dragged
-#           over (hand) is not sent back here: only a drag back or a prompt of its session (send_back) moves it.
-# A window that is wanted and not parked is parked; an auto-parked window that is not wanted goes back.
+# reconcile: lay out the grid (flush) and apply a move already asked for (send_back), while agent-terminal is open.
+#   agent-terminal open (D37, D68): nothing comes over or goes back on its own; agent-terminal's list is the inbox.
+#   agent-terminal closed (D80): no window moves at all; the records are still kept, for when it opens.
 reconcile() {
-  local want="" win f id target t
   [ -n "$(main_display)" ] || return 0
   prune
+  single_mode || return 0
   release_own_window
-  if single_mode; then flush >/dev/null; return 0; fi
-  for f in "$COME"/*; do
-    [ -f "$f" ] || continue
-    t=${f##*/}
-    [ -f "$WAITING/$t" ] || { rm -f "$f"; continue; }
-    win=$(window_of "$t")
-    [ -n "$win" ] || continue
-    ! yours "$win" || continue
-    want="$want ${win%% *}"
-  done
-  want=" $want "
-  for f in "$PARKED"/*; do
-    [ -f "$f" ] || continue
-    id=${f##*/}
-    case "$want" in *" $id "*) continue ;; esac
-    [ "$(cut -d' ' -f6 "$f")" != hand ] || continue
-    # shellcheck disable=SC2046
-    relocate "$id" $(cut -d' ' -f1-4 "$f")
-    rm -f "$f"
-    ev queue_back "$(jq -nc --arg w "$id" '{window:$w}')"
-  done
-  for id in $want; do
-    [ ! -f "$PARKED/$id" ] || continue
-    park_window "$id" auto
-  done
   flush >/dev/null
 }
 
@@ -284,7 +253,7 @@ send_back() {
   if others_waiting "$win" "$1"; then echo "Another tab waits"; return 0; fi
   # shellcheck disable=SC2046
   relocate "$id" $(cut -d' ' -f1-4 "$PARKED/$id")
-  rm -f "$PARKED/$id" "$COME/$1"
+  rm -f "$PARKED/$id"
   ev queue_back "$(jq -nc --arg w "$id" --arg h "$2" '{window:$w,how:$h}')"
   echo "Returned"
 }
@@ -368,17 +337,14 @@ case "$CMD" in
     QUEUE_NAME=$NAME_ARG
     case "${QUEUE_SID:-}" in .*|*[!A-Za-z0-9._-]*) QUEUE_SID="" ;; esac
     case "$CMD" in
-      park)   job() { mark_waiting "$TTY"
-                      # its own event, agent-terminal closed, not the idle reminder: this window may come over (D38)
-                      if ! single_mode && [ "${QUEUE_KIND:-done}" != idle ]; then : >"$COME/$TTY"; fi
-                      lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
-      back)   job() { rm -f "$WAITING/$TTY" "$COME/$TTY"; lock || return 0; load_windows; register "$TTY"
-                      send_back "$TTY" prompted >/dev/null; reconcile; } ;;
+      park)   job() { mark_waiting "$TTY"; lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
+      back)   job() { rm -f "$WAITING/$TTY"; lock || return 0; load_windows; register "$TTY"
+                      ! single_mode || send_back "$TTY" prompted >/dev/null; reconcile; } ;;
       retile) job() { lock || return 0; load_windows; register "$TTY"; reconcile; } ;;
       forget) job() { # the session ended: its tab leaves the queue; a parked window with nothing else waiting
                       # stays where it is (it is yours now)
                 local win
-                rm -f "$WAITING/$TTY" "$COME/$TTY"; [ -z "${QUEUE_SID:-}" ] || rm -f "$TABS/$QUEUE_SID"
+                rm -f "$WAITING/$TTY"; [ -z "${QUEUE_SID:-}" ] || rm -f "$TABS/$QUEUE_SID"
                 lock || return 0; load_windows
                 win=$(window_of "$TTY")
                 if [ -n "$win" ] && ! others_waiting "$win" "$TTY"; then rm -f "$PARKED/${win%% *}"; fi
@@ -398,8 +364,7 @@ case "$CMD" in
     flush >/dev/null ;;
   show|dismiss)
     # show SESSION_ID: put that agent's window on the main display now, as if you dragged it there.
-    # dismiss SESSION_ID: take the agent out of the queue without an answer; a window the queue brought over
-    #   goes back to its cell (agent-terminal closed).
+    # dismiss SESSION_ID: take the agent out of the queue without an answer.
     SID_ARG=$NAME_ARG
     if [ -z "$SID_ARG" ]; then echo "usage: queue.sh $CMD SESSION_ID" >&2; exit 2; fi
     tty=$(tty_of_sid "$SID_ARG")
@@ -408,7 +373,7 @@ case "$CMD" in
     load_windows
     if [ "$CMD" = dismiss ]; then
       name=$(cut -d' ' -f4- "$WAITING/$tty" 2>/dev/null || true)
-      rm -f "$WAITING/$tty" "$COME/$tty"
+      rm -f "$WAITING/$tty"
       reconcile
       echo "Dismissed ${name:-$SID_ARG}"
     else
@@ -419,6 +384,7 @@ case "$CMD" in
   dragged)
     # shellcheck disable=SC2154
     case "${2:-}${3:-}${4:-}${5:-}${6:-}" in ''|*[!0-9-]*) echo "usage: queue.sh dragged ID X Y W H" >&2; exit 2 ;; esac
+    single_mode || exit 0   # agent-terminal closed: no window moves (D80)
     lock || exit 0
     load_windows
     do_dragged "$2" "$3" "$4" "$5" "$6" ;;
