@@ -748,9 +748,9 @@ Agent Terminal draws the markdown tables in an agent's messages as tables.
 
    | Value | Tables show as |
    |---|---|
-   | `auto` | Columns under a rule. When a column gets narrower than 10 characters (a small tile or window), each row shows as a small block. This is the default. |
-   | `rule` | Always columns under a rule. |
-   | `grid` | Every cell in a frame. |
+   | `auto` | Every cell in a frame, with lines between the rows. When a column gets narrower than 10 characters (a small tile or window), each row shows as a small block. This is the default. |
+   | `grid` | Always every cell in a frame. |
+   | `rule` | Columns under a rule. |
    | `records` | Always blocks: the first cell on top, then each other column as its header and value. |
 
 3. Save the file.

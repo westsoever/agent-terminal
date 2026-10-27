@@ -8,8 +8,9 @@ import (
 )
 
 // Markdown tables in an agent's message are drawn as tables, not wrapped as text. Styles (keys.toml tables =):
-// grid draws every cell in a frame, rule lines the columns up under a rule, records shows each row as a small
-// block (first cell on top, the others as "header  value" lines), auto is rule while the columns fit, else records.
+// grid draws every cell in a frame with a line between all rows, rule lines the columns up under a rule, records
+// shows each row as a small block (first cell on top, the others as "header  value" lines), auto is grid while the
+// columns fit, else records.
 var tableStyles = []string{"auto", "grid", "rule", "records"}
 
 const minColW = 10
@@ -175,8 +176,8 @@ func renderTable(t table, w int, style string) []string {
 	switch style {
 	case "grid", "rule", "records":
 	default: // auto
-		style = "rule"
-		if squeezed(t, colWidths(t, w-2*(n-1))) {
+		style = "grid"
+		if squeezed(t, colWidths(t, w-1-3*n)) {
 			style = "records"
 		}
 	}
@@ -287,7 +288,7 @@ func ruleTable(t table, w int) []string {
 	return out
 }
 
-// gridTable: every cell framed; a line between rows when any row takes more than one line.
+// gridTable: every cell framed in light lines, the header centered, a line between all rows.
 func gridTable(t table, w int) []string {
 	n := len(t.head)
 	ws := colWidths(t, w-1-3*n) // "│ " + cell + " " per column, and the last "│"
@@ -301,35 +302,33 @@ func gridTable(t table, w int) []string {
 			b.WriteString(strings.Repeat("─", cw+2))
 		}
 		b.WriteString(r)
-		return row(w, s(b.String(), cDark))
+		return row(w, s(b.String(), cGrey))
 	}
-	line := func(cells [][]string, k int, st lipgloss.Style) string {
+	line := func(cells [][]string, k int, st lipgloss.Style, mid bool) string {
 		var segs []seg
 		for i := range cells {
-			segs = append(segs, s("│ ", cDark), s(align(cells[i][k], ws[i], t.right[i]), st), s(" ", cPlain))
+			c := align(cells[i][k], ws[i], t.right[i])
+			if mid {
+				c = padTo(strings.Repeat(" ", max((ws[i]-width(cells[i][k]))/2, 0))+cells[i][k], ws[i])
+			}
+			segs = append(segs, s("│ ", cGrey), s(c, st), s(" ", cPlain))
 		}
-		segs = append(segs, s("│", cDark))
+		segs = append(segs, s("│", cGrey))
 		return row(w, segs...)
 	}
 	out := []string{edge("┌", "┬", "┐")}
 	hc := cellLines(t.head, ws)
 	for k := range hc[0] {
-		out = append(out, line(hc, k, cWhite))
+		out = append(out, line(hc, k, cWhite, true))
 	}
 	out = append(out, edge("├", "┼", "┤"))
-	var body [][][]string
-	tall := false
-	for _, r := range t.rows {
-		c := cellLines(r, ws)
-		tall = tall || len(c[0]) > 1
-		body = append(body, c)
-	}
-	for j, c := range body {
-		if tall && j > 0 {
+	for j, r := range t.rows {
+		if j > 0 {
 			out = append(out, edge("├", "┼", "┤"))
 		}
+		c := cellLines(r, ws)
 		for k := range c[0] {
-			out = append(out, line(c, k, cText))
+			out = append(out, line(c, k, cText, false))
 		}
 	}
 	return append(out, edge("└", "┴", "┘"))

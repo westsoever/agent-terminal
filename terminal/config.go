@@ -57,8 +57,8 @@ const defaultConfig = `# Agent Terminal: keys and pre-written replies.
 # How a file an agent mentioned is opened (gets the path as its only argument).
 open_cmd = "open"
 
-# How tables in an agent's messages are drawn: "auto" (columns under a rule; each row as a small block when the
-# columns would get too narrow), "rule", "grid" (every cell framed) or "records" (always blocks).
+# How tables in an agent's messages are drawn: "auto" (every cell framed with lines; each row as a small block
+# when the columns would get too narrow), "grid" (always framed), "rule" (columns under a rule) or "records" (always blocks).
 tables = "auto"
 
 # /NW starts a background agent. These are its defaults; words after /NW override them, e.g. /NW soii sonnet high.
