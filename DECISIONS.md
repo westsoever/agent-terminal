@@ -2,6 +2,16 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D83 (2026-10-28): `k` types into a Ghostty terminal (amends D82)
+
+**Asked (owner):** "I cannot interact with ghostty terminals by clicking k on the session here … please enable that".
+
+**Findings:** Ghostty 1.4 scripts `input text … to <terminal>` (a paste: bracketed when the app asked for it, as Claude Code does) and `send key <name> to <terminal>`, both without focus. Key names are W3C codes in camelCase: `enter`, `escape`, `tab`, `backspace`, `arrowUp`, `digit1`. The dictionary has no way to read a terminal's text.
+
+**Built:** `send.js tabs` lists every Ghostty tty as `tty 0 0 ghostty`; such an agent gets `Ghostty` (not `InTerminal`), and `canSend` takes it, so `k`, `/ALL` and the number/esc keys reach it. `send.js text` pastes then presses Enter; `keys` maps the same names as for Terminal.
+
+**Not built:** anything that reads the screen: menus in a Ghostty agent are not seen (no WAITING from a menu, no `answer`), and a typed reply is not checked for submission (Terminal retries Enter until the box is empty). BG still moves Terminal sessions only.
+
 ## D82 (2026-10-27): Ghostty windows are focused, moved and tiled like Terminal windows (amends D80)
 
 **Decision (owner):** "make the agent-terminal also focus and resize/order ghostty terminals".

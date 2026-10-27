@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+// A Ghostty terminal in the tabs list is marked ghostty, with no window or tab.
+func TestParseTabs(t *testing.T) {
+	m := parseTabs("ttys001 395 2\nttys010 0 0 ghostty\nerror: x\n")
+	if m["ttys001"] != (tabPos{395, 2, false}) || m["ttys010"] != (tabPos{0, 0, true}) || len(m) != 2 {
+		t.Errorf("tabs = %v", m)
+	}
+}
+
 // A hung command ends at its limit, also when a child it left behind keeps the output pipe open.
 func TestRunForTimeout(t *testing.T) {
 	start := time.Now()

@@ -657,7 +657,7 @@ func (m model) agentPanel(w, h int) []string {
 		tail = append(tail, el...)
 	case a.Bg:
 		tail = append(tail, row(in, s("> ", cOrange), s(m.cfg.Keys.Reply+" to write · "+m.cfg.Keys.Goto+" opens its screen (ctrl+z there closes it) · /STOP stops it", cDark)))
-	case !a.InTerminal:
+	case !a.canSend():
 		tail = append(tail, row(in, s("not a Terminal tab: look only", cDark)))
 	default:
 		tail = append(tail, row(in, s("> ", cOrange), s(m.cfg.Keys.Reply+" to write", cDark)))

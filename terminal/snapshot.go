@@ -24,6 +24,7 @@ type Agent struct {
 	Since                  time.Time
 	TTY                    string // ttys005, '' when none
 	InTerminal             bool   // the tty is a Terminal.app tab, so the terminal can type into it
+	Ghostty                bool   // the tty is a Ghostty terminal: typed into through Ghostty, its screen can't be read
 	Transcript             string
 	CtxPct                 string
 	Asking                 bool   // its screen shows a menu now (a question, an approval): it waits for the owner
@@ -37,8 +38,8 @@ type Agent struct {
 	CLI                    string // the CLI when it is not Claude Code ("opencode", see opencode.go), else ''
 }
 
-// canSend: agterm can type into it: a Terminal tab, or a background session.
-func (a Agent) canSend() bool { return a.InTerminal || a.Bg }
+// canSend: agterm can type into it: a Terminal tab, a Ghostty terminal, or a background session.
+func (a Agent) canSend() bool { return a.InTerminal || a.Ghostty || a.Bg }
 
 // Group is where an agent sits in the queue.
 func (a Agent) Group() int {
@@ -175,7 +176,8 @@ func loadAgents(tabs map[string]tabPos, groups [][]string) []Agent {
 	for i := range out {
 		out[i].TTY = ttys[out[i].PID]
 		pos, ok := tabs[out[i].TTY]
-		out[i].InTerminal = !out[i].Bg && out[i].TTY != "" && (tabs == nil || ok) // a background session's pty is the daemon's
+		out[i].InTerminal = !out[i].Bg && out[i].TTY != "" && (tabs == nil || ok) && !pos.ghostty // a background session's pty is the daemon's
+		out[i].Ghostty = !out[i].Bg && ok && pos.ghostty
 		out[i].Win, out[i].Tab = pos.win, pos.tab
 	}
 	linkFamilies(out, groups)
