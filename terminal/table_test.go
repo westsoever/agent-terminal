@@ -68,15 +68,19 @@ func TestTableStyles(t *testing.T) {
 	if rec[0] != "▸ a" || !strings.HasPrefix(rec[1], "  Note  a long note") {
 		t.Errorf("records:\n%s", strings.Join(rec, "\n"))
 	}
-	// auto: rule while the columns fit, records once one would be squeezed below minColW
-	if a := plainRows(renderTable(tb, 80, "auto")); a[0] != rule[0] {
-		t.Errorf("auto at 80 is not rule: %q", a[0])
+	// grid: a line between every row, the header centered
+	if g := strings.Join(grid, "\n"); strings.Count(g, "├") != 2 || !strings.Contains(grid[1], " Name ") {
+		t.Errorf("grid lines:\n%s", g)
+	}
+	// auto: grid while the columns fit, records once one would be squeezed below minColW
+	if a := plainRows(renderTable(tb, 80, "auto")); a[0] != grid[0] {
+		t.Errorf("auto at 80 is not grid: %q", a[0])
 	}
 	if a := plainRows(renderTable(tb, 20, "auto")); a[0] != "▸ a" {
 		t.Errorf("auto at 20 is not records: %q", a[0])
 	}
 	// a column that is narrow by itself (N) doesn't make auto switch
-	if squeezed(tb, colWidths(tb, 76)) {
+	if squeezed(tb, colWidths(tb, 80-1-3*3)) {
 		t.Error("narrow N column counted as squeezed")
 	}
 }
