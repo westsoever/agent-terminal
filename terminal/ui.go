@@ -1022,8 +1022,8 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.openShort(*m.sel())
 	case ks == K.Here && (m.view == vDesk || m.view == vWall):
 		a := m.sel()
-		if a == nil || a.TTY == "" || !a.InTerminal {
-			m.setErr("no Terminal window for this agent")
+		if a == nil || a.TTY == "" { // Terminal or Ghostty: the queue finds the window by tty; others fail there
+			m.setErr("no terminal window for this agent")
 			return m, nil
 		}
 		sid, tty, name := a.SID, a.TTY, a.Name

@@ -256,6 +256,15 @@ assert_eq "tile auto: agterm's window left no empty cell, left half" "1920 -67 9
 assert_eq "tile auto: right half" "2880 -67 960 1080" "$(win 392)"
 assert_eq "tile auto: agterm's window untouched" "100 100 800 600" "$(win 390)"
 assert_no_file "tile auto: agterm's window is not parked" "$QD/parked/390"
+# a Ghostty window has an id far above any Terminal window number (queue-term.js); it tiles beside a Terminal one
+rm -f "$AGENT_HOME/terminal/open"
+reset "395 2000 30 700 700 ttys395" "52767353792 2800 30 700 700 ttys396"
+assert_eq "ghostty: a Ghostty and a Terminal window tile together" "Tiled: 2 windows moved" "$("$Q" tile)"
+assert_eq "ghostty: the Terminal window, left half" "1920 -67 960 1080" "$(win 395)"
+assert_eq "ghostty: the Ghostty window, right half" "2880 -67 960 1080" "$(win 52767353792)"
+QUEUE_SID=g1 QUEUE_KIND=input QUEUE_TTY=ttys396 "$Q" park g
+: >"$FT/calls"; "$Q" next >/dev/null
+assert_eq "ghostty: next raises the Ghostty window by its id and tty" "raise 52767353792 ttys396" "$(grep '^raise' "$FT/calls")"
 reset "393 2000 30 700 700 ttys393" "394 2800 30 700 700 ttys394"
 setcfg queue_tile=off
 assert_eq "tile auto: queue_tile=off moves nothing" "Tiled: 0 windows moved" "$("$Q" tile auto)"

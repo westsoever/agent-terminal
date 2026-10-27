@@ -184,7 +184,7 @@ Agent Terminal is one screen for all the Claude Code agents on this Mac. You ope
 
 Agent Terminal does not have its own AI. It does not decide for you. The only exception is the `AI` step of `FIND` (section 6.19). It runs when you push `s`, or when the other steps find nothing. It reads the session records of the agents. It writes the text that you select into the Terminal window of the agent. The agent then does the work.
 
-Agent Terminal can only send text to agents in Terminal.app and to background agents. It shows agents in Claude Desktop, VS Code or Cursor, but you cannot send text to them.
+Agent Terminal can only send text to agents in Terminal.app and to background agents. For an agent in Ghostty it can go to the window (`g`), bring it here (`h`), and tile it with the other windows, but not send text. It shows agents in Claude Desktop, VS Code or Cursor, but you cannot send text to them.
 
 ## 3. Install and start
 
