@@ -48,6 +48,9 @@ func osc8(url, text string) string {
 // renderSeg renders sg for display as shown: sg.t, or its prefix cut with a closing … (cut). The URLs in sg.t
 // become links; one that is cut still points at the whole URL, and carries the … with it.
 func renderSeg(sg seg, shown string, cut bool) string {
+	if sg.link != "" {
+		return osc8(sg.link, sg.st.Render(shown))
+	}
 	spans := urlSpans(sg.t)
 	if len(spans) == 0 {
 		return sg.st.Render(shown)

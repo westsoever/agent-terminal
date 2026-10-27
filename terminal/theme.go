@@ -44,14 +44,14 @@ var themes = []theme{
 // palette is everything but the accent: the greys of render.go, the band behind the owner's prompts, the text on
 // a selected row and the usage colours.
 type palette struct {
-	white, grey, text, dark, band, onAccent, useLow, useMid, useHigh lipgloss.Color
+	white, grey, text, dark, band, onAccent, useLow, useMid, useHigh, link lipgloss.Color
 }
 
 // The dark palette is the terminal.shop one agterm always had. The light one keeps the order (white is the
 // strongest, dark the faintest) at 3.9:1 or more against #eeeeee for every text color.
 var (
-	darkPalette  = palette{"231", "248", "253", "243", "236", "16", "71", "178", "196"}
-	lightPalette = palette{"16", "240", "235", "243", "253", "231", "28", "94", "160"}
+	darkPalette  = palette{"231", "248", "253", "243", "236", "16", "71", "178", "196", "111"}
+	lightPalette = palette{"16", "240", "235", "243", "253", "231", "28", "94", "160", "25"}
 )
 
 // bgMode is the "background" line of keys.toml: "dark", "light", or "auto" (the terminal's answer at start).
@@ -126,6 +126,7 @@ func applyTheme(id string) {
 	cGrey = lipgloss.NewStyle().Foreground(p.grey)
 	cText = lipgloss.NewStyle().Foreground(p.text)
 	cDark = lipgloss.NewStyle().Foreground(p.dark)
+	cLink = lipgloss.NewStyle().Foreground(p.link)
 	promptBg = p.band
 	cUseLow = lipgloss.NewStyle().Foreground(p.useLow)
 	cUseMid = lipgloss.NewStyle().Foreground(p.useMid)

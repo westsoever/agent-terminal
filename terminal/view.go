@@ -679,7 +679,9 @@ func (m model) agentPanel(w, h int) []string {
 	if avail < 1 {
 		avail = 1
 	}
+	linkBase = a.Cwd
 	msg := append(chatLines(l, in, m.cfg.Tables), m.echoLines(*a, in)...)
+	linkBase = ""
 	// bottom-anchored: off lines back from the newest; the scroll keys move off, this drawing sets its limits
 	most := max(0, len(msg)-avail)
 	off := 0
@@ -793,7 +795,9 @@ func (m model) tile(i, w, h int) []string {
 	if text == "" {
 		text = "(no message yet)"
 	}
+	linkBase = a.Cwd
 	lines := textRows(text, in, m.cfg.Tables)
+	linkBase = ""
 	avail := h - 3
 	if len(l.Options) > 0 {
 		avail--

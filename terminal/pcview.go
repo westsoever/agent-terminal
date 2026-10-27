@@ -317,7 +317,7 @@ func (m model) pcSpecDetail(a *PCAsk, in int) []string {
 	}
 	para := func(text string, st seg) {
 		for _, l := range collapse(wrap(plain(text), in)) {
-			out = append(out, row(in, seg{l, st.st}))
+			out = append(out, row(in, s(l, st.st)))
 		}
 	}
 	switch sp.Kind {
