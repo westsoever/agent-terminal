@@ -2,6 +2,16 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D80 (2026-10-22): a REMOTE session shows its whole conversation, read with this Mac's trusted-device token
+
+**Asked (owner):** "update the REMOTE sessions feature by allowing me to see the chat history of the session (scroll up and down to see the full chat of the selected session) instead of only \"The last thing it said\" message".
+
+**Findings:** D58's 403 (`elevated session requires a trusted device`) still comes back with the login token alone. Claude Code 2.1.308 enrolls a Mac as a trusted device on `/login` and keeps the proof as `trustedDeviceToken` in the same keychain item as the login (`Claude Code-credentials`); it sends it as `X-Trusted-Device-Token`. This Mac is enrolled: with that header `GET /v1/sessions/<id>/events?beta=true` answers 200. Events come oldest first, `limit` (1000 is taken) and `after_id` page through them (`has_more`, `last_id`). Messages are `user` / `assistant` events with the transcript's `message.content`; Claude Code's own entries carry `is_meta`. Undocumented, like the list (D58).
+
+**Built:** `remote.go` `remoteEventsGet`, `loadRemoteChat`, `parseEvents`. The selected REMOTE session's events are read page by page; after the first read only what came after the last event is asked for, every 5 s while it stays selected (30 s after a failed read). The owner's prompts and the session's texts are kept (`promptText` filters the machinery, as for a local transcript); thinking, tool calls and tool output are left out. The panel draws them with `chatLines` and scrolls like an agent's (`panelBody`, the shared `m.scroll`). A failed read keeps what was read and shows the reason in orange; with nothing read the panel shows the `post_turn_summary` as before. The device token goes to api.anthropic.com only and is never logged or shown. Checked live on 15 sessions: 203 turns render in 37 ms; the longest first read took 3 s. Test: `TestRemoteChat`.
+
+**Not built:** typing into the session without the CLI (sending stays `claude -p … --cloud`); a cap on how many turns are kept.
+
 ## D79 (2026-10-21): esc stops a working agent; a sent message shows at once, queued until Claude Code takes it; ↑ brings back what was sent
 
 **Asked (owner, 2026-10-20):** four things still sent the owner to Terminal: "If I'm in the terminal and hit Esc, it interrupts the current session and i can prompt it differently. If I hit up while the prompt is loading, I can edit what I've just sent and on enter, it resends it again. I can queue prompts, without interrupting the session. The text shows up instantly, and there's no delay between Enter and seeing it in the chat." The open question (daily note 2026-10-20) was whether plain `Esc` or a separate key like `.` interrupts.

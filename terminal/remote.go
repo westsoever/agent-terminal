@@ -2,9 +2,9 @@ package main
 
 // The REMOTE section of the desk: Claude Code sessions that run on another machine (Remote Control) and are
 // connected to the owner's account now, read from the same list claude.ai/code shows, with the owner's own Claude
-// login. Only active sessions on other machines are listed: connected, not archived, and not a window of this Mac. Reading a session's messages needs a
-// trusted device and is refused for this login, so agterm shows its state and sends a message with the CLI's
-// own path (claude -p ... --cloud <id>); the reply is read on claude.ai/code (enter).
+// login. Only active sessions on other machines are listed: connected, not archived, and not a window of this Mac.
+// The selected session's conversation is read with this Mac's trusted-device token (D80); a message goes out with
+// the CLI's own path (claude -p ... --cloud <id>).
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,31 +43,34 @@ type RemoteState struct {
 type remoteMsg RemoteState
 
 const (
-	remoteTimeout = 15 * time.Second
-	remoteEvery   = 30 * time.Second
-	remoteSendMax = 120 * time.Second
-	remoteAPI     = "https://api.anthropic.com/v1/sessions?beta=true&limit=100"
+	remoteTimeout   = 15 * time.Second
+	remoteEvery     = 30 * time.Second
+	remoteSendMax   = 120 * time.Second
+	remoteAPI       = "https://api.anthropic.com/v1/sessions?beta=true&limit=100"
+	remoteChatMax   = 60 * time.Second // one read of a conversation, all its pages
+	remoteChatEvery = 5 * time.Second  // the selected session's new messages
 )
 
-// remoteCreds: the owner's Claude login (the keychain item Claude Code keeps) and organisation. The token goes to
-// api.anthropic.com only. A variable so tests need no keychain.
-var remoteCreds = func() (token, org string, err error) {
+// remoteCreds: the owner's Claude login (the keychain item Claude Code keeps), this Mac's trusted-device token from
+// the same item ("" when /login never enrolled it) and the organisation. Both tokens go to api.anthropic.com only.
+var remoteCreds = func() (token, device, org string, err error) {
 	out, err := runFor(5*time.Second, false, "security", "find-generic-password", "-s", "Claude Code-credentials", "-w")
 	if err != nil {
-		return "", "", fmt.Errorf("no Claude login in the keychain")
+		return "", "", "", fmt.Errorf("no Claude login in the keychain")
 	}
 	var c struct {
 		O struct {
 			Token string `json:"accessToken"`
 		} `json:"claudeAiOauth"`
+		Device string `json:"trustedDeviceToken"`
 	}
 	if json.Unmarshal(out, &c) != nil || c.O.Token == "" {
-		return "", "", fmt.Errorf("no Claude login in the keychain")
+		return "", "", "", fmt.Errorf("no Claude login in the keychain")
 	}
 	home, _ := os.UserHomeDir()
 	b, err := os.ReadFile(filepath.Join(home, ".claude.json"))
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	var cfg struct {
 		A struct {
@@ -74,32 +78,151 @@ var remoteCreds = func() (token, org string, err error) {
 		} `json:"oauthAccount"`
 	}
 	if json.Unmarshal(b, &cfg) != nil || cfg.A.Org == "" {
-		return "", "", fmt.Errorf("no organisation in ~/.claude.json")
+		return "", "", "", fmt.Errorf("no organisation in ~/.claude.json")
 	}
-	return c.O.Token, cfg.A.Org, nil
+	return c.O.Token, c.Device, cfg.A.Org, nil
 }
 
 // remoteGet reads the session list; a variable so tests can hand back their own JSON.
-var remoteGet = func(ctx context.Context) ([]byte, error) {
-	token, org, err := remoteCreds()
+var remoteGet = func(ctx context.Context) ([]byte, error) { return remoteFetch(ctx, remoteAPI, 8<<20) }
+
+// remoteEventsGet reads one page of a session's events after the event id after ("" from the start), oldest
+// first; a variable so tests can hand back their own pages.
+var remoteEventsGet = func(ctx context.Context, id, after string) ([]byte, error) {
+	u := "https://api.anthropic.com/v1/sessions/" + url.PathEscape(id) + "/events?beta=true&limit=1000"
+	if after != "" {
+		u += "&after_id=" + url.QueryEscape(after)
+	}
+	return remoteFetch(ctx, u, 32<<20)
+}
+
+// remoteFetch: a GET to the sessions API with the owner's login, and this Mac's trusted-device token when it has one
+// (reading events needs it).
+func remoteFetch(ctx context.Context, u string, most int64) ([]byte, error) {
+	token, device, org, err := remoteCreds()
 	if err != nil {
 		return nil, err
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, remoteAPI, nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("anthropic-beta", "ccr-byoc-2025-07-29")
 	req.Header.Set("x-organization-uuid", org)
+	if device != "" {
+		req.Header.Set("X-Trusted-Device-Token", device)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, most))
 	if resp.StatusCode != http.StatusOK {
+		var e struct {
+			E struct {
+				Msg string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(b, &e) == nil && e.E.Msg != "" {
+			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, e.E.Msg)
+		}
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return b, nil
+}
+
+// RemoteChat is a remote session's conversation as far as it was read: the owner's prompts and its texts, oldest
+// first, like a local agent's Chat.
+type RemoteChat struct {
+	Turns []Turn
+	Last  string    // the last event read: the next read asks for what came after it
+	At    time.Time // when it was last read
+	Err   string    // the last read failed; Turns are what was read before
+}
+
+type remoteChatMsg struct {
+	id string
+	c  RemoteChat
+}
+
+// loadRemoteChat reads the events after c.Last, page by page, and adds their messages to c.
+func loadRemoteChat(id string, c RemoteChat) RemoteChat {
+	ctx, cancel := context.WithTimeout(context.Background(), remoteChatMax)
+	defer cancel()
+	c.At, c.Err = time.Now(), ""
+	for range 100 { // shortcut: at most 100 pages of 1000 events per read; the next read, 5 s later, goes on after them
+		b, err := remoteEventsGet(ctx, id, c.Last)
+		if err != nil {
+			c.Err = "its messages: " + strings.Join(strings.Fields(err.Error()), " ")
+			return c
+		}
+		turns, last, more, err := parseEvents(b)
+		if err != nil {
+			c.Err = "its messages: " + err.Error()
+			return c
+		}
+		c.Turns = append(c.Turns, turns...)
+		if last != "" {
+			c.Last = last
+		}
+		if !more || last == "" {
+			break
+		}
+	}
+	return c
+}
+
+// parseEvents: the messages of one page of events (the owner's prompts and the session's texts; tool calls, tool
+// output and Claude Code's own entries left out), the id of its last event and whether more follow.
+func parseEvents(b []byte) (turns []Turn, last string, more bool, err error) {
+	var raw struct {
+		Data []struct {
+			UUID    string    `json:"uuid"`
+			Type    string    `json:"type"`
+			IsMeta  bool      `json:"is_meta"`
+			At      time.Time `json:"created_at"`
+			Message struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+		} `json:"data"`
+		More   bool   `json:"has_more"`
+		LastID string `json:"last_id"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return nil, "", false, err
+	}
+	for _, e := range raw.Data {
+		last = e.UUID
+		if e.IsMeta || (e.Type != "user" && e.Type != "assistant") {
+			continue
+		}
+		var p string // a plain-string prompt
+		if e.Type == "user" && json.Unmarshal(e.Message.Content, &p) == nil {
+			if t := promptText(p); t != "" {
+				turns = append(turns, Turn{User: true, Text: t, At: e.At})
+			}
+			continue
+		}
+		var blocks []block
+		if json.Unmarshal(e.Message.Content, &blocks) != nil {
+			continue
+		}
+		for _, bl := range blocks {
+			switch {
+			case bl.Type != "text" || strings.TrimSpace(bl.Text) == "":
+			case e.Type == "assistant":
+				turns = append(turns, Turn{Text: strings.TrimSpace(bl.Text), At: e.At})
+			default:
+				if t := promptText(bl.Text); t != "" {
+					turns = append(turns, Turn{User: true, Text: t, At: e.At})
+				}
+			}
+		}
+	}
+	if raw.LastID != "" {
+		last = raw.LastID
+	}
+	return turns, last, raw.More, nil
 }
 
 // loadRemote: the active remote sessions, the last updated first.

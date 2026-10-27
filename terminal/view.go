@@ -350,8 +350,8 @@ func (m model) remoteRow(in int, r RemoteSession) string {
 	return row(in, s(" ◇ ", cPlain), s(padTo(name, nameW), ns), s(" "+padTo(label, stateW), st), s(" "+fmt.Sprintf("%*s", ageW, age(r.Updated)), cDark))
 }
 
-// remotePanel: the selected REMOTE session. Its messages cannot be read from here (the account's login is not a
-// trusted device for them), so the panel shows its state and what it last said it did; enter reads it on claude.ai.
+// remotePanel: the selected REMOTE session: its state, then its conversation (read with this Mac's trusted-device
+// token, D80), scrolled like an agent's; what it last said it did while none is read.
 func (m model) remotePanel(r RemoteSession, w, h int) []string {
 	in := w - 4
 	title := []seg{s(r.Title, cWhite), s(" · remote", cGrey)}
@@ -361,35 +361,42 @@ func (m model) remotePanel(r RemoteSession, w, h int) []string {
 	if r.CtxPct != "" {
 		title = append(title, s(" · ctx "+r.CtxPct, cGrey))
 	}
-	var body []string
-	add := func(rs ...string) {
-		for _, x := range rs {
-			body = append(body, " "+x+" ")
-		}
-	}
 	st := cGrey
 	if r.needsYou() {
 		st = cOrange
 	}
-	add(row(in, s(r.Label(), st), s(" · "+age(r.Updated)+" ago", cDark)))
-	if r.Summary != "" {
-		add(row(in), row(in, s("LAST THING IT SAID IT DID", cDark)))
+	msg := []string{row(in, s(r.Label(), st), s(" · "+age(r.Updated)+" ago", cDark)), row(in)}
+	c, read := m.remoteChat[r.ID]
+	switch {
+	case len(c.Turns) > 0 || (read && c.Err == ""):
+		msg = append(msg, chatLines(Last{Chat: c.Turns, Text: r.Summary}, in, m.cfg.Tables)...)
+	case r.Summary != "":
+		msg = append(msg, row(in, s("LAST THING IT SAID IT DID", cDark)))
 		for _, l := range wrap(r.Summary, in) {
-			add(row(in, s(l, cText)))
+			msg = append(msg, row(in, s(l, cText)))
 		}
 	}
-	add(row(in))
-	for _, l := range wrap("It runs on another machine: agterm shows its state and sends it messages, but cannot show its messages. "+
-		m.cfg.Keys.Reply+" writes a message to it · enter opens it on claude.ai/code to read the reply", in) {
-		add(row(in, s(l, cDark)))
+	var tail []string
+	switch {
+	case c.Err != "":
+		for _, l := range wrap(c.Err, in) {
+			tail = append(tail, row(in, s(l, cOrange)))
+		}
+	case !read:
+		tail = append(tail, row(in, s("reading its messages…", cDark)))
 	}
+	K := m.cfg.Keys
+	tail = append(tail, "", row(in, s("─ reply ", cDark), s(strings.Repeat("─", max(0, in-8)), cDark)))
 	if m.mode == mTyping && m.ed.target == r.ID {
-		body = append(body, "")
-		for _, l := range m.ed.lines(in) {
-			body = append(body, " "+l+" ")
+		tail = append(tail, m.ed.lines(in)...)
+	} else {
+		scroll := K.Older + "/" + K.Newer
+		if K.Older == "up" && K.Newer == "down" {
+			scroll = "↑↓"
 		}
+		tail = append(tail, row(in, s("> ", cOrange), s(K.Reply+" to write · "+scroll+" scroll · enter opens it on claude.ai/code", cDark)))
 	}
-	return box(w, h, title, cDark, body)
+	return box(w, h, title, cDark, m.panelBody(m.scroll, r.ID, false, msg, tail, in, h))
 }
 
 // sectionOf: the queue section an agent belongs to by itself: 0 INPUT, 1 WAITING, 2 WORKING, 3 IDLE, 4 DONE.
@@ -1431,6 +1438,10 @@ func (m model) helpLines() []string {
 		row2("HELP", "this page"),
 		row2("QUIT", "stop agterm (ctrl+c also stops it)"),
 		"",
+		"## New on 2026-10-22",
+		row2("REMOTE chat", "the selected REMOTE session shows its whole conversation, read with this Mac's trusted device (Claude Code's /login enrolls it)\n"+
+			"new messages come in every 5 s · "+k(K.Older)+" / "+k(K.Newer)+", pgup / pgdown, home / end scroll"),
+		"",
 		"## New on 2026-10-21",
 		row2("esc", "the selected agent works: stop its turn, as esc in Claude Code (a zoom or panel closes first; a menu gets none)\n"+
 			"in the box too: the box stays open with your text · a queued message runs as soon as the turn stops · a second esc within 5 s closes the box"),
@@ -1442,7 +1453,7 @@ func (m model) helpLines() []string {
 		row2("REMOTE", "below DONE: the connected sessions on other machines (Remote Control), active ones only, read every 30 s\n"+
 			"this Mac's own windows are not listed: they are agents above\n"+
 			k(K.Next)+" / "+k(K.Prev)+" walk into it · "+K.Reply+" writes to the selected one (sent with claude -p --cloud)\n"+
-			"enter opens it on claude.ai/code to read the reply: its messages can't be read here"),
+			"enter opens it on claude.ai/code"),
 		row2("NW", "never guesses its folder: with none written it uses the selected agent's (an error when none is selected, NW ~ for home)\n"+
 			"NW ./x and NW .. start at that folder; NW mis fits ~/bbq and the agents, and lists the folders if it fits several\n"+
 			"the box shows the folder, its branch and where it came from; an orange ⚠ marks home, a non-repo and a worktree"),

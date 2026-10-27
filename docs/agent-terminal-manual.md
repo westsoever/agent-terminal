@@ -258,11 +258,12 @@ Below `DONE` is a sixth part, `REMOTE`. It lists your Claude Code sessions that 
 | `asks` | The session waits for an answer from you (orange). |
 | `idle` | The session does not do work. |
 
-Push `l` or `j` to go from the agents into `REMOTE`. The right side shows the model, the context used, and what the session last said it did.
+Push `l` or `j` to go from the agents into `REMOTE`. The right side shows the model, the context used, and the conversation of the session: your prompts and its replies, from the start. Tool calls and tool output are not shown. Agent Terminal reads new messages every 5 seconds while the session is selected.
 
-- Push `k` to write a message. Agent Terminal sends it with `claude -p "…" --cloud <session id>`. The status line shows `sending…`, then `✓ sent` or the reason it did not go.
-- Push `Enter` to open the session on `claude.ai/code` in your browser. Read the reply there.
-- Agent Terminal cannot show the messages of a remote session. Your account refuses that read on this Mac (`elevated session requires a trusted device`). It shows the state and sends messages only.
+- Push `↑` and `↓` (or `PgUp`, `PgDn`, `Home`, `End`) to scroll through the conversation, as for an agent.
+- Push `k` to write a message. Agent Terminal sends it with `claude -p "…" --cloud <session id>`. The status line shows `sending…`, then `✓ sent` or the reason it did not go. The reply shows in the conversation.
+- Push `Enter` to open the session on `claude.ai/code` in your browser.
+- To read the conversation, this Mac must be a trusted device for your account. Claude Code enrolls it when you run `/login` in Claude Code (`claude auth login` does not). If the read fails, the panel shows the reason in orange, and what the session last said it did.
 
 Agents in the same Terminal window (its tabs, or macOS window tabs) are one family. The agent in the first tab is the lead. Its sub-sessions show below it with `└`, and the lead shows `+2` for two sub-sessions. A family stays together. It shows in the group of its most urgent agent: when a sub-session waits, the family is in `WAITING`.
 
