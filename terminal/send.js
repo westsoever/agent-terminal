@@ -3,7 +3,8 @@
 //   text TTY TEXT        type TEXT into the tab (Terminal scripting, no focus change), then press Enter; a TEXT
 //                        with line breaks goes in as one bracketed paste
 //   keys TTY KEY...      press keys: 0-9, enter, esc, tab, up, down, left, right, backspace; pause waits 0.35 s
-//   raise TTY            select the tab, bring its window to the front and activate Terminal (the `g` key)
+//   raise TTY            select the tab, bring its window to the front and activate Terminal (the `g` key); a tty that
+//                        belongs to a Ghostty terminal is focused there (Ghostty has no other command here)
 //   ttys                 every Terminal tab's tty, one per line (which sessions can be typed into)
 //   tabs                 every Terminal tab as "tty window_id tab_index" (1-based), one per line
 //   tabgroups            macOS window tabs (Window > Merge All Windows: each tab is its own window): one line per
@@ -88,8 +89,22 @@ function press(t, win, tab, keys) {
   return 'ok';
 }
 
+function ghosttyFocus(tty) { // focus the Ghostty terminal with that tty; false when there is none
+  const g = Application('Ghostty');
+  if (!g.running()) return false;
+  for (const w of g.windows()) {
+    for (const tab of w.tabs()) {
+      for (const tm of tab.terminals()) {
+        if (String(tm.tty()).replace('/dev/', '') === tty) { g.focus(tm); g.activate(); return true; }
+      }
+    }
+  }
+  return false;
+}
+
 function run(argv) {
   const [cmd, tty] = argv;
+  if (cmd === 'raise' && ghosttyFocus(tty || '')) return 'ok';
   const t = Application('Terminal');
   if (!t.running()) return cmd === 'closeidle' || cmd === 'closetab' ? 'ok' : cmd === 'ttys' || cmd === 'tabs' || cmd === 'tabgroups' ? '' : 'error: Terminal not running';
   if (cmd === 'tabgroups') {

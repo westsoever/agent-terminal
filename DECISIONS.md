@@ -2,6 +2,16 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D82 (2026-10-27): Ghostty windows are focused, moved and tiled like Terminal windows (amends D80)
+
+**Decision (owner):** "make the agent-terminal also focus and resize/order ghostty terminals".
+
+**Findings:** Ghostty 1.4 scripts through AppleScript (`Ghostty.sdef`): a terminal has a `tty`, and `focus` fronts its window. It has no window frame, so the frame is read and set through System Events (AXPosition, AXSize).
+
+**Built:** `queue-term.js` lists Ghostty windows beside Terminal ones, and `move` and `raise` handle both. A Ghostty window's id is its tab-group address in decimal (far above any Terminal window number), so `queue.sh` and `queue-layout.pl` need no change: tile, `show`, `return`, `next` all work. The System Events window is matched by title; a window whose title is shared, one on another desktop or a minimised one gets no frame and is left alone. `send.js raise` (the `g` key) focuses a Ghostty tty; `h` no longer needs a Terminal tab.
+
+**Not built:** typing into a Ghostty tab (agterm still sends text only to Terminal.app and background agents); AgentTerminalBar's drag watcher and automatic re-tile read Terminal windows only, so for Ghostty only the tile hotkey and a session start lay out the grid.
+
 ## D81 (2026-10-22): a REMOTE session shows its whole conversation, read with this Mac's trusted-device token
 
 **Asked (owner):** "update the REMOTE sessions feature by allowing me to see the chat history of the session (scroll up and down to see the full chat of the selected session) instead of only \"The last thing it said\" message".
