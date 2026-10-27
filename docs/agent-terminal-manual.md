@@ -21,6 +21,7 @@ Push `/`, write the code, then push `Enter`.
 | `THEME` | Accent color | Choose the color of the selected rows and of the things that need you: one of 8, orange is the default. Refer to section 7.7. |
 | `NW` | New agent | Start a background agent. You can add a folder, a model, an effort and a mode, for example `NW soii sonnet high`. Refer to section 6.15. |
 | `ALL` | Write to a group | Write one message to a group of agents: `ALL waiting`, `ALL input`, `ALL idle` or `ALL working`. Refer to section 6.17. |
+| `CLEAN` | Free disk space | Map where the disk space in the home folder goes (`bin/disk-map.sh`, a few minutes). The map opens in the browser: a treemap and the caches, models and build output that can go, with a cleanup script to copy. A background agent named `clean` starts in `~` with the map and removes only what you approve. `bin/disk-map.sh --open` makes the map without the agent. |
 | `STOP` | – | Stop the selected background agent. Its conversation stays. |
 | `BG` | – | Move the selected Terminal session to the background. `BG ALL` moves every idle one. Refer to section 6.15. |
 | `A3` | Agent 3 | The desk, with agent 3 selected. Use a number from 1 to 9. |

@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Disk map</title>
+<!-- disk-map.sh copies this page next to report.js, which sets window.REPORT. -->
+<style>
+:root {
+  --bg: #f6f6f4; --panel: #fff; --ink: #1d1d1b; --mute: #77756f; --line: #e4e2dc;
+  --safe: #2f9e5b; --review: #d9822b;
+  --c-code: #cfd3f6; --c-docs: #f8dcc6; --c-dev: #e3e2de; --c-sdk: #cfe8d6; --c-ai: #f6cfdc; --c-pkg: #cde1f4; --c-sys: #ecebe7;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161615; --panel: #1f1f1d; --ink: #ecebe7; --mute: #9b9992; --line: #33322f;
+    --c-code: #3a3f6e; --c-docs: #6b4a33; --c-dev: #3b3a37; --c-sdk: #2f5a3d; --c-ai: #6a3448; --c-pkg: #2d4a66; --c-sys: #2b2a28;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Inter", sans-serif; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.wrap { max-width: 1400px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
+.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.card { background: var(--panel); padding: 10px 14px; }
+.card small { color: var(--mute); display: block; font-size: 11px; }
+.card b { font: 600 20px/1.3 ui-monospace, Menlo, monospace; }
+.card i { font-style: normal; color: var(--mute); font-size: 11px; margin-left: 4px; }
+.card i.up { color: var(--safe); }
+.main { display: grid; grid-template-columns: 1fr 380px; gap: 12px; min-height: 0; }
+.box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+h2 { font-size: 13px; margin: 0; }
+.sub { color: var(--mute); font-size: 11px; margin-bottom: 8px; }
+.crumbs { color: var(--mute); font-size: 12px; margin-bottom: 6px; display: flex; justify-content: space-between; }
+.crumbs a { color: inherit; cursor: pointer; text-decoration: none; }
+.crumbs a:hover { color: var(--ink); text-decoration: underline; }
+#map { position: relative; height: 62vh; min-height: 360px; }
+.tile { position: absolute; border: 1px solid var(--panel); border-radius: 4px; overflow: hidden; cursor: pointer; }
+.tile:hover { outline: 2px solid var(--ink); z-index: 2; }
+.tile .h { position: absolute; left: 5px; right: 5px; top: 3px; display: flex; justify-content: space-between; gap: 6px; font-size: 11px; font-weight: 600; white-space: nowrap; pointer-events: none; z-index: 1; }
+.tile .h span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.tile .h span:last-child { color: var(--mute); font-weight: 400; }
+.tile .big { position: absolute; left: 6px; bottom: 4px; font: 600 12px ui-monospace, Menlo, monospace; pointer-events: none; z-index: 1; }
+.inner { position: absolute; border: 1px solid rgba(0,0,0,.06); border-radius: 3px; background: rgba(255,255,255,.25); overflow: hidden; }
+.inner span { font-size: 10px; color: var(--mute); padding: 2px 4px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hatch-safe { background-image: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--safe) 35%, transparent) 6px 7px); border-color: var(--safe) !important; }
+.hatch-review { background-image: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--review) 35%, transparent) 6px 7px); border-color: var(--review) !important; }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; color: var(--mute); font-size: 11px; }
+.legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; background: var(--c); vertical-align: -1px; }
+.recs { display: flex; flex-direction: column; max-height: calc(62vh + 70px); }
+.list { overflow: auto; flex: 1; margin: 0 -12px; padding: 0 12px; }
+.group { display: flex; justify-content: space-between; margin: 10px 0 4px; font-size: 11px; color: var(--mute); }
+.pill { padding: 1px 7px; border-radius: 9px; color: #fff; font-size: 10px; }
+.item { border-top: 1px solid var(--line); padding: 7px 0; }
+.item summary { display: grid; grid-template-columns: 18px 1fr auto 10px; gap: 6px; align-items: start; cursor: pointer; list-style: none; }
+.item summary::-webkit-details-marker { display: none; }
+.item summary::after { content: "›"; color: var(--mute); }
+.item[open] summary::after { content: "⌄"; }
+.item .t { font-weight: 600; }
+.item .p { color: var(--mute); font-size: 11px; word-break: break-all; }
+.item .s { font: 600 12px ui-monospace, Menlo, monospace; }
+.item pre { margin: 6px 0 0 24px; font-size: 11px; color: var(--mute); white-space: pre-wrap; word-break: break-all; }
+.foot { border-top: 1px solid var(--line); padding-top: 10px; display: flex; gap: 8px; align-items: center; }
+.foot .tot { flex: 1; font-size: 12px; }
+button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+button.dark { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px solid var(--safe); outline-offset: 2px; }
+@media (max-width: 900px) {
+  .main { grid-template-columns: 1fr; }
+  .cards { grid-template-columns: repeat(2, 1fr); }
+  .recs { max-height: none; }
+}
+</style>
+<script src="report.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="cards" id="cards"></div>
+  <div class="main">
+    <section class="box">
+      <h2>Explorer</h2>
+      <div class="sub">Your home folder, sized by space used. Click a tile to open it. Hatched tiles are cleanup candidates.</div>
+      <div class="crumbs"><span id="crumbs"></span><span id="here" class="mono"></span></div>
+      <div id="map"></div>
+      <div class="legend" id="legend"></div>
+    </section>
+    <section class="box recs">
+      <h2>Recommendations</h2>
+      <div class="sub">Tick items to build a cleanup script, or ask the cleanup agent (it has report.json).</div>
+      <div class="list" id="list"></div>
+      <div class="foot">
+        <span class="tot" id="tot"></span>
+        <button id="selsafe">Select safe</button>
+        <button id="copy" class="dark">Copy script</button>
+      </div>
+    </section>
+  </div>
+</div>
+<script>
+const R = window.REPORT;
+const GB = kb => kb / 1048576;
+const fmt = kb => kb >= 1048576 ? GB(kb).toFixed(1) + " GB" : Math.round(kb / 1024) + " MB";
+const home = R.root;
+const tilde = p => p.startsWith(home) ? "~" + p.slice(home.length) : p;
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// Categories: by the path under home, first match wins.
+const CATS = [
+  ["AI models", "--c-ai", /^(\.ollama|\.lmstudio|\.cache\/(huggingface|lm-studio))/],
+  ["iOS & Android SDKs", "--c-sdk", /^(Library\/(Android|Developer)|\.android)/],
+  ["Package caches", "--c-pkg", /^(\.npm|\.gradle|\.cache|\.cargo|\.bun|\.yarn|\.pnpm-store|go|Library\/(Caches|pnpm))(\/|$)/],
+  ["Documents & media", "--c-docs", /^(Documents|Pictures|Movies|Music|Downloads|Library\/Mobile Documents)(\/|$)/],
+  ["System & app data", "--c-sys", /^Library(\/|$)/],
+  ["Dev tools & other", "--c-dev", /^(\.|Applications)/],
+  ["Code projects", "--c-code", /./],
+];
+const cat = p => CATS.find(c => c[2].test(p.slice(home.length + 1))) || CATS[CATS.length - 1];
+
+// The tree from du's lines: each folder's children, plus what is left over as "other".
+const nodes = {};
+for (const e of R.tree) nodes[e.path] = { path: e.path, name: e.path.split("/").pop(), kb: e.kb, kids: [] };
+for (const n of Object.values(nodes)) {
+  const parent = nodes[n.path.slice(0, n.path.lastIndexOf("/"))];
+  if (parent && n.path !== home) parent.kids.push(n);
+}
+const kidsOf = n => {
+  const k = [...n.kids].sort((a, b) => b.kb - a.kb);
+  const rest = n.kb - k.reduce((s, c) => s + c.kb, 0);
+  if (rest > n.kb * 0.01 && k.length) k.push({ name: "other files", kb: rest, kids: [], other: true, path: n.path });
+  return k;
+};
+
+// A tile is a candidate when it lies inside an item's path.
+const itemOf = p => R.items.find(it => it.paths.some(q => p === q || p.startsWith(q + "/")));
+
+// Squarified treemap (Bruls et al.): rows along the short side, each row kept as square as it can be.
+function squarify(items, x, y, w, h) {
+  const out = [], total = items.reduce((s, i) => s + i.kb, 0);
+  if (!total) return out;
+  const scale = (w * h) / total;
+  let rest = items.map(i => ({ i, a: i.kb * scale }));
+  while (rest.length) {
+    const side = Math.min(w, h);
+    let row = [], best = Infinity;
+    for (const r of rest) {
+      const t = [...row, r], sum = t.reduce((s, q) => s + q.a, 0);
+      const worst = Math.max(...t.map(q => Math.max((side * side * q.a) / (sum * sum), (sum * sum) / (side * side * q.a))));
+      if (worst > best) break;
+      row = t; best = worst;
+    }
+    rest = rest.slice(row.length);
+    const sum = row.reduce((s, q) => s + q.a, 0), thick = sum / side;
+    let off = 0;
+    for (const q of row) {
+      const len = q.a / thick;
+      out.push(w >= h ? { n: q.i, x, y: y + off, w: thick, h: len } : { n: q.i, x: x + off, y, w: len, h: thick });
+      off += len;
+    }
+    if (w >= h) { x += thick; w -= thick; } else { y += thick; h -= thick; }
+  }
+  return out;
+}
+
+let cur = nodes[home];
+function draw() {
+  const map = document.getElementById("map");
+  map.innerHTML = "";
+  const { width, height } = map.getBoundingClientRect();
+  for (const r of squarify(kidsOf(cur), 0, 0, width, height)) {
+    const n = r.n, it = n.other ? null : itemOf(n.path), c = n.other ? CATS[5] : cat(n.path);
+    const t = document.createElement("div");
+    t.className = "tile" + (it ? " hatch-" + it.safety : "");
+    Object.assign(t.style, { left: r.x + "px", top: r.y + "px", width: r.w + "px", height: r.h + "px", backgroundColor: `var(${c[1]})` });
+    t.title = `${tilde(n.path)}${n.other ? " (other files)" : ""} · ${fmt(n.kb)}${it ? " · " + it.label : ""}`;
+    if (r.w > 50 && r.h > 18) t.innerHTML = `<div class="h"><span>${esc(n.name)}</span><span>${r.w > 110 ? fmt(n.kb) : ""}</span></div>`;
+    if (r.w > 70 && r.h > 50 && n.kb > cur.kb * 0.04) t.innerHTML += `<div class="big">${fmt(n.kb)}</div>`;
+    // the second level, inside the tile under its header
+    if (!n.other && r.w > 60 && r.h > 60) {
+      for (const s of squarify(kidsOf(n), 3, 20, r.w - 8, r.h - 42)) {
+        const d = document.createElement("div"), sit = s.n.other ? null : itemOf(s.n.path);
+        d.className = "inner" + (sit && sit !== it ? " hatch-" + sit.safety : "");
+        Object.assign(d.style, { left: s.x + "px", top: s.y + "px", width: Math.max(s.w - 2, 0) + "px", height: Math.max(s.h - 2, 0) + "px" });
+        if (s.w > 44 && s.h > 16) d.innerHTML = `<span>${esc(s.n.name)}</span>`;
+        t.appendChild(d);
+      }
+    }
+    if (!n.other && n.kids.length) t.onclick = () => { cur = n; draw(); };
+    else if (!n.other) t.style.cursor = "default";
+    map.appendChild(t);
+  }
+  // the crumbs from home to here
+  const trail = [];
+  for (let p = cur.path; p && p.length >= home.length; p = p.slice(0, p.lastIndexOf("/"))) if (nodes[p]) trail.unshift(nodes[p]);
+  const cr = document.getElementById("crumbs");
+  cr.innerHTML = "";
+  trail.forEach((n, i) => {
+    const a = document.createElement("a");
+    a.textContent = i ? n.name : "~ Home";
+    a.onclick = () => { cur = n; draw(); };
+    cr.append(i ? " / " : "", a);
+  });
+  document.getElementById("here").textContent = fmt(cur.kb);
+}
+
+// The recommendations, the totals and the script.
+const picked = new Set(R.items.filter(i => i.safety === "safe").map(i => i.id));
+const sum = f => R.items.filter(f).reduce((s, i) => s + i.kb, 0);
+function cards() {
+  const sel = sum(i => picked.has(i.id)), scanned = nodes[home] ? nodes[home].kb : 0;
+  const card = (label, val, note, cls = "") => `<div class="card"><small>${label}</small><b>${val}</b><i class="${cls}">${note}</i></div>`;
+  document.getElementById("cards").innerHTML =
+    card("Free after cleanup", fmt(R.disk.free_kb + sel), "+" + fmt(sel), "up") +
+    card(`<span style="color:var(--safe)">●</span> Safe to remove`, fmt(sum(i => i.safety === "safe")), R.items.filter(i => i.safety === "safe").length + " items") +
+    card(`<span style="color:var(--review)">●</span> Needs review`, fmt(sum(i => i.safety === "review")), R.items.filter(i => i.safety === "review").length + " items") +
+    card("Not scanned", fmt(Math.max(R.disk.used_kb - scanned, 0)), "system, apps, other users");
+  document.getElementById("tot").innerHTML = `<b class="mono">${fmt(sel)}</b> <span style="color:var(--mute)">selected · ${picked.size} items</span>`;
+}
+function list() {
+  const L = document.getElementById("list");
+  L.innerHTML = "";
+  for (const [s, title, color] of [["safe", "Safe to remove", "var(--safe)"], ["review", "Review first", "var(--review)"]]) {
+    const its = R.items.filter(i => i.safety === s);
+    if (!its.length) continue;
+    L.insertAdjacentHTML("beforeend", `<div class="group"><span class="pill" style="background:${color}">${title}</span><span>${fmt(sum(i => i.safety === s))}</span></div>`);
+    for (const it of its) {
+      const d = document.createElement("details");
+      d.className = "item";
+      const more = it.paths.length > 1 ? ` +${it.paths.length - 1} more` : "";
+      d.innerHTML = `<summary><input type="checkbox" aria-label="${esc(it.label)}" ${picked.has(it.id) ? "checked" : ""}>
+        <div><div class="t">${esc(it.label)}</div><div class="p mono">${esc(tilde(it.paths[0]))}${more}</div></div>
+        <span class="s">${fmt(it.kb)}</span></summary><pre class="mono">${esc(scriptFor(it))}</pre>`;
+      const cb = d.querySelector("input");
+      cb.onclick = e => e.stopPropagation();
+      cb.onchange = () => { cb.checked ? picked.add(it.id) : picked.delete(it.id); cards(); };
+      L.appendChild(d);
+    }
+  }
+}
+const q = p => "'" + p.replace(/'/g, "'\\''") + "'";
+function scriptFor(it) {
+  const head = `# ${it.label} (${fmt(it.kb)})`;
+  const rm = it.paths.map(p => "rm -rf " + q(p));
+  if (!it.cmd) return [head, ...rm].join("\n");
+  if (it.cmd.includes("<")) return [head, "# " + it.cmd, ...rm.map(l => "# " + l)].join("\n"); // needs a choice: left commented
+  return [head, it.cmd].join("\n");
+}
+document.getElementById("selsafe").onclick = () => {
+  R.items.forEach(i => i.safety === "safe" && picked.add(i.id));
+  list(); cards();
+};
+document.getElementById("copy").onclick = async e => {
+  const its = R.items.filter(i => picked.has(i.id));
+  const text = `#!/bin/sh\n# cleanup script from the disk map of ${R.generated}. Read it before you run it.\n\n` + its.map(scriptFor).join("\n\n") + "\n";
+  try { await navigator.clipboard.writeText(text); e.target.textContent = "Copied"; }
+  catch { prompt("Copy the script:", text); }
+  setTimeout(() => (e.target.textContent = "Copy script"), 1500);
+};
+
+document.getElementById("legend").innerHTML = CATS.map(c => `<span style="--c:var(${c[1]})">${c[0]}</span>`).join("") +
+  `<span style="--c:var(--safe)">hatched: safe</span><span style="--c:var(--review)">hatched: review</span>`;
+if (!cur) document.getElementById("map").textContent = "The scan found nothing of 50 MB or more.";
+else { draw(); addEventListener("resize", draw); }
+document.title = "Disk map · " + R.generated;
+cards(); list();
+</script>
+</body>
+</html>
