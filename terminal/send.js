@@ -3,10 +3,10 @@
 //   text TTY TEXT        type TEXT into the tab (Terminal scripting, no focus change), then press Enter; a TEXT
 //                        with line breaks goes in as one bracketed paste
 //   keys TTY KEY...      press keys: 0-9, enter, esc, tab, up, down, left, right, backspace; pause waits 0.35 s
-//   raise TTY            select the tab, bring its window to the front and activate Terminal (the `g` key); a tty that
-//                        belongs to a Ghostty terminal is focused there (Ghostty has no other command here)
+//   raise TTY            select the tab, bring its window to the front and activate Terminal (the `g` key)
 //   ttys                 every Terminal tab's tty, one per line (which sessions can be typed into)
-//   tabs                 every Terminal tab as "tty window_id tab_index" (1-based), one per line
+//   tabs                 every Terminal tab as "tty window_id tab_index" (1-based), one per line; then every Ghostty
+//                        terminal as "tty 0 0 ghostty"
 //   tabgroups            macOS window tabs (Window > Merge All Windows: each tab is its own window): one line per
 //                        tab bar, its tab titles in order, tab-separated (read through System Events)
 //   closeidle TTY        close that tab's window when nothing runs in it any more (a short-lived window whose shell
@@ -20,6 +20,8 @@
 // of Terminal's other windows for ~0.1 s and the window that was in front is put back (the brief flicker the
 // owner accepted, design 2026-10-17). `do script` alone does not submit reliably: Claude Code treats a long
 // burst as a paste and keeps its newline, so Enter is always pressed separately.
+// A tty that belongs to a Ghostty terminal takes raise, text and keys through Ghostty's own scripting (1.4+): it
+// types into the terminal without focus, but it can't read the screen, so text is not checked for submission.
 // Prints "ok" or "error: <why>" and exits 0 either way, so the caller reads one line.
 ObjC.import('AppKit');
 ObjC.import('CoreGraphics');
@@ -89,24 +91,65 @@ function press(t, win, tab, keys) {
   return 'ok';
 }
 
-function ghosttyFocus(tty) { // focus the Ghostty terminal with that tty; false when there is none
+// Ghostty's names for the keys press knows (W3C codes, camelCase)
+const GKEYS = { enter: 'enter', esc: 'escape', tab: 'tab', backspace: 'backspace',
+  up: 'arrowUp', down: 'arrowDown', left: 'arrowLeft', right: 'arrowRight' };
+
+function ghosttyTTYs() { // every Ghostty terminal's tty, without /dev/
   const g = Application('Ghostty');
-  if (!g.running()) return false;
+  if (!g.running()) return [];
+  try { return g.windows.tabs.terminals.tty().flat(2).filter(Boolean).map(x => String(x).replace('/dev/', '')); } catch (e) { return []; }
+}
+
+function ghosttyTerm(tty) { // [app, terminal] of the Ghostty terminal with that tty; null when there is none
+  const g = Application('Ghostty');
+  if (!tty || !g.running()) return null;
   for (const w of g.windows()) {
     for (const tab of w.tabs()) {
       for (const tm of tab.terminals()) {
-        if (String(tm.tty()).replace('/dev/', '') === tty) { g.focus(tm); g.activate(); return true; }
+        if (String(tm.tty()).replace('/dev/', '') === tty) return [g, tm];
       }
     }
   }
-  return false;
+  return null;
+}
+
+function ghosttyRun(cmd, g, tm, args) {
+  const keys = ks => {
+    for (const k of ks) {
+      if (k === 'pause') { delay(0.35); continue; }
+      const name = GKEYS[k] || (/^[0-9]$/.test(k) ? 'digit' + k : null);
+      if (!name) return 'error: unknown key ' + k;
+      g.sendKey(name, { to: tm });
+      delay(0.02);
+    }
+    return 'ok';
+  };
+  try {
+    if (cmd === 'raise') { g.focus(tm); g.activate(); return 'ok'; }
+    if (cmd === 'keys') return keys(args);
+    if (cmd === 'text') {
+      const text = args.join(' ');
+      if (!text) return 'error: empty text';
+      g.inputText(text, { to: tm }); // a paste: Claude Code keeps its line breaks
+      delay(0.3);
+      return keys(['enter']);
+    }
+  } catch (e) {
+    return 'error: ' + e.message;
+  }
+  return 'error: unknown command ' + cmd;
 }
 
 function run(argv) {
   const [cmd, tty] = argv;
-  if (cmd === 'raise' && ghosttyFocus(tty || '')) return 'ok';
+  if (cmd === 'raise' || cmd === 'text' || cmd === 'keys') {
+    const gt = ghosttyTerm(tty);
+    if (gt) return ghosttyRun(cmd, gt[0], gt[1], argv.slice(2));
+  }
+  const ghostty = cmd === 'tabs' ? ghosttyTTYs().map(x => x + ' 0 0 ghostty') : [];
   const t = Application('Terminal');
-  if (!t.running()) return cmd === 'closeidle' || cmd === 'closetab' ? 'ok' : cmd === 'ttys' || cmd === 'tabs' || cmd === 'tabgroups' ? '' : 'error: Terminal not running';
+  if (!t.running()) return cmd === 'closeidle' || cmd === 'closetab' ? 'ok' : cmd === 'tabs' ? ghostty.join('\n') : cmd === 'ttys' || cmd === 'tabgroups' ? '' : 'error: Terminal not running';
   if (cmd === 'tabgroups') {
     const out = [];
     try {
@@ -127,7 +170,7 @@ function run(argv) {
       try { ttys = w.tabs.tty(); id = w.id(); } catch (e) { return; }
       (ttys || []).forEach((x, i) => { if (x) out.push(String(x).replace('/dev/', '') + ' ' + id + ' ' + (i + 1)); });
     });
-    return out.join('\n');
+    return out.concat(ghostty).join('\n');
   }
   if (cmd === 'ttys') {
     const out = [];

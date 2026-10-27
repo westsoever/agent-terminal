@@ -94,20 +94,26 @@ func answerTyped(tty string, n int, text string) string {
 	return osa("answer", tty, strconv.Itoa(n), text)
 }
 
-// tabPos is where a tty sits in Terminal: its window and its tab's place in that window (1-based).
-type tabPos struct{ win, tab int }
+// tabPos is where a tty sits in Terminal: its window and its tab's place in that window (1-based). A Ghostty
+// terminal has no window or tab here, only ghostty.
+type tabPos struct {
+	win, tab int
+	ghostty  bool
+}
 
-// terminalTabs: every Terminal.app tab by tty.
-func terminalTabs() map[string]tabPos {
+// terminalTabs: every Terminal.app tab and Ghostty terminal by tty.
+func terminalTabs() map[string]tabPos { return parseTabs(osa("tabs")) }
+
+func parseTabs(out string) map[string]tabPos {
 	m := map[string]tabPos{}
-	for _, l := range strings.Split(osa("tabs"), "\n") {
+	for _, l := range strings.Split(out, "\n") {
 		f := strings.Fields(l)
-		if len(f) != 3 || strings.HasPrefix(l, "error") {
+		if len(f) < 3 || strings.HasPrefix(l, "error") {
 			continue
 		}
 		w, _ := strconv.Atoi(f[1])
 		t, _ := strconv.Atoi(f[2])
-		m[f[0]] = tabPos{w, t}
+		m[f[0]] = tabPos{w, t, len(f) > 3 && f[3] == "ghostty"}
 	}
 	return m
 }
