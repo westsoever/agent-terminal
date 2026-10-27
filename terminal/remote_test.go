@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -158,5 +159,66 @@ func TestRemoteSection(t *testing.T) {
 	m = mm.(model)
 	if m.selSID != "local-1" {
 		t.Fatalf("after the session ended: %q", m.selSID)
+	}
+}
+
+// A remote session's conversation is read page by page after the last event, its prompts and texts only; the panel
+// shows it scrolled like an agent's, and a failed read keeps what was read.
+func TestRemoteChat(t *testing.T) {
+	old := remoteEventsGet
+	defer func() { remoteEventsGet = old }()
+	pages := map[string]string{
+		"": `{"data":[
+ {"uuid":"e1","type":"assistant","is_meta":true,"message":{"content":[{"type":"text","text":"SessionStart says hi"}]}},
+ {"uuid":"e2","type":"user","message":{"content":"first prompt"}},
+ {"uuid":"e3","type":"assistant","message":{"content":[{"type":"thinking"},{"type":"tool_use","name":"Bash"}]}},
+ {"uuid":"e4","type":"user","message":{"content":[{"type":"tool_result","content":"out"}]}}],"has_more":true,"last_id":"e4"}`,
+		"e4": `{"data":[{"uuid":"e5","type":"assistant","message":{"content":[{"type":"text","text":"first answer"}]}},
+ {"uuid":"e6","type":"system","subtype":"init"}],"has_more":false,"last_id":"e6"}`,
+		"e6": `{"data":[{"uuid":"e7","type":"user","message":{"content":[{"type":"text","text":"<system-reminder>x</system-reminder>second prompt"}]}}],"has_more":false,"last_id":"e7"}`,
+	}
+	var asked []string
+	fail := false
+	remoteEventsGet = func(_ context.Context, id, after string) ([]byte, error) {
+		asked = append(asked, after)
+		if fail {
+			return nil, errors.New("HTTP 403: elevated session requires a trusted device")
+		}
+		return []byte(pages[after]), nil
+	}
+	c := loadRemoteChat("session_A", RemoteChat{})
+	if c.Err != "" || c.Last != "e6" || len(c.Turns) != 2 || !c.Turns[0].User || c.Turns[0].Text != "first prompt" || c.Turns[1].Text != "first answer" {
+		t.Fatalf("first read: %+v asked %q", c, asked)
+	}
+	c = loadRemoteChat("session_A", c) // the next read asks only for what came after
+	if len(c.Turns) != 3 || c.Turns[2].Text != "second prompt" || asked[len(asked)-1] != "e6" {
+		t.Fatalf("second read: %+v asked %q", c, asked)
+	}
+	fail = true
+	if f := loadRemoteChat("session_A", c); f.Err == "" || len(f.Turns) != 3 || f.Last != "e7" {
+		t.Fatalf("a failed read must keep the turns: %+v", f)
+	}
+
+	m := newModel()
+	m.w, m.h, m.view = 160, 30, vDesk
+	mm, _ := m.Update(remoteMsg(parseRemote([]byte(remoteJSON))))
+	m = mm.(model)
+	m.selSID = "session_A"
+	if v := ansiRe.ReplaceAllString(m.View(), ""); !strings.Contains(v, "reading its messages") || !strings.Contains(v, "opened PR #4") {
+		t.Fatalf("before the read:\n%s", v)
+	}
+	for i := 0; i < 40; i++ {
+		c.Turns = append(c.Turns, Turn{Text: fmt.Sprintf("answer %d", i)})
+	}
+	mm, _ = m.Update(remoteChatMsg{"session_A", c})
+	m = mm.(model)
+	v := ansiRe.ReplaceAllString(m.View(), "")
+	if !strings.Contains(v, "answer 39") || strings.Contains(v, "first prompt") || !strings.Contains(v, "earlier lines") {
+		t.Fatalf("newest first on screen:\n%s", v)
+	}
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyHome})
+	m = mm.(model)
+	if v = ansiRe.ReplaceAllString(m.View(), ""); !strings.Contains(v, "first prompt") || !strings.Contains(v, "newer lines") {
+		t.Fatalf("home scrolls to the start:\n%s", v)
 	}
 }

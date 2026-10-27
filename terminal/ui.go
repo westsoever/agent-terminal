@@ -78,17 +78,19 @@ type model struct {
 	pcScroll   *chatScroll         // how far the PC side panel is scrolled back
 	pcForms    *pcFormSet          // what the owner chose so far in the requests with a form (pcform.go)
 	pcAt       time.Time
-	pulls      PullsState          // the PR view: open GitHub pull requests
-	pullsAt    time.Time           // when they were last asked for
-	remote     RemoteState         // the REMOTE section: active sessions on other machines (D58)
-	remoteAt   time.Time           // when they were last asked for
-	prOpen     bool                // the PR view's side panel is open (k)
-	prDet      map[string]PRDetail // pull request url -> its side panel
-	prLoading  map[string]bool     // pull request urls whose side panel is being read: held arrow keys start no second gh
-	prScroll   *chatScroll         // how far the PR side panel is scrolled back
-	rcScroll   *chatScroll         // how far the RC view's recap panel is scrolled back
-	badgeAt    time.Time           // when the proposals and Paperclip were last read for the tab bar
-	pendingJob string              // a background agent /NW started: selected once it shows in the list
+	pulls      PullsState            // the PR view: open GitHub pull requests
+	pullsAt    time.Time             // when they were last asked for
+	remote     RemoteState           // the REMOTE section: active sessions on other machines (D58)
+	remoteAt   time.Time             // when they were last asked for
+	remoteChat map[string]RemoteChat // the conversations of the REMOTE sessions selected so far (D81)
+	remoteRead map[string]bool       // REMOTE sessions whose conversation is being read
+	prOpen     bool                  // the PR view's side panel is open (k)
+	prDet      map[string]PRDetail   // pull request url -> its side panel
+	prLoading  map[string]bool       // pull request urls whose side panel is being read: held arrow keys start no second gh
+	prScroll   *chatScroll           // how far the PR side panel is scrolled back
+	rcScroll   *chatScroll           // how far the RC view's recap panel is scrolled back
+	badgeAt    time.Time             // when the proposals and Paperclip were last read for the tab bar
+	pendingJob string                // a background agent /NW started: selected once it shows in the list
 	props      []string
 	sync       []string
 	repoLocal  []Repo       // RP: the clones on this Mac
@@ -164,7 +166,7 @@ func newModel() model {
 	cfg, ct, err := loadConfig()
 	bgMode = cfg.Bg
 	applyTheme(cfg.Theme)
-	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, pcForms: &pcFormSet{}, prDet: map[string]PRDetail{}, prLoading: map[string]bool{}, prScroll: &chatScroll{}, rcScroll: &chatScroll{}, askProg: map[string]*askProg{}, bgScr: map[string]Prompt{}, out: map[string][]outMsg{}, stopped: map[string]time.Time{}}
+	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, pcForms: &pcFormSet{}, prDet: map[string]PRDetail{}, prLoading: map[string]bool{}, prScroll: &chatScroll{}, rcScroll: &chatScroll{}, askProg: map[string]*askProg{}, bgScr: map[string]Prompt{}, out: map[string][]outMsg{}, stopped: map[string]time.Time{}, remoteChat: map[string]RemoteChat{}, remoteRead: map[string]bool{}}
 	m.ed.drafts = loadDrafts()
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
@@ -430,8 +432,8 @@ func (m *model) scrollChat(ks string) bool {
 	default:
 		return false
 	}
-	if a := m.sel(); a == nil || a.SID != c.sid {
-		return true // nothing drawn for this agent yet
+	if m.selSID == "" || m.selSID != c.sid {
+		return true // nothing drawn for this agent or REMOTE session yet
 	}
 	c.off = min(max(0, c.off+step), c.max)
 	return true
@@ -601,6 +603,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.remoteAt = time.Now()
 			cmds = append(cmds, func() tea.Msg { return remoteMsg(loadRemote()) })
 		}
+		if r := m.selRemote(); r != nil && !readOnly && !m.remoteRead[r.ID] { // its new messages
+			c, wait := m.remoteChat[r.ID], remoteChatEvery
+			if c.Err != "" {
+				wait = remoteEvery
+			}
+			if time.Since(c.At) > wait {
+				id := r.ID
+				m.remoteRead[id] = true
+				cmds = append(cmds, func() tea.Msg { return remoteChatMsg{id, loadRemoteChat(id, c)} })
+			}
+		}
 		if m.view == vPaperclip && time.Since(m.pcAt) > 5*time.Second {
 			m.pcAt = time.Now()
 			cmds = append(cmds, func() tea.Msg { return pcMsg(loadPaperclip()) })
@@ -732,12 +745,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.writeState()
 		}
 		return m, nil
+	case remoteChatMsg:
+		delete(m.remoteRead, msg.id)
+		m.remoteChat[msg.id] = msg.c
+		return m, nil
 	case remoteSentMsg:
 		if msg.err != "" {
 			m.setErr("not sent to " + msg.title + ": " + msg.err)
 			return m, nil
 		}
-		m.setStatus("✓ sent to " + msg.title + ": read the reply with enter (claude.ai/code)")
+		m.setStatus("✓ sent to " + msg.title + ": its reply shows here")
 		m.remoteAt = time.Time{} // read the list again at the next tick: its state moved
 		return m, nil
 	case pullsMsg:
