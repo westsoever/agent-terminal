@@ -1,8 +1,13 @@
 package main
 
 import (
+	neturl "net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -122,6 +127,51 @@ func linkSpans(t string) (spans [][2]int, urls []bool) {
 	return spans, urls
 }
 
+// linkBase is the folder that relative paths in the text being drawn are relative to: the agent's. The views
+// that draw an agent's chat set it around the drawing. Empty (a remote session, any other text), no path links.
+var linkBase string
+
+var (
+	pathLinks   = map[string]pathHit{}
+	pathLinksMu sync.Mutex
+)
+
+type pathHit struct {
+	url string
+	at  time.Time
+}
+
+// pathLink is the file:// URL of the folder that p names, or that holds it when p is a file; "" when p is not
+// on this machine. cmd+click (or o and a number) opens it in Finder. Looked up at most every 10 seconds.
+func pathLink(p string) string {
+	if linkBase == "" {
+		return ""
+	}
+	if i := strings.LastIndex(p, ":"); i > 0 && strings.Trim(p[i+1:], "0123456789") == "" { // file.go:42
+		p = p[:i]
+	}
+	switch {
+	case strings.HasPrefix(p, "~/"):
+		p = filepath.Join(os.Getenv("HOME"), p[2:])
+	case !filepath.IsAbs(p):
+		p = filepath.Join(linkBase, p)
+	}
+	pathLinksMu.Lock()
+	defer pathLinksMu.Unlock()
+	if h, ok := pathLinks[p]; ok && time.Since(h.at) < 10*time.Second {
+		return h.url
+	}
+	url, dir := "", p
+	if fi, err := os.Stat(p); err == nil {
+		if !fi.IsDir() {
+			dir = filepath.Dir(p)
+		}
+		url = (&neturl.URL{Scheme: "file", Path: dir}).String()
+	}
+	pathLinks[p] = pathHit{url, time.Now()}
+	return url
+}
+
 // mdSegs draws one line of marked text: `code`, paths and links in the link color (URLs underlined), bold in
 // white, the rest in base.
 func mdSegs(l string, base lipgloss.Style) []seg {
@@ -141,11 +191,13 @@ func mdSegs(l string, base lipgloss.Style) []seg {
 				continue
 			}
 			out = append(out, s(t[pos:sp[0]], st))
-			ls := cLink
+			ls, text, link := cLink, t[sp[0]:sp[1]], ""
 			if urls[i] {
 				ls = ls.Underline(true)
+			} else {
+				link = pathLink(text)
 			}
-			out = append(out, s(t[sp[0]:sp[1]], ls))
+			out = append(out, seg{t: text, st: ls, link: link})
 			pos = sp[1]
 		}
 		out = append(out, s(t[pos:], st))
@@ -160,7 +212,7 @@ func mdSegs(l string, base lipgloss.Style) []seg {
 		default:
 			switch {
 			case code:
-				add(part, cLink, false)
+				out = append(out, seg{t: part, st: cLink, link: pathLink(part)})
 			case bold:
 				add(part, cWhite, false)
 			default:

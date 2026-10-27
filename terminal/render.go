@@ -25,11 +25,12 @@ var (
 // seg is a run of plain text with one style. Rows are built from segs so widths are counted on plain text
 // and every line comes out exactly as wide as asked: the box lines stay straight.
 type seg struct {
-	t  string
-	st lipgloss.Style
+	t    string
+	st   lipgloss.Style
+	link string // when set, the whole seg is an OSC 8 link to it (a folder, see pathLink)
 }
 
-func s(t string, st lipgloss.Style) seg { return seg{t, st} }
+func s(t string, st lipgloss.Style) seg { return seg{t: t, st: st} }
 
 func width(t string) int { return runewidth.StringWidth(t) }
 

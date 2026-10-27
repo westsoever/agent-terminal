@@ -8,6 +8,36 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// A path in an agent's text is a link to its folder (a file's folder), relative paths from the agent's folder;
+// one that doesn't exist, or text drawn without an agent, is not.
+func TestPathLinks(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(dir+"/sub dir", 0o755)
+	os.WriteFile(dir+"/sub dir/a.go", nil, 0o644)
+	linkBase = dir
+	defer func() { linkBase = "" }()
+	want := "file://" + dir + "/sub%20dir"
+	for _, p := range []string{"sub dir/a.go", dir + "/sub dir/a.go:42", dir + "/sub dir"} {
+		if got := pathLink(p); got != want {
+			t.Errorf("%q: %q, want %q", p, got, want)
+		}
+	}
+	if got := pathLink("nope/x.go"); got != "" {
+		t.Errorf("missing file linked: %q", got)
+	}
+	segs := mdSegs("see "+mdCode+"sub dir/a.go"+mdCode+" and "+dir+"/sub dir", cText)
+	if segs[1].link != want {
+		t.Errorf("code span not linked: %+v", segs)
+	}
+	if row(60, segs[1]) == "" || !strings.Contains(row(60, segs[1]), "\x1b]8;;"+want) {
+		t.Errorf("row has no OSC 8 link: %q", row(60, segs[1]))
+	}
+	linkBase = ""
+	if got := pathLink(dir); got != "" {
+		t.Errorf("linked with no agent folder: %q", got)
+	}
+}
+
 // Links, paths, `code` and bold get their own colors; the marks and the markdown around them never show.
 func TestMdSegs(t *testing.T) {
 	text := "See **bold** and `code`, [docs](https://a.io/x) at https://b.io/y or ~/aiw/x.go and terminal/table.go."

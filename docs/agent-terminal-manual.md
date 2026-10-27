@@ -276,7 +276,7 @@ A `◦` before the name shows a background agent: a session that runs without a 
 The agent panel shows the selected agent:
 
 - The top line shows its name, its folder and its git branch. On the right it shows the model, effort and context use of its last reply, for example `[Opus 5.5] high ctx: 42%`. The context turns orange from 80%. The wall tiles show it too; a narrow tile drops the context first, then the effort.
-- The text is the conversation: your prompts and its messages, the newest at the bottom. Your prompts start with `›` and have a lighter background, so you can find them easily. Tables show as tables (see 7.5). Links, file paths and `code` in an agent's message are blue, and bold text and headings are white.
+- The text is the conversation: your prompts and its messages, the newest at the bottom. Your prompts start with `›` and have a lighter background, so you can find them easily. Tables show as tables (see 7.5). Links, file paths and `code` in an agent's message are blue, and bold text and headings are white. A file path that exists on your Mac is a link too: cmd+click (or `o` and its number) opens its folder in Finder. A relative path starts from the agent's folder.
 - The numbered lines are the answers that it asks you to select from.
 - `FILES IT MENTIONED` shows the files that its last message names. Each file has a letter.
 - A message that you send shows at the bottom at once, in grey, with `sending…`, then `sent`. To an agent that works, it shows `queued` until the agent takes it up. When the conversation shows the message, the grey copy goes.
