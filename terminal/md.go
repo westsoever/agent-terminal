@@ -172,8 +172,8 @@ func pathLink(p string) string {
 	return url
 }
 
-// mdSegs draws one line of marked text: `code`, paths and links in the link color (URLs underlined), bold in
-// white, the rest in base.
+// mdSegs draws one line of marked text: `code`, paths and links in the link color (URLs and the paths that
+// exist, which are links, underlined), bold in white, the rest in base.
 func mdSegs(l string, base lipgloss.Style) []seg {
 	var out []seg
 	add := func(t string, st lipgloss.Style, links bool) {
@@ -194,8 +194,8 @@ func mdSegs(l string, base lipgloss.Style) []seg {
 			ls, text, link := cLink, t[sp[0]:sp[1]], ""
 			if urls[i] {
 				ls = ls.Underline(true)
-			} else {
-				link = pathLink(text)
+			} else if link = pathLink(text); link != "" {
+				ls = ls.Underline(true)
 			}
 			out = append(out, seg{t: text, st: ls, link: link})
 			pos = sp[1]
@@ -212,7 +212,11 @@ func mdSegs(l string, base lipgloss.Style) []seg {
 		default:
 			switch {
 			case code:
-				out = append(out, seg{t: part, st: cLink, link: pathLink(part)})
+				sg := seg{t: part, st: cLink, link: pathLink(part)}
+				if sg.link != "" {
+					sg.st = sg.st.Underline(true)
+				}
+				out = append(out, sg)
 			case bold:
 				add(part, cWhite, false)
 			default:

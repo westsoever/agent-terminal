@@ -26,8 +26,11 @@ func TestPathLinks(t *testing.T) {
 		t.Errorf("missing file linked: %q", got)
 	}
 	segs := mdSegs("see "+mdCode+"sub dir/a.go"+mdCode+" and "+dir+"/sub dir", cText)
-	if segs[1].link != want {
-		t.Errorf("code span not linked: %+v", segs)
+	if segs[1].link != want || !segs[1].st.GetUnderline() {
+		t.Errorf("code span not linked and underlined: %+v", segs)
+	}
+	if nope := mdSegs(mdCode+"nope/x.go"+mdCode, cText); nope[0].link != "" || nope[0].st.GetUnderline() {
+		t.Errorf("a missing file looks like a link: %+v", nope)
 	}
 	if row(60, segs[1]) == "" || !strings.Contains(row(60, segs[1]), "\x1b]8;;"+want) {
 		t.Errorf("row has no OSC 8 link: %q", row(60, segs[1]))
