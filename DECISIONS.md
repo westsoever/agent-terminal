@@ -2,6 +2,16 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D80 (2026-10-26): Terminal windows move and resize only while agterm is open (amends D38, D43, D68)
+
+**Decision (owner):** "Currently, even when the agent terminal is not open (i quit the AgentTerminalBar) it still moves and resizes the windows. This should only happen, when agent-terminal is actively open."
+
+**Why it happened:** by D38, with agterm closed a session's own done, input, blocked or ready event moved its window to the main display (`notify.sh` → `queue.sh park`), and by D68 every session start re-tiled the second display (`session-start.sh` → `queue.sh retile`). Both run from the hooks, so quitting AgentTerminalBar did not stop them.
+
+**Built:** `queue.sh` `reconcile` moves nothing while agterm is closed (no live pid in `~/.agent/terminal/open`): no grid layout, no window coming over. The `come` records that let a waiting window come over are gone, so that never happens while agterm is open either (D37). `back` sends a window back to its cell only while agterm is open; with agterm closed the window stays and keeps its parked record, so the next prompt with agterm open sends it back. `dragged` does nothing while agterm is closed. The records (waiting, tabs, parked) are still kept, so agterm has them when it opens. The hotkeys still work when pressed: `tile` lays out the grid and `next` raises the next waiting window. Tests: `tests/t_queue.sh`.
+
+**Not built:** none.
+
 ## D79 (2026-10-21): esc stops a working agent; a sent message shows at once, queued until Claude Code takes it; ↑ brings back what was sent
 
 **Asked (owner, 2026-10-20):** four things still sent the owner to Terminal: "If I'm in the terminal and hit Esc, it interrupts the current session and i can prompt it differently. If I hit up while the prompt is loading, I can edit what I've just sent and on enter, it resends it again. I can queue prompts, without interrupting the session. The text shows up instantly, and there's no delay between Enter and seeing it in the chat." The open question (daily note 2026-10-20) was whether plain `Esc` or a separate key like `.` interrupts.

@@ -24,6 +24,7 @@ type Last struct {
 	Chat     []Turn        // the conversation in the transcript tail, oldest first, at most maxTurns
 	Model    string        // the model of its latest reply, as Claude Code names it ("claude-opus-5-5"), '' when none
 	Effort   string        // the effort that reply ran at ("high"), '' when the transcript doesn't say
+	Ctx      int           // tokens in the context window after its latest reply, 0 when the transcript doesn't say
 	Mentions []fileMention // the files its recent messages name (newest message last), for the FL view
 }
 
@@ -51,6 +52,11 @@ type entry struct {
 	Message   struct {
 		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
+		Usage   struct {
+			Input         int `json:"input_tokens"`
+			CacheRead     int `json:"cache_read_input_tokens"`
+			CacheCreation int `json:"cache_creation_input_tokens"`
+		} `json:"usage"`
 	} `json:"message"`
 }
 
@@ -103,6 +109,9 @@ func readLast(path, cwd string) Last {
 		}
 		if e.Type == "assistant" && e.Message.Model != "" && e.Message.Model != "<synthetic>" {
 			l.Model, l.Effort = e.Message.Model, e.Effort
+			if u := e.Message.Usage; u.Input+u.CacheRead+u.CacheCreation > 0 {
+				l.Ctx = u.Input + u.CacheRead + u.CacheCreation
+			}
 		}
 		var blocks []block
 		if json.Unmarshal(e.Message.Content, &blocks) != nil {
