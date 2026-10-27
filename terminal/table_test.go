@@ -4,7 +4,43 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 )
+
+// Links, paths, `code` and bold get their own colors; the marks and the markdown around them never show.
+func TestMdSegs(t *testing.T) {
+	text := "See **bold** and `code`, [docs](https://a.io/x) at https://b.io/y or ~/aiw/x.go and terminal/table.go."
+	fg := func(st lipgloss.Style) string { return string(st.GetForeground().(lipgloss.Color)) }
+	got := map[string]string{}
+	shown := ""
+	for _, l := range wrapMd(text, 200) {
+		for _, sg := range mdSegs(l, cText) {
+			shown += sg.t
+			got[sg.t] = fg(sg.st)
+		}
+	}
+	if strings.ContainsAny(shown, mdCode+mdBold+"`*") || strings.Contains(shown, "](") {
+		t.Errorf("marks show: %q", shown)
+	}
+	for _, w := range []string{"bold", "code", "docs", "https://b.io/y", "~/aiw/x.go", "terminal/table.go"} {
+		if got[w] == "" || got[w] == fg(cText) {
+			t.Errorf("%q is not colored: %v", w, got)
+		}
+	}
+	if got[" and "] != fg(cText) {
+		t.Errorf("plain text colored: %v", got)
+	}
+	// a span that wraps keeps its color on every line, and the marks take no room
+	for _, l := range wrapMd("`one two three four five`", 10) {
+		if segs := mdSegs(l, cText); len(segs) != 1 || fg(segs[0].st) != fg(cLink) {
+			t.Errorf("wrapped code line %q: %v", l, segs)
+		}
+	}
+	if width(mdBold+"ab"+mdCode) != 2 {
+		t.Error("marks take room")
+	}
+}
 
 const tblMsg = "Before.\n\n| Name | Note | N |\n|---|---|--:|\n| **a** | a long note that has to wrap when the panel is narrow | 1 |\n| b \\| c | `x` | 22 |\n\nAfter."
 
@@ -22,7 +58,7 @@ func TestParseTable(t *testing.T) {
 	if !ok || len(tb.head) != 3 || len(tb.rows) != 2 {
 		t.Fatalf("got %+v %v", tb, ok)
 	}
-	if tb.rows[0][0] != "a" || tb.rows[1][0] != "b | c" || tb.rows[1][1] != "x" || !tb.right[2] || tb.right[0] {
+	if unMd(tb.rows[0][0]) != "a" || tb.rows[1][0] != "b | c" || unMd(tb.rows[1][1]) != "x" || !tb.right[2] || tb.right[0] {
 		t.Fatalf("cells %+v", tb)
 	}
 	if _, ok := parseTable([]string{"| a | b |", "| not | a separator |"}); ok {

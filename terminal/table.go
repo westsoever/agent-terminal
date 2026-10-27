@@ -26,12 +26,12 @@ func textRows(text string, w int, style string) []string {
 	}
 	afterTable := false
 	flush := func() {
-		lines := collapse(wrap(plain(strings.Join(prose, "\n")), w))
+		lines := collapse(wrapMd(strings.Join(prose, "\n"), w))
 		if afterTable && len(lines) > 0 {
 			gap()
 		}
 		for _, l := range lines {
-			out = append(out, row(w, s(l, cText)))
+			out = append(out, row(w, mdSegs(l, cText)...))
 		}
 		prose = nil
 	}
@@ -127,7 +127,7 @@ func parseTable(lines []string) (t table, ok bool) {
 
 func cellsPlain(c []string) []string {
 	for i := range c {
-		c[i] = strings.TrimSpace(plain(c[i]))
+		c[i] = strings.TrimSpace(mdPlain(c[i]))
 	}
 	return c
 }
@@ -216,7 +216,7 @@ func cellLines(cells []string, ws []int) [][]string {
 		if c == "" {
 			out[i] = []string{""}
 		} else {
-			out[i] = wrap(c, max(ws[i], 4))
+			out[i] = balanceMd(wrap(c, max(ws[i], 4)))
 		}
 		h = max(h, len(out[i]))
 	}
@@ -247,9 +247,7 @@ func ruleTable(t table, w int) []string {
 			if i > 0 {
 				segs = append(segs, s("  ", cPlain))
 			}
-			sg := st(i)
-			sg.t = align(cells[i][k], ws[i], t.right[i])
-			segs = append(segs, sg)
+			segs = append(segs, mdSegs(align(cells[i][k], ws[i], t.right[i]), st(i).st)...)
 		}
 		return row(w, segs...)
 	}
@@ -311,7 +309,9 @@ func gridTable(t table, w int) []string {
 			if mid {
 				c = padTo(strings.Repeat(" ", max((ws[i]-width(cells[i][k]))/2, 0))+cells[i][k], ws[i])
 			}
-			segs = append(segs, s("│ ", cGrey), s(c, st), s(" ", cPlain))
+			segs = append(segs, s("│ ", cGrey))
+			segs = append(segs, mdSegs(c, st)...)
+			segs = append(segs, s(" ", cPlain))
 		}
 		segs = append(segs, s("│", cGrey))
 		return row(w, segs...)
@@ -346,20 +346,20 @@ func recordsTable(t table, w int) []string {
 		if j > 0 {
 			out = append(out, row(w))
 		}
-		for k, l := range wrap(r[0], w-2) {
+		for k, l := range balanceMd(wrap(r[0], w-2)) {
 			lead := "▸ "
 			if k > 0 {
 				lead = "  "
 			}
-			out = append(out, row(w, s(lead, cDark), s(l, cWhite)))
+			out = append(out, row(w, append([]seg{s(lead, cDark)}, mdSegs(l, cWhite)...)...))
 		}
 		for i := 1; i < len(r); i++ {
-			for k, l := range wrap(r[i], max(4, w-4-hw)) {
+			for k, l := range balanceMd(wrap(r[i], max(4, w-4-hw))) {
 				h := ""
 				if k == 0 {
-					h = t.head[i]
+					h = unMd(t.head[i])
 				}
-				out = append(out, row(w, s("  "+padTo(h, hw)+"  ", cDark), s(l, cText)))
+				out = append(out, row(w, append([]seg{s("  "+padTo(h, hw)+"  ", cDark)}, mdSegs(l, cText)...)...))
 			}
 		}
 	}

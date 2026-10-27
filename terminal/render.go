@@ -15,6 +15,7 @@ var (
 	cText   = lipgloss.NewStyle().Foreground(lipgloss.Color("253")) // what agents wrote: bright enough to read
 	cDark   = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 	cOrange = lipgloss.NewStyle().Foreground(lipgloss.Color("202"))
+	cLink   = lipgloss.NewStyle().Foreground(lipgloss.Color("111")) // links, file paths and `code` in an agent's text
 	cSel    = lipgloss.NewStyle().Background(lipgloss.Color("202")).Foreground(lipgloss.Color("16")).Bold(true)
 	cPlain  = lipgloss.NewStyle()
 	// promptBg: the band behind the owner's prompts in a conversation, a shade lighter than the screen
