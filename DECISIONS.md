@@ -2,7 +2,7 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
-## D80 (2026-10-22): a REMOTE session shows its whole conversation, read with this Mac's trusted-device token
+## D81 (2026-10-22): a REMOTE session shows its whole conversation, read with this Mac's trusted-device token
 
 **Asked (owner):** "update the REMOTE sessions feature by allowing me to see the chat history of the session (scroll up and down to see the full chat of the selected session) instead of only \"The last thing it said\" message".
 
@@ -11,6 +11,15 @@ Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are rec
 **Built:** `remote.go` `remoteEventsGet`, `loadRemoteChat`, `parseEvents`. The selected REMOTE session's events are read page by page; after the first read only what came after the last event is asked for, every 5 s while it stays selected (30 s after a failed read). The owner's prompts and the session's texts are kept (`promptText` filters the machinery, as for a local transcript); thinking, tool calls and tool output are left out. The panel draws them with `chatLines` and scrolls like an agent's (`panelBody`, the shared `m.scroll`). A failed read keeps what was read and shows the reason in orange; with nothing read the panel shows the `post_turn_summary` as before. The device token goes to api.anthropic.com only and is never logged or shown. Checked live on 15 sessions: 203 turns render in 37 ms; the longest first read took 3 s. Test: `TestRemoteChat`.
 
 **Not built:** typing into the session without the CLI (sending stays `claude -p … --cloud`); a cap on how many turns are kept.
+## D80 (2026-10-26): Terminal windows move and resize only while agterm is open (amends D38, D43, D68)
+
+**Decision (owner):** "Currently, even when the agent terminal is not open (i quit the AgentTerminalBar) it still moves and resizes the windows. This should only happen, when agent-terminal is actively open."
+
+**Why it happened:** by D38, with agterm closed a session's own done, input, blocked or ready event moved its window to the main display (`notify.sh` → `queue.sh park`), and by D68 every session start re-tiled the second display (`session-start.sh` → `queue.sh retile`). Both run from the hooks, so quitting AgentTerminalBar did not stop them.
+
+**Built:** `queue.sh` `reconcile` moves nothing while agterm is closed (no live pid in `~/.agent/terminal/open`): no grid layout, no window coming over. The `come` records that let a waiting window come over are gone, so that never happens while agterm is open either (D37). `back` sends a window back to its cell only while agterm is open; with agterm closed the window stays and keeps its parked record, so the next prompt with agterm open sends it back. `dragged` does nothing while agterm is closed. The records (waiting, tabs, parked) are still kept, so agterm has them when it opens. The hotkeys still work when pressed: `tile` lays out the grid and `next` raises the next waiting window. Tests: `tests/t_queue.sh`.
+
+**Not built:** none.
 
 ## D79 (2026-10-21): esc stops a working agent; a sent message shows at once, queued until Claude Code takes it; ↑ brings back what was sent
 

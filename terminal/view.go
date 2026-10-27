@@ -351,7 +351,7 @@ func (m model) remoteRow(in int, r RemoteSession) string {
 }
 
 // remotePanel: the selected REMOTE session: its state, then its conversation (read with this Mac's trusted-device
-// token, D80), scrolled like an agent's; what it last said it did while none is read.
+// token, D81), scrolled like an agent's; what it last said it did while none is read.
 func (m model) remotePanel(r RemoteSession, w, h int) []string {
 	in := w - 4
 	title := []seg{s(r.Title, cWhite), s(" · remote", cGrey)}

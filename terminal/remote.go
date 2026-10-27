@@ -3,7 +3,7 @@ package main
 // The REMOTE section of the desk: Claude Code sessions that run on another machine (Remote Control) and are
 // connected to the owner's account now, read from the same list claude.ai/code shows, with the owner's own Claude
 // login. Only active sessions on other machines are listed: connected, not archived, and not a window of this Mac.
-// The selected session's conversation is read with this Mac's trusted-device token (D80); a message goes out with
+// The selected session's conversation is read with this Mac's trusted-device token (D81); a message goes out with
 // the CLI's own path (claude -p ... --cloud <id>).
 
 import (

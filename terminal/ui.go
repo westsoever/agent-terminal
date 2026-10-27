@@ -82,7 +82,7 @@ type model struct {
 	pullsAt    time.Time             // when they were last asked for
 	remote     RemoteState           // the REMOTE section: active sessions on other machines (D58)
 	remoteAt   time.Time             // when they were last asked for
-	remoteChat map[string]RemoteChat // the conversations of the REMOTE sessions selected so far (D80)
+	remoteChat map[string]RemoteChat // the conversations of the REMOTE sessions selected so far (D81)
 	remoteRead map[string]bool       // REMOTE sessions whose conversation is being read
 	prOpen     bool                  // the PR view's side panel is open (k)
 	prDet      map[string]PRDetail   // pull request url -> its side panel
