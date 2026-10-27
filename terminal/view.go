@@ -1538,6 +1538,7 @@ func (m model) helpLines() []string {
 		row2("s", "ask Claude which sessions fit (it runs by itself when names and text find nothing)"),
 		row2("r", "resume an ended session in the background, in its folder (claude --bg --resume)"),
 		row2("LOGIN", "log Claude Code in, in a short-lived window (the footer says when it is logged out)"),
+		row2("CLEAN", "map the disk (the map opens in the browser) and start an agent in ~ that frees space with it"),
 		"",
 		"## Wall (push " + K.Wall + ")",
 		row2("1-9", "select that tile"),

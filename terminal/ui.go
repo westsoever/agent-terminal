@@ -1688,6 +1688,9 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 	case c == "ALL":
 		_, arg, _ := strings.Cut(strings.TrimSpace(code), " ")
 		return m.allCommand(arg)
+	case c == "CLEAN": // map the disk and start an agent that frees space with the map (clean.go)
+		m.setStatus("mapping the disk… a few minutes; the map opens in the browser and an agent starts in ~")
+		return m, cleanCmd(parseNW("", m.cfg))
 	case c == "LOGIN":
 		m.setStatus("log in in the new window; it closes when that is done")
 		return m, m.openShortCmd("login", "login", func() (string, error) { return termShort(shQuote(claudeBin()) + " auth login") })
