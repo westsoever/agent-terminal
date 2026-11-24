@@ -80,7 +80,7 @@ What it installs:
 
 After pulling new commits, run `./install.sh --dry-run` to see whether anything needs reapplying. Most changes need nothing, because the hooks point at this folder.
 
-**Second Mac:** clone this repo and follow "Quick install". State in `~/.agent/` is per machine and isn't synced.
+**Second Mac:** clone this repo and follow "Quick install", then run `bin/state-sync.sh init https://github.com/westsoever/agent-state.git` once. From then on the session hooks sync `~/.agent/sessions/` and `~/.agents` (skills) through git on every session start and end (D84). Everything else in `~/.agent/` (secrets, tokens, logs, the watcher's state) stays per machine.
 
 **Upgrading from Kaching (D65) or Ching (D35):** run `./install.sh` once from the folder (also after you rename the folder), then `./install.sh --install-menubar --yes` if you use the dot, and `terminal/build.sh` for the new command `agterm`. The first replaces the hook entries under `~/.claude/kaching/bin/` or `~/.claude/ching/bin/` with the same ones under `~/.claude/agent-terminal/bin/`, and the `org.kaching.*` and `org.ching.*` jobs with `org.agent-terminal.*`; the second replaces KachingBar or ChingBar with AgentTerminalBar, which macOS treats as a new app: add it again under System Settings > Privacy & Security > Accessibility if you use the voice shortcut. `~/.claude/kaching` and `~/.claude/ching` stay as more links, so sessions that started before keep working. In Raycast, re-add the `ui/raycast` folder and give the renamed commands their hotkeys again. `MANUAL-STEPS.md` lists every step.
 
