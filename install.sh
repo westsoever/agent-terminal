@@ -333,6 +333,9 @@ HOOKS=$(
   hook_line Stop "" "$LINK/bin/stop-check.sh" 900
   hook_line PreToolUse "$GUARD_MATCHER" "$LINK/bin/guard.sh" 15
   hook_line Notification "idle_prompt" "$LINK/bin/notify.sh idle" 10
+  hook_line SessionStart "" "$LINK/bin/state-sync.sh start" 5
+  hook_line Stop "" "$LINK/bin/state-sync.sh stop" 5
+  hook_line SessionEnd "" "$LINK/bin/state-sync.sh end" 5
 )
 OLD_BINS_JSON=$(for l in "${OLD_LINKS[@]}"; do printf '%s\n' "$l/bin/"; done | jq -R . | jq -s -c .)
 HOOKS_JSON=$(printf '%s\n' "$HOOKS" | jq -R -s '

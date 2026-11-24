@@ -62,7 +62,8 @@ out=$(inst --yes); assert_eq "apply exits 0" "0" "$?"
 S=$(cat "$SETTINGS_FILE")
 for ev in SessionStart UserPromptSubmit SessionEnd PreCompact Stop PreToolUse Notification; do
   n=$(printf '%s' "$S" | jq --arg e "$ev" '[.hooks[$e][]?.hooks[]?.command | select(contains("/agent-terminal/bin/"))] | length')
-  assert_eq "hook added for $ev" "1" "$n"
+  case $ev in SessionStart|SessionEnd|Stop) want=2 ;; *) want=1 ;; esac   # + state-sync.sh (D84)
+  assert_eq "hook added for $ev" "$want" "$n"
 done
 assert_eq "guard matcher covers Bash, Monitor, Read, Edit, Supabase and messaging MCP" "Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit|Monitor|mcp__.*[Ss]upabase.*|mcp__.*([Gg]mail|[Ss]lack|[Dd]iscord|[Tt]elegram).*" \
   "$(printf '%s' "$S" | jq -r '.hooks.PreToolUse[] | select(.hooks[0].command | contains("guard.sh")) | .matcher')"

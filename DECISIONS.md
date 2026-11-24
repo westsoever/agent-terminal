@@ -2,6 +2,18 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D84 (2026-11-24): session state and skills sync between Macs (amends the README's "state is per machine")
+
+**Asked (owner):** "Make sure that we have the session hooks in place, so that the ~/.agent & ~/.agents always get fetched and commit automatically so that i have the same skills & states on both my machines".
+
+**Built:** `bin/state-sync.sh`. On SessionStart, on SessionEnd and on Stop (at most every 10 minutes), it commits what each repo's `.gitignore` lets in, rebases onto origin and pushes, in the background. It covers `~/.agent` (private repo westsoever/agent-state) and `~/.agents` (westsoever/agents); after `~/.agents` moves, it runs that repo's `install.sh` so new skills get linked. One sync per repo at a time (`lockf`).
+
+**Only `sessions/` syncs from `~/.agent`:** its `.gitignore` is a whitelist. `secret/`, `tokens/`, `terminal/keys.toml`, `events.jsonl`, logs, locks and the watcher's state stay on the machine; they hold secrets or are rewritten by each machine every minute.
+
+**Never forced:** a rebase that conflicts is aborted and logged in `~/.agent/state-sync.log`; nothing is pushed until a human resolves it. Session folders are named by session id, so two Macs don't write the same file; `~/.agents` can conflict when both edit one skill.
+
+**Second Mac:** pull this repo, run `./install.sh`, then `bin/state-sync.sh init https://github.com/westsoever/agent-state.git` once. `init` keeps local files and adds them to the shared history.
+
 ## D83 (2026-10-28): `k` types into a Ghostty terminal (amends D82)
 
 **Asked (owner):** "I cannot interact with ghostty terminals by clicking k on the session here … please enable that".
