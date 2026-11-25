@@ -36,11 +36,35 @@ func readMorq() []string {
 	return strings.Split(strings.TrimRight(string(out), "\n"), "\n")
 }
 
-func (m *model) loadMorq() {
-	m.mq = readMorq()
+func (m *model) loadMorq() { m.setMQ(readMorq()) }
+
+// setMQ: new report lines. On MQ the cursor stays on the same proposal id, so a refresh that adds proposals above it
+// never moves e or x onto another one.
+func (m *model) setMQ(lines []string) {
+	id := ""
+	if m.view == vMorq && m.listSel < len(m.mq) {
+		id = mqID(m.mq[m.listSel])
+	}
+	m.mq = lines
+	if id != "" {
+		for i, l := range lines {
+			if mqID(l) == id {
+				m.listSel = i
+				return
+			}
+		}
+	}
 	if m.listSel >= len(m.mq) {
 		m.listSel = 0
 	}
+}
+
+// mqStatus: the second field of a proposal line ("open", "pr", ...), "" for other lines.
+func mqStatus(line string) string {
+	if f := strings.Fields(line); len(f) > 1 && mqIDRe.MatchString(f[0]) {
+		return f[1]
+	}
+	return ""
 }
 
 // mqID: the proposal id a report line starts with ("P3  open  ..."), "" for other lines.
@@ -55,7 +79,7 @@ func mqID(line string) string {
 func mqOpen(lines []string) int {
 	n := 0
 	for _, l := range lines {
-		if f := strings.Fields(l); len(f) > 1 && mqIDRe.MatchString(f[0]) && f[1] == "open" {
+		if mqStatus(l) == "open" {
 			n++
 		}
 	}
@@ -70,7 +94,7 @@ func (m model) morqView(h int) []string {
 		case strings.HasPrefix(l, "MORQ") || strings.HasPrefix(l, "GATE") || strings.HasPrefix(l, "PROPOSALS") ||
 			strings.HasPrefix(l, "EXECUTED"):
 			st = cWhite
-		case mqID(l) != "" && strings.Fields(l)[1] == "open":
+		case mqStatus(l) == "open":
 			st = cOrange
 		}
 		items = append(items, []seg{s(l, st)})

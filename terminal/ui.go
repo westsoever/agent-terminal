@@ -772,10 +772,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case mqMsg:
-		m.mq = msg
-		if m.listSel >= len(m.mq) && m.view == vMorq {
-			m.listSel = 0
-		}
+		m.setMQ(msg)
 		return m, nil
 	case propsMsg:
 		m.props = msg

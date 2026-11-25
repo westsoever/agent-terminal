@@ -647,6 +647,14 @@ func TestMorqView(t *testing.T) {
 	if !strings.Contains(m.status, "P2 queued") {
 		t.Fatalf("e queues the proposal: status %q", m.status)
 	}
+	m.listSel = 3 // a refresh that adds P3 above keeps the cursor on P2
+	m.setMQ(append([]string{m.mq[0], m.mq[1], m.mq[2], "P3  open     Newer"}, m.mq[3:]...))
+	if mqID(m.mq[m.listSel]) != "P2" {
+		t.Fatalf("the cursor moved off P2 to %q", m.mq[m.listSel])
+	}
+	m.setMQ([]string{"P1"}) // a short line with only an id must not panic
+	_ = m.View()
+	m.loadMorq()
 	m.listSel = 0
 	m, _ = press(m, "e") // not a proposal line: nothing is sent
 	nm, _ = m.command("MO START")
