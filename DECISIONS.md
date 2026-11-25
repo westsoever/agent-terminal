@@ -2,6 +2,16 @@
 
 Newest first. PLAN.md holds D1-D9 and the v3 scope note; later decisions are recorded here and folded into PLAN.md once the Phase 1 build finishes (the build agent is editing PLAN.md now).
 
+## D85 (2026-11-25): MQ (morq) replaces RC
+
+**Asked (owner):** "Instead of the RC recaps, it says MQ morq. There, morq will showcase all the work its proposer has come up with and a reporting scheme on what has been executed. The proposer should always work and come up with new things (every 30 minutes), but also start with /MO start. Seeing a proposal I should be able to hit a button and directly start executing the proposal flow even when I'm over 50% weekly usage."
+
+**Built:** the RC tab and its view are gone (the desk still shows the selected agent's recap). `MQ` shows `morq report`: the proposer line, the usage gate, the open proposals (`P<n>`) and the last 20 runs morq executed, with PR links. Keys: enter shows a proposal (`morq show`, in `less`) or opens a run's PR, `e` runs `morq queue P<n>`, `x` runs `morq drop P<n>`. `MO START` / `MO STOP` (also `MQ START` / `MQ STOP`) run `morq mo start|stop`. The tab is orange while proposals are open and is refreshed with the PO badge every 30 s. `terminal/morq.go`.
+
+**Where the work happens:** morq itself, in the cos repo (`09-agents/morq/`). The proposer and the `e` button run through morq's own LaunchAgents (`ing.cos.morq-propose` every 30 minutes, `ing.cos.morq-exec` on demand), not as children of agterm: launchd started through node is the path proven to start `claude -p`. Only an owner action (the button, `MO START`, the 30-minute proposer) skips the 50% gate. morq's unattended loop keeps the gate.
+
+**Ids are validated** (`^P\d+$`) in agterm and in morq before they reach a shell line or a command.
+
 ## D84 (2026-11-24): session state and skills sync between Macs (amends the README's "state is per machine")
 
 **Asked (owner):** "Make sure that we have the session hooks in place, so that the ~/.agent & ~/.agents always get fetched and commit automatically so that i have the same skills & states on both my machines".
