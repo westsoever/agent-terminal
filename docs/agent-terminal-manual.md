@@ -13,7 +13,7 @@ Push `/`, write the code, then push `Enter`.
 | `IN` | Inbox (the desk) | All agents and the selected agent. This is the start view. |
 | `FL` | Files | The last 30 files that the agents wrote about, newest first. Files of agents that stopped stay in the list. |
 | `RP` | Repos | The git clones on this Mac and your GitHub repos (`westsoever`, `technobbq`) that have no clone. Repos with work that you can lose (the git sync check) are at the top. |
-| `RC` | Recaps | The last recap of each agent. The names are on the left, newest recap first; the recap of the selected agent shows in full in a box on the right. Claude Code writes a recap when you come back to a session after some time. The desk also shows the recap of the selected agent above its last message. |
+| `MQ` | morq | What morq (the local agent in `~/cos/09-agents/morq/`) is doing: its proposer (a round every 30 minutes), the usage gate, the open proposals and the runs it executed, with their PR links. The tab turns orange while proposals are open. `MO START` turns the proposer on and runs a round now; `MO STOP` turns it off. The desk still shows the recap of the selected agent above its last message. |
 | `PR` | Pull requests | The open GitHub pull requests that involve you (yours, assigned to you, that ask your review, or where you commented or were mentioned), the last updated first. The number in the tab is how many. |
 | `PO` | Proposals | The changes that the learner proposes. The tab is orange when proposals are open. |
 | `PC` | Paperclip | Paperclip issues and company approvals that need you, and issues in progress. The selected row shows on the right, with what it asks you. The tab is orange when a row needs you. |
@@ -108,15 +108,15 @@ The top line does not show your message. It shows only the name of the agent tha
 
 When a tile shows on the full screen, the number keys send answers, as on the desk.
 
-### 1.6 Keys in the lists (FL, RC, PR, PO, PC, RP)
+### 1.6 Keys in the lists (FL, MQ, PR, PO, PC, RP)
 
 | View | Key | Result |
 |---|---|---|
 | All lists | `l`, `j` | Select the next or previous line. |
 | `FL` | `Enter` | Open the selected file. |
-| `RC` | `l`, `j` | Select the next or previous agent. Its recap shows on the right. |
-| `RC` | `Up`, `Down`, `PgUp`, `PgDn`, `Home`, `End` | Scroll a long recap. |
-| `RC` | `Enter` | Go to the desk, with that agent selected. |
+| `MQ` | `Enter` | On a proposal (`P3 …`): show it in full. On an executed run: open its PR. |
+| `MQ` | `e` | Execute the selected proposal now. morq queues it and starts at once, at any weekly usage, even while its unattended loop is paused. |
+| `MQ` | `x` | Drop the selected proposal. |
 | `PR` | `Enter` | Open the pull request on GitHub in your browser. |
 | `PR` | `k` | Open the pull request on the right: its branch, size, checks, description, files and thread. Push `k` again to write a comment for a new agent. |
 | `PR` | `1` | With the pull request open: start a new agent that reviews it. |

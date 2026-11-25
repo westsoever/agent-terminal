@@ -3,7 +3,7 @@
 //
 //	agterm                 open the desk
 //	agterm --render WxH    print one frame of the desk at that size and exit (for checks and screenshots)
-//	                 --view CODE   picks another view (FL RP RC PR PO PC HELP, or "FIND words": the names and
+//	                 --view CODE   picks another view (FL RP MQ PR PO PC HELP, or "FIND words": the names and
 //	                               text tiers run first)
 package main
 

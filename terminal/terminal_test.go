@@ -139,7 +139,7 @@ func TestViewGeometry(t *testing.T) {
 	m.pulls = PullsState{Items: []PullReq{{Repo: "westsoever/cos", Number: 12, Title: "t", Draft: true, Updated: now.Add(-time.Hour)}}}
 	m.sync = []string{"## repo", "needs: 1 stash"}
 	m.find = findFixtureState()
-	for _, v := range []view{vDesk, vWall, vFiles, vRepos, vRecaps, vProposals, vPulls, vPaperclip, vFind, vHelp} {
+	for _, v := range []view{vDesk, vWall, vFiles, vRepos, vMorq, vProposals, vPulls, vPaperclip, vFind, vHelp} {
 		for _, sz := range [][2]int{{80, 24}, {120, 40}, {200, 60}} {
 			m.view, m.w, m.h = v, sz[0], sz[1]
 			lines := strings.Split(m.View(), "\n")
@@ -616,39 +616,54 @@ func TestHelpScrolls(t *testing.T) {
 	}
 }
 
-// RC lists the agents by name on the left and shows the selected one's recap in full on the right; j/k cycle
-// through them, the scroll keys scroll a long recap and enter goes to the agent.
-func TestRecapPanel(t *testing.T) {
+// MQ shows `morq report` with the proposals in it; e queues the selected proposal, x drops it, and MO START turns
+// the proposer on, all through the morq command (D85). The RC view it replaced is gone.
+func TestMorqView(t *testing.T) {
 	t.Setenv("AGENT_HOME", t.TempDir())
+	dir := t.TempDir()
+	logf := filepath.Join(dir, "args")
+	bin := filepath.Join(dir, "morq")
+	script := "#!/bin/sh\necho \"$@\" >> " + logf + "\ncase \"$1\" in\n" +
+		"report) printf 'MORQ  proposer on\\nGATE  closed · seven_day 66%%\\nPROPOSALS (2)\\nP2  open     Index notes\\nP1  pr       Old\\n" +
+		"EXECUTED (1 runs, newest first)\\n  11-25 16:40  P1     pr       Old · https://github.com/westsoever/cos/pull/9\\n' ;;\n" +
+		"queue) echo \"$2 queued; morq starts it now\" ;;\nmo) echo \"proposer on; a round starts now\" ;;\nesac\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MORQ_BIN", bin)
 	cfg, _, _ := loadConfig()
-	m := model{cfg: cfg, w: 120, h: 30, view: vRecaps, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, rcScroll: &chatScroll{}}
-	long := strings.Repeat("A long recap line. ", 80) + "THE_END"
-	older := strings.Replace(recapLine, "We fixed the queue.", long, 1)
-	newer := strings.Replace(strings.Replace(recapLine, "We fixed the queue.", "The newer recap.", 1), "15:29", "16:29", 1)
-	m.agents = []Agent{{SID: "a", Name: "older-agent", Cwd: "/tmp", Transcript: writeTranscript(t, older)},
-		{SID: "b", Name: "newer-agent", Cwd: "/tmp", Transcript: writeTranscript(t, newer)}}
-	text := func() string {
-		return escRe.ReplaceAllString(strings.Join(m.recapsView(m.h-headerH-footerH), "\n"), "")
+	m := model{cfg: cfg, w: 120, h: 30, view: vDesk, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}}
+	nm, _ := m.command("MQ")
+	m = nm.(model)
+	v := escRe.ReplaceAllString(m.View(), "")
+	if m.view != vMorq || !strings.Contains(v, "P2  open     Index notes") || !strings.Contains(v, "MQ") || strings.Contains(v, " RC ") {
+		t.Fatalf("MQ shows morq's report in place of RC:\n%s", v)
 	}
-
-	v := text()
-	if !strings.Contains(v, "newer-agent") || !strings.Contains(v, "older-agent") || !strings.Contains(v, "The newer recap.") {
-		t.Fatalf("the names on the left, the newest recap on the right:\n%s", v)
+	if mqOpen(m.mq) != 1 || mqID(m.mq[3]) != "P2" || mqID(m.mq[0]) != "" {
+		t.Fatalf("one open proposal, ids only on proposal lines: %v", m.mq)
 	}
-	if strings.Contains(v, "A long recap") {
-		t.Fatalf("only the selected agent's recap shows:\n%s", v)
+	m.listSel = 3
+	m, _ = press(m, "e")
+	if !strings.Contains(m.status, "P2 queued") {
+		t.Fatalf("e queues the proposal: status %q", m.status)
 	}
-	m, _ = press(m, cfg.Keys.Next)
-	if v = text(); !strings.Contains(v, "A long recap line.") || strings.Contains(v, "THE_END") || !strings.Contains(v, "more lines") {
-		t.Fatalf("the next agent's recap starts at its top and says there is more:\n%s", v)
+	m.listSel = 3 // a refresh that adds P3 above keeps the cursor on P2
+	m.setMQ(append([]string{m.mq[0], m.mq[1], m.mq[2], "P3  open     Newer"}, m.mq[3:]...))
+	if mqID(m.mq[m.listSel]) != "P2" {
+		t.Fatalf("the cursor moved off P2 to %q", m.mq[m.listSel])
 	}
-	m, _ = press(m, "end")
-	if v = text(); !strings.Contains(v, "THE_END") {
-		t.Fatalf("end scrolls to the end of the recap:\n%s", v)
-	}
-	m, _ = press(m, "enter")
-	if m.view != vDesk || m.selSID != "a" {
-		t.Fatalf("enter goes to the agent: view %d, sel %q", m.view, m.selSID)
+	m.setMQ([]string{"P1"}) // a short line with only an id must not panic
+	_ = m.View()
+	m.loadMorq()
+	m.listSel = 0
+	m, _ = press(m, "e") // not a proposal line: nothing is sent
+	nm, _ = m.command("MO START")
+	m = nm.(model)
+	b, _ := os.ReadFile(logf)
+	calls := strings.Count(string(b), "report")
+	if !strings.Contains(string(b), "queue P2\n") || !strings.Contains(string(b), "mo start\n") ||
+		strings.Count(string(b), "queue") != 1 || calls < 2 || m.view != vMorq || !strings.Contains(m.status, "proposer on") {
+		t.Fatalf("morq calls: %q, status %q", b, m.status)
 	}
 }
 

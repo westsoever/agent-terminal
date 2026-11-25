@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +21,7 @@ const (
 	vRepos
 	vProposals
 	vPulls
-	vRecaps
+	vMorq
 	vPaperclip
 	vHelp
 )
@@ -35,7 +34,7 @@ var tabs = []struct {
 	{"IN", "inbox", vDesk},
 	{"FL", "files", vFiles},
 	{"RP", "repos", vRepos},
-	{"RC", "recaps", vRecaps},
+	{"MQ", "morq", vMorq},
 	{"PR", "pull requests", vPulls},
 	{"PO", "proposals", vProposals},
 	{"PC", "paperclip", vPaperclip},
@@ -88,7 +87,7 @@ type model struct {
 	prDet      map[string]PRDetail   // pull request url -> its side panel
 	prLoading  map[string]bool       // pull request urls whose side panel is being read: held arrow keys start no second gh
 	prScroll   *chatScroll           // how far the PR side panel is scrolled back
-	rcScroll   *chatScroll           // how far the RC view's recap panel is scrolled back
+	mq         []string              // the MQ view: `morq report` lines
 	badgeAt    time.Time             // when the proposals and Paperclip were last read for the tab bar
 	pendingJob string                // a background agent /NW started: selected once it shows in the list
 	props      []string
@@ -166,7 +165,7 @@ func newModel() model {
 	cfg, ct, err := loadConfig()
 	bgMode = cfg.Bg
 	applyTheme(cfg.Theme)
-	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, pcForms: &pcFormSet{}, prDet: map[string]PRDetail{}, prLoading: map[string]bool{}, prScroll: &chatScroll{}, rcScroll: &chatScroll{}, askProg: map[string]*askProg{}, bgScr: map[string]Prompt{}, out: map[string][]outMsg{}, stopped: map[string]time.Time{}, remoteChat: map[string]RemoteChat{}, remoteRead: map[string]bool{}}
+	m := model{cfg: cfg, cfgTime: ct, expect: map[string]time.Time{}, lastCache: map[string]cachedLast{}, ed: newEditor(), prompts: map[string]Prompt{}, scroll: &chatScroll{}, files: loadFileHistory(), pcDet: map[string]PCDetail{}, pcScroll: &chatScroll{}, pcForms: &pcFormSet{}, prDet: map[string]PRDetail{}, prLoading: map[string]bool{}, prScroll: &chatScroll{}, askProg: map[string]*askProg{}, bgScr: map[string]Prompt{}, out: map[string][]outMsg{}, stopped: map[string]time.Time{}, remoteChat: map[string]RemoteChat{}, remoteRead: map[string]bool{}}
 	m.ed.drafts = loadDrafts()
 	if err != nil {
 		m.setErr("keys.toml: " + err.Error())
@@ -621,6 +620,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if time.Since(m.badgeAt) > badgeEvery { // the PO and PC tabs turn orange on other views too
 			m.badgeAt = time.Now()
 			cmds = append(cmds, func() tea.Msg { return propsMsg(readProposals()) })
+			cmds = append(cmds, func() tea.Msg { return mqMsg(readMorq()) })
 			if m.view != vPaperclip {
 				m.pcAt = time.Now()
 				cmds = append(cmds, func() tea.Msg { return pcMsg(loadPaperclip()) })
@@ -770,6 +770,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.listSel = max(0, len(m.pulls.Items)-1)
 			}
 		}
+		return m, nil
+	case mqMsg:
+		m.setMQ(msg)
 		return m, nil
 	case propsMsg:
 		m.props = msg
@@ -962,7 +965,7 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case vFind:
 		_, cmd := m.findKey(ks)
 		return m, cmd
-	case vFiles, vProposals, vPulls, vRecaps, vPaperclip, vRepos:
+	case vFiles, vProposals, vPulls, vMorq, vPaperclip, vRepos:
 		if done, cmd := m.listKey(ks); done {
 			return m, cmd
 		}
@@ -1535,10 +1538,10 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 			m.mode = mTyping
 			return true, m.ed.open("pr:"+pr.URL, "", m.editorWidth())
 		}
-	case vRecaps:
-		n = len(m.recaps())
-		if m.panelScroll(m.rcScroll, ks) {
-			return true, nil
+	case vMorq:
+		n = len(m.mq)
+		if done, cmd := m.morqKey(ks); done {
+			return true, cmd
 		}
 	case vPaperclip:
 		n = len(m.pc.Items)
@@ -1587,11 +1590,6 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 				c := exec.Command(proposalsBin(), "show", id)
 				return true, tea.ExecProcess(exec.Command("sh", "-c", c.String()+" | less -R"), func(err error) tea.Msg { return execDone{err} })
 			}
-		case vRecaps:
-			if rs := m.recaps(); m.listSel < len(rs) {
-				m.selSID, m.view = rs[m.listSel].agent.SID, vDesk
-				m.writeState()
-			}
 		case vPaperclip:
 			if m.listSel < len(m.pc.Items) {
 				openPath("open", m.pc.Items[m.listSel].URL)
@@ -1639,6 +1637,9 @@ func (m *model) listKey(ks string) (bool, tea.Cmd) {
 
 func (m model) command(code string) (tea.Model, tea.Cmd) {
 	c := strings.ToUpper(strings.Fields(code)[0])
+	if f := strings.Fields(code); (c == "MO" || c == "MQ") && len(f) > 1 { // MO START / MO STOP: morq's proposer
+		return m.morqCommand(f[1])
+	}
 	for _, t := range tabs {
 		if c == t.code {
 			m.view, m.zoom, m.listSel = t.v, false, 0
@@ -1647,6 +1648,8 @@ func (m model) command(code string) (tea.Model, tea.Cmd) {
 				return m, m.openRepos()
 			case vProposals:
 				m.loadProposals()
+			case vMorq:
+				m.loadMorq()
 			case vPulls:
 				m.pullsAt = time.Now()
 				return m, func() tea.Msg { return pullsMsg(loadPulls()) }
@@ -1771,23 +1774,6 @@ func propID(line string) string {
 		return strings.TrimSuffix(f[1], ":")
 	}
 	return ""
-}
-
-type agentRecap struct {
-	agent Agent
-	last  Last
-}
-
-// recaps: the agents that have a recap, newest recap first.
-func (m *model) recaps() []agentRecap {
-	var out []agentRecap
-	for i := range m.agents {
-		if l := m.last(&m.agents[i]); l.Recap != "" {
-			out = append(out, agentRecap{m.agents[i], l})
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].last.RecapAt.After(out[j].last.RecapAt) })
-	return out
 }
 
 // badgeEvery: how often the tab bar reads the proposals and Paperclip, and the PR view its pull requests.
