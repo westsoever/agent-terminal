@@ -26,7 +26,7 @@ export GIT_SSH_COMMAND=${GIT_SSH_COMMAND:-"ssh -o BatchMode=yes -o ConnectTimeou
 
 log() { mkdir -p "$AGENT_HOME"; printf '%s %s %s\n' "$(date '+%F %T')" "$MODE" "$*" >>"$LOG"; }
 
-bg() { # run "sync" detached; hooks must not wait on the network
+sync_detached() { # run "sync" detached; hooks must not wait on the network
   [ -t 0 ] || cat >/dev/null   # the hook's JSON
   if [ "${STATE_SYNC_FG:-}" = 1 ]; then "$SELF" sync; else nohup "$SELF" sync >/dev/null 2>&1 </dev/null & fi
   exit 0
@@ -77,13 +77,13 @@ sync_one() { # repo; caller holds the repo lock
 }
 
 case "$MODE" in
-  start|end) bg ;;
+  start|end) sync_detached ;;
   stop)
     [ -t 0 ] || cat >/dev/null
     now=$(date +%s); last=$(cat "$STAMP" 2>/dev/null || echo 0)
     [ $((now - last)) -ge "$GAP" ] || exit 0
     mkdir -p "$AGENT_HOME"; echo "$now" >"$STAMP"
-    bg </dev/null ;;
+    sync_detached </dev/null ;;
   _locked) rc=0; sync_one "$2" || rc=$?; exit "$rc" ;;
   sync)
     rc=0
