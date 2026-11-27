@@ -3,7 +3,7 @@
 # AGENT_HOME and CLAUDE_DIR redirected, so nothing here can touch the real machine state.
 set -uo pipefail
 
-KIT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+KIT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)   # -P: install.sh links the physical path (macOS /tmp is /private/tmp)
 BIN=$KIT/bin
 : "${T_ROOT:?run via tests/run.sh}"
 TNAME=${TNAME:-$(basename "${0%.sh}")}

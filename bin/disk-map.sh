@@ -48,7 +48,8 @@ shopt -s nullglob
 n=0
 while IFS=$'\t' read -r safety label globs cmd; do
   paths=()
-  for g in $globs; do paths+=( $g ); done  # unquoted on purpose: the globs expand here
+  # shellcheck disable=SC2206 # unquoted on purpose: the globs expand here
+  for g in $globs; do paths+=( $g ); done
   ((${#paths[@]})) || continue
   kb=0; list=()
   for p in "${paths[@]}"; do
