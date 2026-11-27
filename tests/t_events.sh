@@ -15,7 +15,7 @@ assert_eq "ev: name" "demo" "$(printf '%s' "$line" | jq -r .name)"
 assert_eq "ev: cwd" "/tmp/demo" "$(printf '%s' "$line" | jq -r .cwd)"
 assert_eq "ev: empty data is {}" "{}" "$(printf '%s' "$line" | jq -c .data)"
 assert_contains "ev: ISO UTC timestamp" "$(printf '%s' "$line" | jq -r .ts)" "Z"
-assert_eq "ev: file is private (0600)" "600" "$(stat -f %Lp "$EVF")"
+assert_eq "ev: file is private (0600)" "600" "$(t_mode "$EVF")"
 
 ev stop_blocked '{"retry":2,"reason":"tests"}'
 assert_eq "ev: data kept" "2" "$(tail -1 "$EVF" | jq -r .data.retry)"
