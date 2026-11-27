@@ -149,11 +149,52 @@ file_mtime() {
   printf '%s\n' "$m"
 }
 
-# epoch_date EPOCH +FORMAT: that epoch in local time, e.g. epoch_date 1700000000 +%H; prints nothing when it cannot be
-# told. `date -r EPOCH` is BSD (macOS); on GNU date `-r` takes a FILE and the epoch needs `-d @EPOCH`. Each is wrong
-# on the other system (BSD `-d` is a DST flag), so GNU is told apart first: BSD date rejects --version.
+# at_userland: tell GNU coreutils (Linux) from BSD (macOS) date and stat, by feature: BSD date and stat reject
+# --version. The answer is kept per PATH, so a PATH with other tools (the tests' shims) is asked again. A command
+# substitution cannot fill the cache of its parent: a script that calls the helpers below in a loop runs at_userland
+# once at top level first.
+at_userland() {
+  [ "${_AT_UL_PATH-}" = "$PATH" ] && return 0
+  _AT_GNU_DATE=; _AT_GNU_STAT=
+  if date --version >/dev/null 2>&1; then _AT_GNU_DATE=1; fi
+  if stat --version >/dev/null 2>&1; then _AT_GNU_STAT=1; fi
+  _AT_UL_PATH=$PATH
+}
+
+# epoch_date [-u] EPOCH +FORMAT: that epoch in local time (UTC with -u), e.g. epoch_date 1700000000 +%H; prints nothing
+# when it cannot be told. `date -r EPOCH` is BSD (macOS); on GNU date `-r` takes a FILE and the epoch needs `-d @EPOCH`.
+# Each is wrong on the other system (BSD `-d` is a DST flag), so GNU is told apart first (at_userland).
 epoch_date() {
-  if date --version >/dev/null 2>&1; then date -d "@$1" "$2" 2>/dev/null; else date -r "$1" "$2" 2>/dev/null; fi
+  local u=; if [ "${1:-}" = -u ]; then u=-u; shift; fi
+  at_userland
+  if [ -n "$_AT_GNU_DATE" ]; then date ${u:+"$u"} -d "@$1" "$2" 2>/dev/null; else date ${u:+"$u"} -r "$1" "$2" 2>/dev/null; fi
+}
+
+# date_parse [-u] FORMAT STRING +OUTFORMAT: STRING, written in strftime FORMAT in local time (UTC with -u), printed in
+# OUTFORMAT (+%s for the epoch); nothing and status 1 when it does not parse. BSD date reads it with -j -f FORMAT. GNU
+# date -d reads the forms used here (YYYY-MM-DD, "YYYY-MM-DD HH:MM:SS", YYYY-MM-DDTHH:MM:SS[Z]) without a format but
+# also reads words ("tomorrow"), so on GNU the result must format back to STRING exactly.
+date_parse() {
+  local u='' e; if [ "${1:-}" = -u ]; then u=-u; shift; fi
+  at_userland
+  if [ -z "$_AT_GNU_DATE" ]; then date ${u:+"$u"} -j -f "$1" "$2" "$3" 2>/dev/null; return; fi
+  e=$(date ${u:+"$u"} -d "$2" +%s 2>/dev/null) || return 1
+  [ "$(date ${u:+"$u"} -d "@$e" "+$1" 2>/dev/null)" = "$2" ] || return 1
+  date ${u:+"$u"} -d "@$e" "$3" 2>/dev/null
+}
+
+# day_shift DAY N +OUTFORMAT: the local day N days after DAY (YYYY-MM-DD; N may be negative), in OUTFORMAT. Counted
+# from local noon, so a DST change (a 23 or 25 h day) never lands it on the wrong day.
+day_shift() {
+  local e; e=$(date_parse '%Y-%m-%d %H:%M:%S' "$1 12:00:00" +%s) && [ -n "$e" ] || return 1
+  epoch_date $((e + $2 * 86400)) "$3"
+}
+
+# file_mode FILE: its permission bits in octal (600, 755), nothing when it cannot be read. BSD `stat -f %Lp`; GNU
+# `stat -f` is file system status and can exit 0 with a block of text, so GNU is told apart first (at_userland).
+file_mode() {
+  at_userland
+  if [ -n "$_AT_GNU_STAT" ]; then stat -c %a "$1" 2>/dev/null; else stat -f %Lp "$1" 2>/dev/null; fi
 }
 
 # ev KIND [DATA_JSON]: append one line to $AGENT_HOME/events.jsonl, the input contract for the Phase 6

@@ -181,4 +181,22 @@ assert_file "queue.sh on macOS: the queue folder is made" "$AGENT_HOME/queue"
 rm -rf "$AGENT_HOME/queue"
 PATH="$WORK/shim-GNU:$PATH" "$BIN/queue.sh" status >/dev/null 2>&1   # QUEUE_TERM (a helper) set, as in every other test: still runs off macOS
 assert_file "queue.sh with a QUEUE_TERM helper runs off macOS too" "$AGENT_HOME/queue"
+# ---------- date_parse, day_shift, epoch_date -u and file_mode on this machine's own tools ----------
+assert_eq "date_parse: local time to epoch" "$NOON" "$(date_parse '%Y-%m-%d %H:%M:%S' '2023-11-14 12:13:20' +%s)"
+assert_eq "date_parse -u: ISO UTC with Z to epoch" "$LATE" "$(TZ=Europe/Copenhagen date_parse -u '%Y-%m-%dT%H:%M:%SZ' '2023-11-14T22:13:20Z' +%s)"
+assert_eq "date_parse: reformats" "2023-W46" "$(date_parse '%Y-%m-%d' '2023-11-14' +%G-W%V)"
+assert_eq "date_parse: ISO local time with T" "$NOON" "$(date_parse '%Y-%m-%dT%H:%M:%S' '2023-11-14T12:13:20' +%s)"
+assert_ne_day() { [ "$(date_parse '%Y-%m-%d' "$2" +%Y-%m-%d || true)" != "$2" ] && pass "$1" || fail "$1" "  $2 read back as itself"; }
+assert_ne_day "date_parse: an impossible day does not read back as itself" "2026-02-30"
+assert_eq "date_parse: a word is not a date" "" "$(date_parse '%Y-%m-%d' tomorrow +%Y-%m-%d || true)"
+assert_eq "date_parse: garbage fails with status 1" "1" "$(date_parse '%Y-%m-%dT%H:%M:%S' 'not a time' +%s >/dev/null; echo $?)"
+assert_eq "day_shift: forward over a month end" "2026-03-02" "$(day_shift 2026-02-27 3 +%Y-%m-%d)"
+assert_eq "day_shift: backward over a year end" "2025-12-25" "$(day_shift 2026-01-01 -7 +%Y-%m-%d)"
+assert_eq "day_shift: over a DST change (Copenhagen, 2026-03-29)" "2026-03-30 2026-03-28" \
+  "$(TZ=Europe/Copenhagen day_shift 2026-03-29 1 +%Y-%m-%d) $(TZ=Europe/Copenhagen day_shift 2026-03-29 -1 +%Y-%m-%d)"
+assert_eq "epoch_date -u: UTC whatever TZ says" "2023-11-14T22:13:20Z" "$(TZ=Asia/Tokyo epoch_date -u "$LATE" +%Y-%m-%dT%H:%M:%SZ)"
+chmod 640 "$F"; assert_eq "file_mode: permission bits in octal" "640" "$(file_mode "$F")"
+mkdir -p "$WORK/m700"; chmod 700 "$WORK/m700"; assert_eq "file_mode: a folder" "700" "$(file_mode "$WORK/m700")"
+assert_eq "file_mode: a missing file prints nothing" "" "$(file_mode "$WORK/no-such-file")"
+assert_eq "tests' t_mode agrees" "640" "$(t_mode "$F")"
 exit 0
