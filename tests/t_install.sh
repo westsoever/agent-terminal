@@ -3,6 +3,10 @@
 # popup opt-in, uninstall, and the installed hook commands actually working through the symlink.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# plutil (macOS) reads the launchd plists back. Without it (Linux, where launchd never runs them) those checks are
+# skipped; the plist text checks still run.
+PLUTIL=$(command -v plutil || true)
+[ -n "$PLUTIL" ] || echo "no plutil (not macOS): launchd plist read-back checks skipped" >>"$T_ROOT/skipped.t_install"
 
 D="$WORK/fixture-claude"; mkdir -p "$D"
 VS="/Users/someone/.claude/vscode-session-manager-hook.sh"
@@ -100,7 +104,7 @@ out=$(inst --yes --dry-run); assert_contains "dry-run after install: nothing to 
 assert_file "watcher plist installed" "$LA"
 assert_contains "plist runs every 300 s" "$(cat "$LA")" "<integer>300</integer>"
 assert_contains "plist points at the kit symlink" "$(cat "$LA")" "/agent-terminal/bin/agent-terminal-watch.sh"
-assert_ok "plist is valid XML plist" plutil -lint "$LA"
+[ -z "$PLUTIL" ] || assert_ok "plist is valid XML plist" plutil -lint "$LA"
 assert_contains "launchctl bootstrap called" "$(cat "$WORK/launchctl.log")" "bootstrap gui/"
 n=$(wc -l <"$WORK/launchctl.log")
 inst --yes >/dev/null
@@ -240,10 +244,10 @@ XD="$WORK/x&y<z>"; XA="$WORK/a&b<c>"; XLA="$WORK/la-escape"; mkdir -p "$XD"; pri
 xinst() { env SETTINGS_FILE="$XD/settings.json" CLAUDE_DIR="$XD" AGENT_HOME="$XA" AGENT_REPOS_FILE="$WORK/escape-repos" LAUNCH_AGENTS_DIR="$XLA" "$KIT/install.sh" "$@" </dev/null 2>&1; }
 out=$(xinst --yes); assert_eq "special characters in paths: install exits 0" "0" "$?"
 XP="$XLA/org.agent-terminal.watch.plist"
-assert_ok "special characters: the plist is valid" plutil -lint "$XP"
-assert_eq "special characters: AGENT_HOME survives the round trip" "$XA" "$(plutil -extract EnvironmentVariables.AGENT_HOME raw -o - "$XP")"
-assert_eq "special characters: the script path survives the round trip" "$XD/agent-terminal/bin/agent-terminal-watch.sh" "$(plutil -extract ProgramArguments.1 raw -o - "$XP")"
-assert_eq "special characters: the log path survives the round trip" "$XA/watch.log" "$(plutil -extract StandardOutPath raw -o - "$XP")"
+[ -z "$PLUTIL" ] || assert_ok "special characters: the plist is valid" plutil -lint "$XP"
+[ -z "$PLUTIL" ] || assert_eq "special characters: AGENT_HOME survives the round trip" "$XA" "$(plutil -extract EnvironmentVariables.AGENT_HOME raw -o - "$XP")"
+[ -z "$PLUTIL" ] || assert_eq "special characters: the script path survives the round trip" "$XD/agent-terminal/bin/agent-terminal-watch.sh" "$(plutil -extract ProgramArguments.1 raw -o - "$XP")"
+[ -z "$PLUTIL" ] || assert_eq "special characters: the log path survives the round trip" "$XA/watch.log" "$(plutil -extract StandardOutPath raw -o - "$XP")"
 assert_contains "special characters: the file holds the escaped form" "$(cat "$XP")" "a&amp;b&lt;c&gt;/watch.log"
 assert_not_contains "special characters: no raw ampersand-path in the file" "$(cat "$XP")" "a&b"
 out=$(xinst --yes); assert_contains "special characters: a second run is a no-op" "$out" "nothing to do"
@@ -281,7 +285,7 @@ if [ "$(uname)" = Darwin ] && printf '' | script -q /dev/null true >/dev/null 2>
   assert_eq "tty, answer y: hooks installed" "1" "$(jq '[.hooks.PreToolUse[]?.hooks[]?.command | select(contains("/agent-terminal/bin/guard.sh"))] | length' "$TD/settings.json")"
   assert_contains "tty, answer y: launchctl bootstrap called" "$(tail -n +$((n + 1)) "$WORK/launchctl.log")" "bootstrap gui/"
 else
-  echo "no usable script(1) pty: tty prompt tests skipped" >"$T_ROOT/skipped.t_install"
+  echo "no usable script(1) pty: tty prompt tests skipped" >>"$T_ROOT/skipped.t_install"
 fi
 
 # ---------- Phase 6: the learner job (org.agent-terminal.learn) and the claude-mem exclusion (D27) ----------
@@ -300,18 +304,18 @@ assert_not_contains "learn: no claude-mem settings: nothing planned for it" "$ou
 n=$(wc -l <"$WORK/launchctl.log")
 out=$(linst --yes); rc=$?
 assert_eq "learn: install exits 0" "0" "$rc"
-assert_ok "learn: the plist is valid" plutil -lint "$LP"
-assert_eq "learn: label" "org.agent-terminal.learn" "$(plutil -extract Label raw -o - "$LP")"
-assert_eq "learn: runs learn.sh through the kit link" "$LD/agent-terminal/bin/learn.sh" "$(plutil -extract ProgramArguments.1 raw -o - "$LP")"
-assert_eq "learn: no argument (learn.sh decides the weekly part)" "2" "$(plutil -extract ProgramArguments raw -o - "$LP")"
-assert_eq "learn: every day at 05:30" "5 30" "$(plutil -extract StartCalendarInterval.Hour raw -o - "$LP") $(plutil -extract StartCalendarInterval.Minute raw -o - "$LP")"
-assert_eq "learn: no weekday (daily)" "" "$(plutil -extract StartCalendarInterval.Weekday raw -o - "$LP" 2>/dev/null)"
-assert_eq "learn: not run at load" "" "$(plutil -extract RunAtLoad raw -o - "$LP" 2>/dev/null)"
-assert_eq "learn: AGENT_TERMINAL_LEARNER=1" "1" "$(plutil -extract EnvironmentVariables.AGENT_TERMINAL_LEARNER raw -o - "$LP")"
-assert_eq "learn: CLAUDE_MEM_INTERNAL=1" "1" "$(plutil -extract EnvironmentVariables.CLAUDE_MEM_INTERNAL raw -o - "$LP")"
-assert_eq "learn: AGENT_HOME" "$LAH" "$(plutil -extract EnvironmentVariables.AGENT_HOME raw -o - "$LP")"
-assert_contains "learn: PATH reaches claude in ~/.local/bin" "$(plutil -extract EnvironmentVariables.PATH raw -o - "$LP")" "$HOME/.local/bin"
-assert_eq "learn: launchd output goes to AGENT_HOME/learn.log" "$LAH/learn.log" "$(plutil -extract StandardOutPath raw -o - "$LP")"
+[ -z "$PLUTIL" ] || assert_ok "learn: the plist is valid" plutil -lint "$LP"
+[ -z "$PLUTIL" ] || assert_eq "learn: label" "org.agent-terminal.learn" "$(plutil -extract Label raw -o - "$LP")"
+[ -z "$PLUTIL" ] || assert_eq "learn: runs learn.sh through the kit link" "$LD/agent-terminal/bin/learn.sh" "$(plutil -extract ProgramArguments.1 raw -o - "$LP")"
+[ -z "$PLUTIL" ] || assert_eq "learn: no argument (learn.sh decides the weekly part)" "2" "$(plutil -extract ProgramArguments raw -o - "$LP")"
+[ -z "$PLUTIL" ] || assert_eq "learn: every day at 05:30" "5 30" "$(plutil -extract StartCalendarInterval.Hour raw -o - "$LP") $(plutil -extract StartCalendarInterval.Minute raw -o - "$LP")"
+[ -z "$PLUTIL" ] || assert_eq "learn: no weekday (daily)" "" "$(plutil -extract StartCalendarInterval.Weekday raw -o - "$LP" 2>/dev/null)"
+[ -z "$PLUTIL" ] || assert_eq "learn: not run at load" "" "$(plutil -extract RunAtLoad raw -o - "$LP" 2>/dev/null)"
+[ -z "$PLUTIL" ] || assert_eq "learn: AGENT_TERMINAL_LEARNER=1" "1" "$(plutil -extract EnvironmentVariables.AGENT_TERMINAL_LEARNER raw -o - "$LP")"
+[ -z "$PLUTIL" ] || assert_eq "learn: CLAUDE_MEM_INTERNAL=1" "1" "$(plutil -extract EnvironmentVariables.CLAUDE_MEM_INTERNAL raw -o - "$LP")"
+[ -z "$PLUTIL" ] || assert_eq "learn: AGENT_HOME" "$LAH" "$(plutil -extract EnvironmentVariables.AGENT_HOME raw -o - "$LP")"
+[ -z "$PLUTIL" ] || assert_contains "learn: PATH reaches claude in ~/.local/bin" "$(plutil -extract EnvironmentVariables.PATH raw -o - "$LP")" "$HOME/.local/bin"
+[ -z "$PLUTIL" ] || assert_eq "learn: launchd output goes to AGENT_HOME/learn.log" "$LAH/learn.log" "$(plutil -extract StandardOutPath raw -o - "$LP")"
 assert_contains "learn: bootstrapped" "$(tail -n +$((n + 1)) "$WORK/launchctl.log")" "bootstrap gui/$(id -u) $LP"
 assert_file "learn: the watcher is installed too" "$LLA/org.agent-terminal.watch.plist"
 n=$(wc -l <"$WORK/launchctl.log")
@@ -323,7 +327,7 @@ out=$(linst); rc=$?
 assert_eq "learn: a changed plist without a tty or --yes is refused" "1" "$rc"
 assert_contains "learn: ... the diff shows the old minute" "$out" "<integer>45</integer>"
 linst --yes >/dev/null
-assert_eq "learn: --yes restores the minute" "30" "$(plutil -extract StartCalendarInterval.Minute raw -o - "$LP")"
+[ -z "$PLUTIL" ] || assert_eq "learn: --yes restores the minute" "30" "$(plutil -extract StartCalendarInterval.Minute raw -o - "$LP")"
 
 # claude-mem installed: the learner's .work joins CLAUDE_MEM_EXCLUDED_PROJECTS, with a backup first
 printf '{\n  "CLAUDE_MEM_RUNTIME": "worker",\n  "CLAUDE_MEM_EXCLUDED_PROJECTS": "/Users/x/secret/**"\n}\n' >"$CMS"; chmod 640 "$CMS"
@@ -340,7 +344,7 @@ assert_eq "claude-mem: install exits 0" "0" "$rc"
 assert_eq "claude-mem: the entry is appended, the old one kept" "/Users/x/secret/**,$LAH/proposals/.work" "$(jq -r .CLAUDE_MEM_EXCLUDED_PROJECTS "$CMS")"
 assert_eq "claude-mem: other settings untouched" "worker" "$(jq -r .CLAUDE_MEM_RUNTIME "$CMS")"
 assert_eq "claude-mem: a backup holds the old file" "$CM_BEFORE" "$(cat "$CMS".bak.agent-terminal.*)"
-assert_eq "claude-mem: the file keeps its mode" "640" "$(stat -f %Lp "$CMS")"
+assert_eq "claude-mem: the file keeps its mode" "640" "$(t_mode "$CMS")"
 CMA=$(cat "$CMS")
 out=$(linst --yes)
 assert_contains "claude-mem: a second run has nothing to do" "$out" "nothing to do"
