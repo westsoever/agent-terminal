@@ -597,7 +597,7 @@ if [ "$CM_CHANGED" -eq 1 ]; then
   cp -p "$CM_FILE" "$CM_BACKUP"; act "backup -> $CM_BACKUP"
   tmp=$(mktemp "$(dirname "$CM_FILE")/.settings.XXXXXX")
   printf '%s\n' "$CM_NEW" >"$tmp"
-  chmod "$(stat -f %Lp "$CM_FILE" 2>/dev/null || stat -c %a "$CM_FILE")" "$tmp"
+  chmod --reference="$CM_FILE" "$tmp" 2>/dev/null || chmod "$(stat -f %Lp "$CM_FILE")" "$tmp"
   mv "$tmp" "$CM_FILE"; act "wrote $CM_FILE (CLAUDE_MEM_EXCLUDED_PROJECTS)"
 fi
 apply_plist() { # file body label what
