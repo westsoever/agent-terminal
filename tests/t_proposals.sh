@@ -187,8 +187,8 @@ F="$P/rule-no-version-bump.md"
 assert_eq "write: exit 0 under set -euo pipefail" "0" "$rc"
 assert_eq "write: prints 'written <path>'" "written $(cd "$P" && pwd -P)/rule-no-version-bump.md" "$out"
 assert_file "write: file created" "$F"
-assert_eq "write: dir mode 0700" "700" "$(stat -f %Lp "$P")"
-assert_eq "write: file mode 0600" "600" "$(stat -f %Lp "$F")"
+assert_eq "write: dir mode 0700" "700" "$(t_mode "$P")"
+assert_eq "write: file mode 0600" "600" "$(t_mode "$F")"
 assert_eq "write: header keys in spec 4.2 order" "id kind status created component fingerprint sessions days target " \
   "$(sed '/^$/q' "$F" | sed -n 's/^\([a-z_]*\): .*/\1/p' | tr '\n' ' ')"
 assert_eq "write: id" "rule-no-version-bump" "$(sed -n 1p "$F" | sed 's/^id: //')"
@@ -229,7 +229,7 @@ assert_contains "rerun: evidence refreshed" "$(proposal_section "$F" evidence)" 
 assert_eq "rerun: created kept" "$created1" "$(proposal_get "$F" created)"
 assert_contains "rerun: proposal text kept (the owner may be reading it)" "$(proposal_section "$F" proposal)" "never bump the version"
 assert_eq "rerun: patch kept" "$(jq -r .patch <<<"$J1")" "$(proposal_patch "$F")"
-assert_eq "rerun: still 0600" "600" "$(stat -f %Lp "$F")"
+assert_eq "rerun: still 0600" "600" "$(t_mode "$F")"
 
 fp2=$(proposal_fingerprint "use pnpm not npm")
 printf '%s rejected 2026-10-15: not a rule\n' "$fp2" >"$P/rejected.txt"
@@ -281,7 +281,7 @@ assert_eq "absolute path inside the root (canonical spelling) is fine" "written 
   "$(pj "$(proposal_fingerprint abs2)" | proposal_write "$(cd "$P" && pwd -P)/rule-abs2.md")"
 # proposal_safe_path: the shared check for other learner writes (.work, the weekly report)
 assert_eq "safe_path: relative subpath allowed, parents made 0700" "$(cd "$P" && pwd -P)/.work/x/prompts.jsonl" "$(proposal_safe_path .work/x/prompts.jsonl)"
-assert_eq "safe_path: made dir is 0700" "700" "$(stat -f %Lp "$P/.work/x")"
+assert_eq "safe_path: made dir is 0700" "700" "$(t_mode "$P/.work/x")"
 assert_fails "safe_path: ../ refused" proposal_safe_path ../x
 ln -s "$WORK/outside" "$P/.work/out"
 assert_fails "safe_path: symlinked directory inside the root refused" proposal_safe_path .work/out/prompts.jsonl
@@ -293,7 +293,7 @@ assert_eq "symlinked proposals root: nothing written" "" "$(ls -A "$WORK/elsewhe
 # a root that already existed with a looser mode is tightened
 AH3="$WORK/agent3"; mkdir -p "$AH3/proposals"; chmod 755 "$AH3/proposals"
 printf '%s' "$JX" | AGENT_HOME=$AH3 proposal_write rule-x.md >/dev/null
-assert_eq "existing root tightened to 0700" "700" "$(stat -f %Lp "$AH3/proposals")"
+assert_eq "existing root tightened to 0700" "700" "$(t_mode "$AH3/proposals")"
 
 # ---------- proposal_write: bad input (exit 2, nothing written) ----------
 bad() { # name path json

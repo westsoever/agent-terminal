@@ -9,7 +9,7 @@
 # shellcheck source=../bin/lib.sh
 . "$BIN/lib.sh"
 export TZ=UTC
-LEARN_NOW=$(date -j -f '%Y-%m-%d %H:%M:%S' "2026-10-19 06:00:00" +%s)   # Monday of 2026-W43: the default is W42
+LEARN_NOW=$(t_epoch '%Y-%m-%d %H:%M:%S' "2026-10-19 06:00:00")   # Monday of 2026-W43: the default is W42
 export LEARN_NOW
 FX="$KIT/tests/fixtures/learn"
 X="$BIN/learn-extract.sh"
@@ -78,7 +78,7 @@ assert_eq "report: exit 0" "0" "$rc"
 assert_eq "report: quiet on stderr" "" "$(cat "$WORK/rep.err")"
 assert_eq "report: says where it wrote" "report $(cd "$ROOT" && pwd -P)/report-2026-W42.md" "$out"
 assert_file "report: default week is the last complete one (W42)" "$R"
-assert_eq "report: mode 0600" "600" "$(stat -f %Lp "$R")"
+assert_eq "report: mode 0600" "600" "$(t_mode "$R")"
 rep=$(cat "$R")
 assert_contains "header: week and dates" "$rep" "week: 2026-10-12 to 2026-10-18 (local time, UTC)"
 
