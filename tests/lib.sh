@@ -144,6 +144,37 @@ tallow() {
 # delay under test, measured just before (see t_meta.sh): on a loaded machine a fixed limit fails on load alone.
 ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
 
+# ---- the tests' own clock and file reads, on BSD (macOS) or GNU (Linux) date and stat ----
+# The scripts under test use bin/lib.sh (epoch_date, date_parse, file_mode); these are kept apart from them, so a test
+# never checks a helper with itself. BSD date and stat reject --version.
+#   t_date EPOCH +FMT       local time        t_udate EPOCH +FMT   UTC
+#   t_epoch [-u] FMT STR    STR, written as FMT in local time (UTC with -u), as epoch seconds
+#   t_mode FILE             permission bits in octal (600)          t_mtime FILE   mtime as epoch seconds
+if date --version >/dev/null 2>&1; then
+  t_date() { date -d "@$1" "$2"; }
+  t_udate() { date -u -d "@$1" "$2"; }
+  t_epoch() { if [ "$1" = -u ]; then date -u -d "$3" +%s; else date -d "$2" +%s; fi; }
+else
+  t_date() { date -r "$1" "$2"; }
+  t_udate() { date -u -r "$1" "$2"; }
+  t_epoch() { if [ "$1" = -u ]; then date -u -j -f "$2" "$3" +%s; else date -j -f "$1" "$2" +%s; fi; }
+fi
+on_macos() { [ "$(uname -s)" = Darwin ]; }
+# skip_off_macos REASON: off macOS, note REASON as this file's skip and end it (exit 0). For a test file whose subject is
+# macOS-only (launchd, menu bar, voice) or deferred, i.e. not run on the Linux station. A part of a file uses on_macos.
+skip_off_macos() {
+  on_macos && return 0
+  echo "$TNAME: $1" >>"$T_ROOT/skipped.$TNAME"
+  exit 0
+}
+if stat --version >/dev/null 2>&1; then
+  t_mode() { stat -c %a "$1"; }
+  t_mtime() { stat -c %Y "$1"; }
+else
+  t_mode() { stat -f %Lp "$1"; }
+  t_mtime() { stat -f %m "$1"; }
+fi
+
 # ---- leftover processes ----
 # own_sleep SECS: a sleep length only this test run uses (SECS.<pid of the test>), so a leftover check by command
 # line never sees the sleep of another test file or of another suite running at the same time. Keep SECS well
