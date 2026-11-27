@@ -26,6 +26,7 @@ set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
+at_userland   # GNU or BSD date and stat, told once for the date helpers below
 
 NOW=${WATCH_NOW:-$(date +%s)}
 STALL_SECS=$(( ${WATCH_STALL_MINS:-20} * 60 ))
@@ -50,7 +51,7 @@ num_or() { # value default -> value as a decimal number when it is 1 to 9 digits
     *) if [ "${#1}" -le 9 ]; then printf '%s' $((10#$1)); else printf '%s' "$2"; fi ;;
   esac
 }
-DAY=$(date -u -r "$NOW" +%Y-%m-%d)
+DAY=$(epoch_date -u "$NOW" +%Y-%m-%d)
 mkdir -p "$AGENT_HOME/tokens"
 # Heartbeat for the menu bar dot (ui/menubar): the mtime of $AGENT_HOME/watch.heartbeat says launchd still runs this
 # job. Written before the lock, so a tick that finds the previous one still busy counts as alive too. Never fails the tick.
@@ -66,7 +67,7 @@ trap 'rm -rf "$LOCK" "$TMP"' EXIT
 # Sessions whose meta file has not been written for 48 h are dead (ended ones pile up by the thousand).
 # They are skipped on the file's mtime alone, with the builtin -nt: no meta_get, so no fork, per file.
 REF="$TMP/ref48h"
-touch -t "$(date -r $((NOW - 172800)) +%Y%m%d%H%M.%S)" "$REF"
+touch -t "$(epoch_date $((NOW - 172800)) +%Y%m%d%H%M.%S)" "$REF"
 
 wnotify() { NOTIFY_CWD="$CWD" NOTIFY_SESSION="$SID" NOTIFY_NOW="$NOW" "$SELF_DIR/notify.sh" "$1" "$2" </dev/null >/dev/null 2>&1 || true; }
 
@@ -153,7 +154,7 @@ CONCH_FILE=${VOICEMODE_CONCH:-$HOME/.voicemode/conch}
 LAST_SPOKEN="$AGENT_HOME/notify/last-spoken"
 
 hour_ok() { # inside the same window as budgeted banners
-  local h; h=$(date -r "$NOW" +%H); h=${h#0}
+  local h; h=$(epoch_date "$NOW" +%H); h=${h#0}
   [ "$h" -ge "$QUIET_END" ] && [ "$h" -lt "$QUIET_START" ]
 }
 user_present() { # keyboard or mouse used within PRESENT_SECS; unreadable counts as absent
@@ -168,7 +169,7 @@ user_present() { # keyboard or mouse used within PRESENT_SECS; unreadable counts
   [ "$idle" -lt "$PRESENT_SECS" ]
 }
 conch_secs() { # ISO local time as VoiceMode writes it -> epoch, or nothing when it does not parse
-  local secs; secs=$(date -j -f '%Y-%m-%dT%H:%M:%S' "${1%%.*}" +%s 2>/dev/null || true)
+  local secs; secs=$(date_parse '%Y-%m-%dT%H:%M:%S' "${1%%.*}" +%s || true)
   case "$secs" in ''|*[!0-9]*) ;; *) printf '%s' "$secs" ;; esac
 }
 voice_free() { # false while VoiceMode is in use: a live process with an active call or an unexpired hold
@@ -215,7 +216,7 @@ MAX_AGE_SECS=$(( $(num_or "${WATCH_NUDGE_MAX_HOURS:-}" 12) * 3600 )) # older tha
 # the way the 48 h pass above does it. The age check below stays: a fresh meta can carry an old `updated`.
 NREF="$TMP/nref"
 nref_epoch=$((NOW - MAX_AGE_SECS)); [ "$nref_epoch" -gt 86400 ] || nref_epoch=86400
-touch -t "$(date -r "$nref_epoch" +%Y%m%d%H%M.%S)" "$NREF"
+touch -t "$(epoch_date "$nref_epoch" +%Y%m%d%H%M.%S)" "$NREF"
 SPEAK_FAILED=0 # one failed speak per tick is enough: a hung Kokoro must not cost 30 s per waiting session
 
 log_lines() { # number of lines in notify.log; 0 when it is missing or unreadable
@@ -350,10 +351,10 @@ fi
 # 5. rotation
 EVF="$AGENT_HOME/events.jsonl"
 if [ -f "$EVF" ] && [ "$(wc -c <"$EVF" | tr -d ' ')" -gt "${WATCH_ROTATE_BYTES:-20971520}" ]; then
-  mv "$EVF" "$AGENT_HOME/events-$(date -u -r "$NOW" +%Y%m%d-%H%M%S).jsonl"
+  mv "$EVF" "$AGENT_HOME/events-$(epoch_date -u "$NOW" +%Y%m%d-%H%M%S).jsonl"
 fi
 if [ -f "$NOTIFY_LOG_FILE" ] && [ "$(wc -c <"$NOTIFY_LOG_FILE" | tr -d ' ')" -gt "${WATCH_ROTATE_BYTES:-20971520}" ]; then
-  mv "$NOTIFY_LOG_FILE" "${NOTIFY_LOG_FILE%.log}-$(date -u -r "$NOW" +%Y%m%d-%H%M%S).log"
+  mv "$NOTIFY_LOG_FILE" "${NOTIFY_LOG_FILE%.log}-$(epoch_date -u "$NOW" +%Y%m%d-%H%M%S).log"
 fi
 
 # 6. pruning: dash.sh (the menu bar runs it every 12 s) reads every session folder. A folder goes when its meta says
@@ -361,7 +362,7 @@ fi
 # last-pass, retries). Notes or anything else (STATE.md, NEXT.md, a draft) keep it, like every session not marked
 # ended. notify/ files untouched for 14 days go too: they are cooldown stamps and day counts, stale by then.
 PREF="$TMP/ref14d"
-touch -t "$(date -r $((NOW - 14 * 86400)) +%Y%m%d%H%M.%S)" "$PREF"
+touch -t "$(epoch_date $((NOW - 14 * 86400)) +%Y%m%d%H%M.%S)" "$PREF"
 only_bookkeeping() { # session folder -> 0 when every entry in it is the hooks' own
   local f
   for f in "$1"/* "$1"/.[!.]* "$1"/..?*; do

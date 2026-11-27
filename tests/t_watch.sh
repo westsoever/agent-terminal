@@ -107,7 +107,7 @@ assert_no_file "notify.log rotated away" "$AGENT_HOME/notify.log"
 assert_ok "rotated notify log kept" ls "$AGENT_HOME"/notify-*.log   # the run above may have rotated an earlier one
 
 # pruning: only an ended session's folder that holds nothing but bookkeeping, untouched for 14 days
-OLD=$(date -r $((NOW - 20 * 86400)) +%Y%m%d%H%M.%S); RECENT=$(date -r $((NOW - 3 * 86400)) +%Y%m%d%H%M.%S)
+OLD=$(t_date $((NOW - 20 * 86400)) +%Y%m%d%H%M.%S); RECENT=$(t_date $((NOW - 3 * 86400)) +%Y%m%d%H%M.%S)
 pr() { # sid state stamp [extra file]
   local d="$AGENT_HOME/sessions/$1"; mkdir -p "$d"; printf 'cwd=%s\nstate=%s\n' "$P" "$2" >"$d/meta"
   : >"$d/.meta.flock"; : >"$d/last-pass"
@@ -172,7 +172,7 @@ OAH="$WORK/old-ah"; mkdir -p "$OAH/sessions"
 oreg() { # sid state transcript meta_age_secs : session in the old-ah sandbox whose meta file is that old
   local d="$OAH/sessions/$1"; mkdir -p "$d"
   printf 'cwd=%s\nname=proj\nstate=%s\ntranscript=%s\nupdated=%s\n' "$P" "$2" "$3" "$NOW" >"$d/meta"
-  touch -t "$(date -r $((NOW - $4)) +%Y%m%d%H%M.%S)" "$d/meta"
+  touch -t "$(t_date $((NOW - $4)) +%Y%m%d%H%M.%S)" "$d/meta"
 }
 TO1="$WORK/o1.jsonl"; amsg q1 0 1 0 1 >"$TO1"; touch -t 202001010000 "$TO1"; oreg o1 working "$TO1" 259200   # 3 days old
 TO2="$WORK/o2.jsonl"; amsg q2 0 1 0 1 >"$TO2"; touch -t 202001010000 "$TO2"; oreg o2 working "$TO2" 144000   # 40 h old: inside the window
@@ -296,7 +296,7 @@ assert_eq "sync: SYNC_CHECK_INTERVAL_H=0 switches the check off" "0" "$(scalls)"
 assert_no_file "sync: ... and leaves no stamp" "$SAH/sync-check.stamp"
 sreset; SYNC_CHECK_INTERVAL_H=soon srun; swait 1
 assert_eq "sync: a junk interval falls back to the default and still runs" "1" "$(scalls)"
-sreset; : >"$SAH/sync-check.md"; touch -t "$(date -r "$NOW" +%Y%m%d%H%M.%S)" "$SAH/sync-check.md"   # made "now" on the fake clock:
+sreset; : >"$SAH/sync-check.md"; touch -t "$(t_date "$NOW" +%Y%m%d%H%M.%S)" "$SAH/sync-check.md"   # made "now" on the fake clock:
 srun; sleep 1   # under the parallel suite this line runs minutes after NOW was set, past the 60 s future-mtime guard
 assert_eq "sync: a snapshot younger than the interval (an on-demand run) counts as a run" "0" "$(scalls)"
 sreset; : >"$SAH/sync-check.md"; touch -t 202001010000 "$SAH/sync-check.md"; srun; swait 1
