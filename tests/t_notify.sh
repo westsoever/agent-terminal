@@ -2,7 +2,7 @@
 # notify.sh: repo/folder name in title, terminal-notifier -> osascript fallback, idle de-dup.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-export NOTIFY_NOW; NOTIFY_NOW=$(date -j -f '%Y-%m-%d %H:%M:%S' "$(date +%Y-%m-%d) 12:00:00" +%s)
+export NOTIFY_NOW; NOTIFY_NOW=$(t_epoch '%Y-%m-%d %H:%M:%S' "$(date +%Y-%m-%d) 12:00:00")
 
 R=$(mk_repo notifyrepo)
 LOG="$AGENT_HOME/notify.log"
@@ -61,7 +61,7 @@ assert_contains "idle label" "$(tail -1 "$LOG")" "Waiting"
 
 # ---------- routing and budget (Phase 1.5) ----------
 export NOTIFY_DRY_RUN=1; : >"$LOG"; rm -rf "$AGENT_HOME/notify"
-NOON=$(date -j -f '%Y-%m-%d %H:%M:%S' "2026-10-05 12:00:00" +%s)
+NOON=$(t_epoch '%Y-%m-%d %H:%M:%S' "2026-10-05 12:00:00")
 nt() { printf '%s' "$(hook_json Notification "$R" "$1")" | NOTIFY_NOW=${3:-$NOON} "$BIN/notify.sh" "$2" "m"; }
 nt r1 done
 assert_contains "done goes to the inbox, not a push" "$(tail -1 "$LOG")" $'\tinbox\t'
@@ -144,11 +144,11 @@ assert_contains "events: suppressed alert with reason" "$(jq -r 'select(.kind=="
 assert_contains "events: inbox routing" "$(jq -r 'select(.kind=="notify") | .data.reason' "$EVF")" "routed-to-inbox"
 
 # ---------- fix wave FC1-3: when the hour cannot be read the quiet-hours check fails closed ----------
-# A `date` that rejects -r (a non-BSD date on PATH) used to leave the hour empty and let the alert through.
+# A `date` that cannot read an epoch (rejects BSD -r and GNU -d) used to leave the hour empty and let the alert through.
 mkdir -p "$WORK/shim-noclock"
 cat >"$WORK/shim-noclock/date" <<'EOS'
 #!/usr/bin/env bash
-case "${1:-}" in -r) exit 1 ;; esac
+case "${1:-}" in -r|-d) exit 1 ;; esac
 exec /bin/date "$@"
 EOS
 chmod +x "$WORK/shim-noclock/date"
