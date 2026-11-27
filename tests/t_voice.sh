@@ -4,6 +4,7 @@
 # shellcheck disable=SC2088
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+skip_off_macos "voice (macOS only): deferred: not used on the Linux station"
 
 CMD="$KIT/commands/dash.md"
 assert_file "3.2: commands/dash.md exists" "$CMD"

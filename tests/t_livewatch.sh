@@ -2,6 +2,7 @@
 # t_livewatch.sh - tests/live-watch.sh, the silent real-machine check of the launchd watcher, against a fake
 # launchctl that replays a recorded `launchctl print` and counts kickstarts.
 . "$(dirname "$0")/lib.sh"
+skip_off_macos "live-watch.sh checks the launchd watcher (macOS only): deferred: not used on the Linux station"
 
 LW=$KIT/tests/live-watch.sh
 FAKE=$WORK/fake-lc

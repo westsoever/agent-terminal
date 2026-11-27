@@ -3,6 +3,7 @@
 # logs in the shape lib.sh ev writes; the real log is never read. TZ and METRICS_NOW pin the clock.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+skip_off_macos "metrics.sh: deferred: not used on the Linux station"
 unset AGENT_TERMINAL_INCLUDE_SANDBOX                    # the session running the tests must not switch the exclusion off
 export TZ=UTC
 NOW=$(date -j -f '%Y-%m-%d %H:%M:%S' "2026-10-16 12:00:00" +%s)   # 2026-10-16 12:00 UTC (TZ=UTC above)
