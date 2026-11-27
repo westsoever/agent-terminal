@@ -49,8 +49,8 @@ DEFB=""
 for dep in jq dirname sed awk perl git tr grep sort wc head; do
   command -v "$dep" >/dev/null 2>&1 || { echo "GUARD: $dep is not installed; failing closed" >&2; exit 2; }
 done
-# -P: resolve_path gives physical paths, so the guard's own folder must be physical too (on macOS /tmp is /private/tmp)
-SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SELF_PHYS=$(cd "$SELF_DIR" && pwd -P)   # resolve_path gives physical paths: compare those to this (macOS /tmp is /private/tmp)
 INPUT=$(cat)
 DECIDED=0
 
@@ -1026,7 +1026,7 @@ is_tamper_path() { # macOS volumes are case-insensitive: match on the lower-case
   local l s
   if is_config_path "$1"; then return 0; fi
   l=$(printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z')
-  s=$(printf '%s' "$SELF_DIR" | LC_ALL=C tr 'A-Z' 'a-z')
+  s=$(printf '%s' "$SELF_PHYS" | LC_ALL=C tr 'A-Z' 'a-z')
   case "$l" in "$s"|"$s"/*) return 0 ;; esac
   case "$l" in
     */.claude/settings.json|*/.claude/settings.local.json|*/.git/hooks|*/.git/hooks/*|*.githooks|*.githooks/*|*/agent-terminal/bin|*/agent-terminal/bin/*|*/.claude/agent-terminal|*/.claude/agent-terminal/*) return 0 ;;
@@ -1133,7 +1133,7 @@ kit_name_glob() { # sets KIT_GLOB: the kit checkout's folder name as a case-inse
   local n i c jl ju lo=abcdefghijklmnopqrstuvwxyz up=ABCDEFGHIJKLMNOPQRSTUVWXYZ
   [ "$KIT_GLOB_DONE" = 1 ] && return 0
   KIT_GLOB_DONE=1
-  n=${SELF_DIR%/*}; n=${n##*/}
+  n=${SELF_PHYS%/*}; n=${n##*/}
   for ((i = 0; i < ${#n}; i++)); do   # no tr per letter: this runs on every Bash call (no locale ranges either)
     c=${n:i:1}; jl=${lo%%"$c"*}; ju=${up%%"$c"*}
     if [ "${#jl}" -lt 26 ]; then KIT_GLOB="${KIT_GLOB}[$c${up:${#jl}:1}]"
