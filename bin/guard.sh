@@ -1191,7 +1191,9 @@ tamper_bash() {
     # or an existing symlink alias of the kit (/tmp/zz/bin/guard.sh) is checked too. The command word is not a
     # target (cp in cwd=<kit>/bin is not <kit>/bin/cp), except after a split '>&', where k=0 is the redirect target.
     if [ "${#t}" -le 4096 ] && { { [ "$cw" -eq 0 ] && ! cmd_pos "$k"; } || redir_target "$k"; }; then
-      wabs=${t#"${t%%[!0-9<>&|]*}"}   # an attached redirect (>>bin/guard.sh): the path starts after the operator
+      # An attached redirect (>>bin/guard.sh, 2>>x): the path starts after the operator. Only strip when there is an
+      # operator, so a path that starts with digits (7/bin/guard.sh through a symlink named 7) is kept whole.
+      case "$t" in [0-9]*[\<\>]* | [\<\>\&\|]*) wabs=${t#"${t%%[!0-9<>&|]*}"} ;; *) wabs=$t ;; esac
       if [ -n "$wabs" ]; then
         write_target_phys "$wabs"; wabs=$WPHYS
         if may_be_tamper "$wabs" && is_tamper_path "$wabs"; then

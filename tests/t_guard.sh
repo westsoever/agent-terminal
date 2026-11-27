@@ -139,7 +139,10 @@ gdeny "attached relative redirect to the guard, cwd = kit" "$KIT" 'echo x >>bin/
 gdeny "relative write to the guard, cwd = kit/bin" "$KIT/bin" 'echo x >> guard.sh'
 gdeny "cp over lib.sh, cwd = kit/bin" "$KIT/bin" 'cp /tmp/x lib.sh'
 gdeny "relative write after cd into the kit" "$R" "cd $KIT && echo x >> bin/guard.sh"
-ln -s "$KIT" "$WORK/zz"; ln -s /tmp "$WORK/tlink"; ln -s "$KIT/bin/guard.sh" "$WORK/gl"
+ln -s "$KIT" "$WORK/zz"; ln -s "$KIT" "$WORK/7"; ln -s /tmp "$WORK/tlink"; ln -s "$KIT/bin/guard.sh" "$WORK/gl"
+gdeny "write through a kit alias whose name starts with a digit" "$WORK" 'echo x >> 7/bin/guard.sh'
+gdeny "tee through a kit alias whose name starts with a digit" "$WORK" 'echo x | tee 7/bin/guard.sh'
+gdeny "attached fd redirect to the guard, cwd = kit" "$KIT" 'echo x 2>>bin/guard.sh'
 gdeny "write through an existing file symlink to the guard" "$WORK" 'echo x >> gl'
 gdeny "write through an existing symlink alias of the kit" "$WORK" 'echo x >> zz/bin/guard.sh'
 gdeny "sed -i through an existing symlink alias of the kit" "$WORK" 'sed -i "" s/a/b/ zz/bin/lib.sh'
