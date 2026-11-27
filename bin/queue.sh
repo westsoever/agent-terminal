@@ -47,6 +47,9 @@ set -euo pipefail
 # process to the first ancestor that has one; a run with no tty (the watcher, launchd, claude -p) does nothing.
 # park/back/forget find the tty at once, then do the window work in the background so a hook never waits on it.
 [ "${AGENT_TERMINAL_LEARNER:-${KACHING_LEARNER:-${CHING_LEARNER:-}}}" != 1 ] || exit 0
+# Terminal.app and Ghostty are driven through osascript (queue-term.js): off macOS every command is a no-op (exit 0, no
+# output), as with queue=off. QUEUE_TERM, a helper that replaces osascript (the tests), keeps it working anywhere.
+[ -n "${QUEUE_TERM:-}" ] || [ "$(uname -s)" = Darwin ] || exit 0
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"

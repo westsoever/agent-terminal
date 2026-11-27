@@ -90,7 +90,11 @@ case "$MODE" in
     for d in $DIRS; do
       [ -d "$d/.git" ] || continue
       # one sync per repo at a time: many sessions end together
-      lockf -s -t 120 "$d/.git/state-sync.lock" "$SELF" _locked "$d" || rc=1
+      if command -v lockf >/dev/null; then
+        lockf -s -t 120 "$d/.git/state-sync.lock" "$SELF" _locked "$d" || rc=1
+      else # Linux: util-linux flock
+        flock -w 120 "$d/.git/state-sync.lock" "$SELF" _locked "$d" || rc=1
+      fi
     done
     exit $rc ;;
   init)

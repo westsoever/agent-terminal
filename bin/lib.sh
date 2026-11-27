@@ -138,7 +138,23 @@ sign() { # sign a b c... -> sha256 of "a|b|c|<secret>"
   printf '%s|%s' "$*" "$(secret)" | shasum -a 256 | cut -d' ' -f1
 }
 
-file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+# file_mtime FILE: its modification time as epoch seconds, 0 when it cannot be read. BSD stat (macOS) is tried first and
+# gives a clean integer in one call. On GNU coreutils `stat -f` means filesystem status: it can print a block of text
+# and even exit 0, so only an all-digit answer counts; anything else falls through to GNU `stat -c %Y`.
+file_mtime() {
+  local m
+  m=$(stat -f %m "$1" 2>/dev/null) || m=""
+  case "$m" in ''|*[!0-9]*) m=$(stat -c %Y "$1" 2>/dev/null) || m="" ;; esac
+  case "$m" in ''|*[!0-9]*) m=0 ;; esac
+  printf '%s\n' "$m"
+}
+
+# epoch_date EPOCH +FORMAT: that epoch in local time, e.g. epoch_date 1700000000 +%H; prints nothing when it cannot be
+# told. `date -r EPOCH` is BSD (macOS); on GNU date `-r` takes a FILE and the epoch needs `-d @EPOCH`. Each is wrong
+# on the other system (BSD `-d` is a DST flag), so GNU is told apart first: BSD date rejects --version.
+epoch_date() {
+  if date --version >/dev/null 2>&1; then date -d "@$1" "$2" 2>/dev/null; else date -r "$1" "$2" 2>/dev/null; fi
+}
 
 # ev KIND [DATA_JSON]: append one line to $AGENT_HOME/events.jsonl, the input contract for the Phase 6
 # learning loop. Uses SID NAME CWD when set. Strings in DATA are cut to 300 chars; a line over 1 KB keeps

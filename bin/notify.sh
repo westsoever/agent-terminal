@@ -9,8 +9,9 @@
 # per-session cooldown instead, NOTIFY_HANDOFF_COOLDOWN_MINS (120).
 # Hook usage reads hook JSON on stdin (cwd, session_id); works in any folder, repo or not. The folder /
 # repo name is always in the title. Delivery: terminal-notifier (click activates the Claude app), else
-# osascript. Env: NOTIFY_CWD NOTIFY_SESSION NOTIFY_ACTIVATE NOTIFY_DRY_RUN NOTIFY_LOG NOTIFY_NOW (epoch)
-# NOTIFY_TERMINAL_NOTIFIER NOTIFY_OSASCRIPT NOTIFY_IDLE_SUPPRESS (900 s) NOTIFY_PUSH_DONE AGENT_HOME
+# osascript, else notify-send (Linux); with none of them the alert is logged but not shown.
+# Env: NOTIFY_CWD NOTIFY_SESSION NOTIFY_ACTIVATE NOTIFY_DRY_RUN NOTIFY_LOG NOTIFY_NOW (epoch)
+# NOTIFY_TERMINAL_NOTIFIER NOTIFY_OSASCRIPT NOTIFY_NOTIFY_SEND NOTIFY_IDLE_SUPPRESS (900 s) NOTIFY_PUSH_DONE AGENT_HOME
 set -euo pipefail
 # A learner model call (learn_model_call sets AGENT_TERMINAL_LEARNER=1) never notifies: no log line, no popup, no .last stamp.
 [ "${AGENT_TERMINAL_LEARNER:-${KACHING_LEARNER:-${CHING_LEARNER:-}}}" != 1 ] || exit 0
@@ -74,13 +75,18 @@ printf '%s\n' "$NOW" >"$LAST"
 LOG=${NOTIFY_LOG:-$AGENT_HOME/notify.log}
 TN=${NOTIFY_TERMINAL_NOTIFIER:-terminal-notifier}
 OSA=${NOTIFY_OSASCRIPT:-osascript}
+NS=${NOTIFY_NOTIFY_SEND:-notify-send}
 
 if [ -n "${NOTIFY_DRY_RUN:-}" ]; then
   METHOD=dry-run
 elif command -v "$TN" >/dev/null 2>&1; then
   METHOD=terminal-notifier
-else
+elif command -v "$OSA" >/dev/null 2>&1; then
   METHOD=osascript
+elif command -v "$NS" >/dev/null 2>&1; then
+  METHOD=notify-send
+else
+  METHOD=none
 fi
 
 case "$KIND" in
@@ -97,8 +103,8 @@ WHY=""
 put() { printf '%s\n' "$2" >"$1.$$" && mv -f "$1.$$" "$1"; }   # file value: a reader never sees it empty
 budget_ok() { # 0 when a budgeted alert may go out now (and books it); else sets WHY
   local hour used last file
-  hour=$(date -r "$NOW" +%H 2>/dev/null || true); hour=${hour#0}
-  # no readable hour (a date without BSD -r on PATH): the quiet-hours check cannot run, so do not send
+  hour=$(epoch_date "$NOW" +%H || true); hour=${hour#0}
+  # no readable hour (a date that is neither BSD nor GNU on PATH): the quiet-hours check cannot run, so do not send
   case "$hour" in ''|*[!0-9]*) WHY=no-clock; return 1 ;; esac
   if [ "$hour" -lt "${NOTIFY_QUIET_END:-9}" ] || [ "$hour" -ge "${NOTIFY_QUIET_START:-21}" ]; then WHY=quiet-hours; return 1; fi
   # handoff is rare (once per crossing of 80%) and actionable: no daily count and not the shared cooldown,
@@ -110,7 +116,7 @@ budget_ok() { # 0 when a budgeted alert may go out now (and books it); else sets
     put "$file" "$NOW"
     return 0
   fi
-  file="$AGENT_HOME/notify/budget-$(date -r "$NOW" +%Y-%m-%d)"
+  file="$AGENT_HOME/notify/budget-$(epoch_date "$NOW" +%Y-%m-%d)"
   used=$(cat "$file" 2>/dev/null || echo 0); case "$used" in ''|*[!0-9]*) used=0 ;; esac
   if [ "$used" -ge "${NOTIFY_BUDGET:-4}" ]; then WHY=daily-budget; return 1; fi
   last=$(cat "$AGENT_HOME/notify/$SESSION.budgeted" 2>/dev/null || echo 0); case "$last" in ''|*[!0-9]*) last=0 ;; esac
@@ -126,8 +132,10 @@ case "$CLASS" in
   # booked under a lock: two alerts at once read the same count and both went out
   budgeted) if ! with_lock "$AGENT_HOME/notify/.budget.lock" budget_ok; then METHOD="suppressed:${WHY:-lock-busy}"; OUTCOME=suppressed; fi ;;
 esac
+# nothing to show it with (no terminal-notifier, osascript or notify-send): logged, but not counted as delivered
+if [ "$METHOD" = none ]; then OUTCOME=suppressed; WHY=no-notifier; fi
 
-printf '%s\t%s\t%s\t%s\n' "$(date -r "$NOW" '+%Y-%m-%d %H:%M:%S')" "$METHOD" "$TITLE" "$MSG" >>"$LOG"
+printf '%s\t%s\t%s\t%s\n' "$(epoch_date "$NOW" '+%Y-%m-%d %H:%M:%S')" "$METHOD" "$TITLE" "$MSG" >>"$LOG"
 ev notify "$(jq -nc --arg k "$KIND" --arg o "$OUTCOME" --arg w "$WHY" '{kind:$k,outcome:$o,reason:$w}')"
 
 case "$METHOD" in
@@ -136,5 +144,8 @@ case "$METHOD" in
   osascript)
     # Title and message go in as argv so they are never parsed as AppleScript source.
     "$OSA" -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' -e 'end run' -- "$TITLE" "$MSG" >/dev/null 2>&1 || true ;;
+  notify-send)
+    # Also argv, after -- so a title that starts with a dash is not read as an option.
+    "$NS" -a agent-terminal -- "$TITLE" "$MSG" >/dev/null 2>&1 || true ;;
 esac
 exit 0
