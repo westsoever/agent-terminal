@@ -2,6 +2,7 @@
 # disk-map.sh (CLEAN): finds the candidates in a fake home, sizes them, and writes the report the page reads.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+skip_off_macos "disk-map.sh: deferred: not used on the Linux station"
 R="$WORK/root"; O="$WORK/out"
 big() { mkdir -p "$1" && dd if=/dev/zero of="$1/f" bs=1048576 count="$2" 2>/dev/null; }
 big "$R/.npm/_cacache" 12

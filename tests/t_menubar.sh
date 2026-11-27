@@ -6,6 +6,7 @@
 # build half is skipped with a note.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+skip_off_macos "menu bar app and its dash.sh counts (macOS only): deferred: not used on the Linux station"
 
 NOW=$(date +%s)
 mk_sess() { # sid state [updated] -> a registry entry

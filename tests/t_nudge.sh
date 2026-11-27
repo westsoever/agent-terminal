@@ -3,6 +3,7 @@
 # and (Task 4) the spoken note. The clock, the voice, the idle read and the conch are all faked.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+skip_off_macos "the watcher's spoken nudge: deferred: not used on the Linux station"
 # shellcheck source=../bin/lib.sh
 . "$BIN/lib.sh"
 W="$BIN/agent-terminal-watch.sh"

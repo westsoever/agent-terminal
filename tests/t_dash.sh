@@ -2,6 +2,7 @@
 # dash.sh: machine-wide discovery across unrelated repos, plain folders and ~; --speak.
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+skip_off_macos "dash.sh: deferred: not used on the Linux station"
 
 NOW=$(date +%s)
 reg() { # sid cwd state [updated]

@@ -244,6 +244,9 @@ status: working
 - (none)
 EOS
 chmod 600 "$WORK/r1/.agent/STATE.md"
+# The voice dispatcher is macOS only (deferred on the Linux station): relay-log.sh's writes are checked on macOS alone.
+# Its refusals below run everywhere.
+if on_macos; then
 out=$("$RELAY" "$WORK/r1/.agent" yes 'tell miso-app to run the tests again' 2>&1); rc=$?
 assert_eq "relay-log: exits 0" "0" "$rc"
 S1=$(cat "$WORK/r1/.agent/STATE.md")
@@ -270,6 +273,9 @@ assert_not_contains "relay-log: no escape byte reaches the file" "$(cat "$WORK/r
 "$RELAY" "$WORK/r1/.agent" yes "$(head -c 900 /dev/zero | tr '\0' z)" >/dev/null 2>&1
 longest=$(awk '{ if (length($0) > m) m = length($0) } END { print m }' "$WORK/r1/.agent/STATE.md")
 assert_eq "relay-log: a long text is cut so a line stays under 400 characters" "ok" "$([ "$longest" -lt 400 ] && echo ok || echo "$longest")"
+else
+  echo "t_dispatcher: relay-log.sh writes (voice dispatcher, macOS only): deferred: not used on the Linux station" >>"$T_ROOT/skipped.t_dispatcher"
+fi
 # refusals: nothing is written anywhere else
 before=$(cd "$WORK" && find . -type f -newer "$WORK/outside.txt" | sort | tr '\n' ' ')
 assert_fails "relay-log: a text-less call is refused" "$RELAY" "$WORK/r1/.agent" yes ""
@@ -290,7 +296,7 @@ assert_fails "relay-log: no arguments is a usage error" "$RELAY"
 after=$(cd "$WORK" && find . -type f -newer "$WORK/outside.txt" | sort | tr '\n' ' ')
 assert_eq "relay-log: refused calls left no new file behind" "$before" "$after"
 assert_eq "relay-log: no temp file is left in the state dir" "STATE.md" "$(find "$WORK/r1/.agent" -type f -exec basename {} \; | tr '\n' ' ' | sed 's/ $//')"
-assert_contains "relay-log: each entry is an event too" "$(cat "$AGENT_HOME/events.jsonl")" '"kind":"relay"'
+on_macos && assert_contains "relay-log: each entry is an event too" "$(cat "$AGENT_HOME/events.jsonl")" '"kind":"relay"'   # the writes are macOS only, above
 
 # ---------------- settings template and the install path ----------------
 ST="$DISP/settings.json"
