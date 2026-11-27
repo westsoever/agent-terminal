@@ -36,6 +36,7 @@ set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
+at_userland   # GNU or BSD date and stat, told once for the date helpers below
 umask 077
 
 usage() { sed -n '2,/^# Env:/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
@@ -53,24 +54,24 @@ done
 
 NOW=${LEARN_NOW:-}
 case "$NOW" in ''|*[!0-9]*) NOW=$(date +%s) ;; esac
-at_noon() { # DAY [-v+Nd] +FMT: DAY at local noon (DST-safe), shifted, formatted (BSD date: -v before the date)
-  if [ $# -eq 3 ]; then date -j "$2" -f "%Y-%m-%d %H:%M:%S" "$1 12:00:00" "$3"; else date -j -f "%Y-%m-%d %H:%M:%S" "$1 12:00:00" "$2"; fi
+at_noon() { # DAY [N] +FMT: DAY at local noon (DST-safe), shifted by N days, formatted
+  if [ $# -eq 3 ]; then day_shift "$1" "$2" "$3"; else date_parse '%Y-%m-%d %H:%M:%S' "$1 12:00:00" "$2"; fi
 }
 if [ -n "$WEEK" ]; then
   case "$WEEK" in [0-9][0-9][0-9][0-9]-W[0-9][0-9]) ;; *) bad_usage "--week must look like 2026-W42 (got '$WEEK')" ;; esac
   y=${WEEK%%-W*}; w=$((10#${WEEK##*-W}))
   # ISO week 1 holds January 4: its Monday plus (w - 1) weeks
   u4=$(at_noon "$y-01-04" +%u)
-  MON=$(at_noon "$y-01-04" -v+$(((w - 1) * 7 - (u4 - 1)))d +%Y-%m-%d)
+  MON=$(at_noon "$y-01-04" $(((w - 1) * 7 - (u4 - 1))) +%Y-%m-%d)
   [ "$(at_noon "$MON" +%G-W%V)" = "$WEEK" ] || bad_usage "--week is not a real ISO week: $WEEK"
 else
-  u=$(date -r "$NOW" +%u)
-  MON=$(date -r "$NOW" -v-$((u - 1 + 7))d +%Y-%m-%d)
+  u=$(epoch_date "$NOW" +%u)
+  MON=$(at_noon "$(epoch_date "$NOW" +%Y-%m-%d)" $((1 - u - 7)) +%Y-%m-%d)
   WEEK=$(at_noon "$MON" +%G-W%V)
 fi
-SUN=$(at_noon "$MON" -v+6d +%Y-%m-%d)
-W2MON=$(at_noon "$MON" -v-14d +%Y-%m-%d)   # a rejection streak that began before this day spans 4 or more weeks
-PMON=$(at_noon "$MON" -v-7d +%Y-%m-%d)
+SUN=$(at_noon "$MON" 6 +%Y-%m-%d)
+W2MON=$(at_noon "$MON" -14 +%Y-%m-%d)   # a rejection streak that began before this day spans 4 or more weeks
+PMON=$(at_noon "$MON" -7 +%Y-%m-%d)
 PREV=$(at_noon "$PMON" +%G-W%V)
 TZNAME=$(at_noon "$MON" +%Z)
 
@@ -105,7 +106,7 @@ add_state() { # file key cwd
   local ne day
   ne=$(checkpoint_get "$1" not_examined)
   [ -n "$ne" ] || return 0
-  day=$(date -r "$(file_mtime "$1")" +%Y-%m-%d)
+  day=$(epoch_date "$(file_mtime "$1")" +%Y-%m-%d)
   jq -nc --arg sid "$2" --arg cwd "$3" --arg day "$day" --arg t "$ne" '{sid:$sid, cwd:$cwd, day:$day, text:$t, src:"state"}' \
     >>"$TMP/state-items"
 }
@@ -192,7 +193,7 @@ for f in "$ROOT"/archive/*.md; do
   id=$(proposal_get "$f" id); [ -n "$id" ] || { id=${f##*/}; id=${id%%.*}; }
   m=$(file_mtime "$f")
   jq -nc --arg id "$id" --arg c "$(proposal_get "$f" component)" --arg s "$(proposal_get "$f" status)" \
-    --arg day "$(date -r "$m" +%Y-%m-%d)" --arg w "$(date -r "$m" +%G-W%V)" '{id:$id, component:$c, status:$s, day:$day, w:$w}' >>"$TMP/archive"
+    --arg day "$(epoch_date "$m" +%Y-%m-%d)" --arg w "$(epoch_date "$m" +%G-W%V)" '{id:$id, component:$c, status:$s, day:$day, w:$w}' >>"$TMP/archive"
 done
 # shellcheck disable=SC2016 # jq source
 jq -R -n -c --slurpfile a "$TMP/archive" --arg sun "$SUN" "$WEEKOF"'
@@ -343,7 +344,7 @@ def stats($w):
 '
 jq -n -r --slurpfile p "$TMP/prompts" --slurpfile e "$TMP/events" --slurpfile l "$TMP/ledger-out" \
   --slurpfile d "$TMP/decisions" --arg w2mon "$W2MON" --arg week "$WEEK" --arg prev "$PREV" --arg mon "$MON" --arg sun "$SUN" --arg tz "$TZNAME" --arg home "$HOME" \
-  --arg gen "$(date -u -r "$NOW" +%Y-%m-%dT%H:%M:%SZ)" "$REPORT_JQ" >"$TMP/report" \
+  --arg gen "$(epoch_date -u "$NOW" +%Y-%m-%dT%H:%M:%SZ)" "$REPORT_JQ" >"$TMP/report" \
   || die "cannot build the report"
 
 tmp="$ROOT/.report-$WEEK.tmp.$$"

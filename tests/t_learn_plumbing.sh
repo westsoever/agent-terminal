@@ -35,7 +35,7 @@ assert_eq "learn: no components: four learn_run missing events, in order" "extra
 assert_contains "learn: prints one summary line" "$out" "learn: weekly run: extract=missing corrections=missing skills=missing report=missing"
 assert_file "learn: writes .work/learn.log" "$P/.work/learn.log"
 assert_contains "learn: the log names the missing file" "$(cat "$P/.work/learn.log")" "learn-corrections.sh does not exist"
-assert_eq "learn: proposals root is 0700" "700" "$(stat -f %Lp "$P")"
+assert_eq "learn: proposals root is 0700" "700" "$(t_mode "$P")"
 assert_eq "learn: the lock is gone after the run" "" "$(ls -d "$P/.work/learn.lock" 2>/dev/null)"
 
 # all four present: order, cwd, environment
@@ -277,10 +277,10 @@ not_approved "session checks"
 out=$("$CP" reject lesson-short-commits "not my style" 2>&1); rc=$?
 assert_eq "cli: reject exits 0" "0" "$rc"
 assert_eq "cli: reject appends the fingerprint and the reason" "$(proposal_fingerprint "short commits") not my style" "$(cat "$P/rejected.txt")"
-assert_eq "cli: rejected.txt is 0600" "600" "$(stat -f %Lp "$P/rejected.txt")"
+assert_eq "cli: rejected.txt is 0600" "600" "$(t_mode "$P/rejected.txt")"
 assert_no_file "cli: reject moves the file away" "$P/lesson-short-commits.md"
 assert_eq "cli: the archived copy says rejected" "rejected" "$(proposal_get "$P/archive/lesson-short-commits.md" status)"
-assert_eq "cli: the archived copy is 0600" "600" "$(stat -f %Lp "$P/archive/lesson-short-commits.md")"
+assert_eq "cli: the archived copy is 0600" "600" "$(t_mode "$P/archive/lesson-short-commits.md")"
 assert_eq "cli: reject emits a proposal event" '{"id":"lesson-short-commits","action":"rejected"}' "$(jq -c 'select(.kind == "proposal") | .data' "$EVF" | tail -1)"
 out=$(jq -nc --arg fp "$(proposal_fingerprint "short commits")" '{component: "lessons", fingerprint: $fp, sessions: 9, days: 9, target: "x", proposal: "again", evidence: []}' | proposal_write lesson-short-commits-2.md)
 assert_contains "cli: a rejected fingerprint is not proposed again" "$out" "skipped rejected"
@@ -288,7 +288,7 @@ assert_contains "cli: reject of a decided id says so" "$("$CP" reject lesson-sho
 assert_contains "cli: list --all shows decided ones with their status" "$("$CP" list --all)" "[rejected] lesson lesson-short-commits"
 
 # snooze: status snoozed:<date>, archived, event, blocks until then
-want=$(date -v+3d +%Y-%m-%d)
+want=$(date -v+3d +%Y-%m-%d 2>/dev/null || date -d '+3 days' +%Y-%m-%d)   # BSD, else GNU
 mkother skill other-loop "a > b > c" 3 "Another loop."
 out=$("$CP" snooze skill-other-loop 3); rc=$?
 assert_eq "cli: snooze exits 0" "0" "$rc"
@@ -301,7 +301,7 @@ assert_not_contains "cli: list hides the snoozed one" "$("$CP" list)" "other-loo
 assert_eq "cli: snooze needs whole days" "2" "$("$CP" snooze skill-sync-rebase 0 >/dev/null 2>&1; echo $?)"
 assert_eq "cli: snooze rejects junk days" "2" "$("$CP" snooze skill-sync-rebase 3x >/dev/null 2>&1; echo $?)"
 # a snooze that ran out: the learner proposes it again, and deciding it again keeps both archived copies
-sed -i '' "s/^status: .*/status: snoozed:2000-01-01/" "$P/archive/skill-other-loop.md"
+perl -pi -e 's/^status: .*/status: snoozed:2000-01-01/' "$P/archive/skill-other-loop.md"
 out=$(jq -nc --arg fp "$(proposal_fingerprint "a > b > c")" '{component: "skills", fingerprint: $fp, sessions: 4, days: 3, target: "x", proposal: "Back again.", evidence: [], why_not_covered: "w"}' | proposal_write skill-other-loop.md)
 assert_contains "cli: an expired snooze is proposed again" "$out" "written"
 "$CP" reject skill-other-loop >/dev/null
@@ -367,7 +367,7 @@ if [ "$(uname)" = Darwin ] && printf '' | script -q /dev/null true >/dev/null 2>
   assert_eq "tty: rule approve, the person types the code: exits 0" "0" "$rc"
   assert_contains "tty: the code: the rule is in the target" "$(cat "$WORK/real-agents/CLAUDE.md")" "## Versions"
   assert_ok "tty: the code: the link stays a link" test -L "$HOME/.agents/CLAUDE.md"
-  assert_eq "tty: the code: the target keeps its mode" "640" "$(stat -f %Lp "$WORK/real-agents/CLAUDE.md")"
+  assert_eq "tty: the code: the target keeps its mode" "640" "$(t_mode "$WORK/real-agents/CLAUDE.md")"
   assert_eq "tty: the code: the old version is kept in archive/" "$ORIG_RULES" "$(cat "$P/archive/rule-no-version-bump.target-before")"
   assert_eq "tty: the code: archived as approved" "approved" "$(proposal_get "$P/archive/rule-no-version-bump.md" status)"
   assert_eq "tty: the code: proposal event" '{"id":"rule-no-version-bump","action":"approved"}' "$(jq -c 'select(.kind == "proposal") | .data' "$EVF" | tail -1)"

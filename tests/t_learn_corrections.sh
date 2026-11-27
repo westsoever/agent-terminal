@@ -112,7 +112,7 @@ assert_contains "golden: draft gets the version cluster" "$dp" '"pattern":"do no
 assert_contains "golden: draft gets the dates cluster" "$dp" '"pattern":"write dates as YYYY-MM-DD"'
 assert_not_contains "golden: the one-day pnpm cluster is not drafted" "$dp" "pnpm, not npm\""
 assert_eq "golden: every prompt is in the label cache" "17" "$(grep -c . "$P/.work/corrections-labels.jsonl")"
-assert_eq "golden: cache files are private" "600" "$(stat -f %Lp "$P/.work/corrections-labels.jsonl" 2>/dev/null || stat -c %a "$P/.work/corrections-labels.jsonl")"
+assert_eq "golden: cache files are private" "600" "$(t_mode "$P/.work/corrections-labels.jsonl")"
 assert_contains "golden: covered is logged" "$(cat "$P/.work/learn.log")" "covered: write dates as YYYY-MM-DD"
 assert_eq "golden: learn_run names the component and the .work cwd" "learn-corrections $AGENT_HOME/proposals/.work" \
   "$(grep '"kind":"learn_run"' "$AGENT_HOME/events.jsonl" | tail -n 1 | jq -r '"\(.name) \(.cwd)"')"
@@ -184,7 +184,7 @@ assert_eq "truncated: scanned counts what was not cached" "6" "$(run_field scann
 
 # hits go oldest first, whatever the file order (the newest line first here)
 fresh oldest
-tail -r "$FX/work/prompts.jsonl" >"$P/.work/prompts.jsonl"
+perl -e 'print reverse <>' "$FX/work/prompts.jsonl" >"$P/.work/prompts.jsonl"
 LEARN_MAX_SNIPPETS=1 "$LC"
 assert_contains "oldest first: the oldest hit is the one sent" "$(call_prompt corrections-classify)" \
   '"id":"a1000000-0000-4000-8000-00000000a001@2026-10-12T12:03:40.000Z"'

@@ -60,9 +60,9 @@ assert_not_contains "the learner's own .work run is not extracted" "$(cat "$WD/p
 assert_not_contains "the API_TOKEN value is redacted" "$(cat "$WD/prompts.jsonl")" "fixture-not-a-real-secret"
 assert_eq "events.jsonl: the 4 countable events" "learn_run prompt proposal stop_ok " \
   "$(jq -r .kind "$WD/events.jsonl" | sort | tr '\n' ' ')"
-assert_eq ".work is 0700" "700" "$(stat -f %Lp "$WD")"
+assert_eq ".work is 0700" "700" "$(t_mode "$WD")"
 assert_eq "every .work file is 0600" "600 600 600 600 600" \
-  "$(for f in prompts.jsonl toolseq.jsonl events.jsonl offsets extract-state.json; do stat -f %Lp "$WD/$f"; done | tr '\n' ' ' | sed 's/ $//')"
+  "$(for f in prompts.jsonl toolseq.jsonl events.jsonl offsets extract-state.json; do t_mode "$WD/$f"; done | tr '\n' ' ' | sed 's/ $//')"
 assert_eq "offsets: every counted transcript is read to its end" "$(wc -c <"$A2" | tr -d ' ')" \
   "$(awk -F'\t' -v p="$A2" '$1 == "path" && $7 == p { print $4 }' "$WD/offsets")"
 assert_eq "offsets: a skipped project directory is never listed" "" \
@@ -154,7 +154,7 @@ run_x
 assert_eq "rebuild: prompts.jsonl = golden" "$(canon "$FX/work/prompts.jsonl")" "$(canon "$WD/prompts.jsonl")"
 assert_eq "rebuild: toolseq.jsonl = golden" "$(canon "$FX/work/toolseq.jsonl")" "$(canon "$WD/toolseq.jsonl")"
 # offsets from another run than the state (a crash between writes): everything is read again, nothing doubled
-sed -i '' '1s/.*/# gen 999/' "$WD/offsets"
+perl -pi -e '$_ = "# gen 999\n" if $. == 1' "$WD/offsets"
 run_x
 assert_eq "generation mismatch: rebuilt, no duplicates" "$(canon "$FX/work/prompts.jsonl")" "$(canon "$WD/prompts.jsonl")"
 

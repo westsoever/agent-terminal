@@ -113,7 +113,7 @@ assert_eq "e2e: the hook logged fail, pass and the checkpoint" "fail pass fix" \
   "$(jq -r 'select(.sid=="e2e-1") | if .kind=="tests" then .data.outcome elif .kind=="checkpoint" then .data.task_type else empty end' "$EVF" | tr '\n' ' ' | sed 's/ $//')"
 H="$WORK/e2e-home"; mkdir -p "$H"
 jq -c 'select(.sid=="e2e-1") | .cwd = "/Users/fixture/code/e2e"' "$EVF" >"$H/events.jsonl"
-week=$(TZ=UTC date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$(jq -r 'select(.kind=="tests") | .ts' "$H/events.jsonl" | head -1)" +%G-W%V)
+week=$(t_udate "$(t_epoch -u '%Y-%m-%dT%H:%M:%SZ' "$(jq -r 'select(.kind=="tests") | .ts' "$H/events.jsonl" | head -1)")" +%G-W%V)
 AGENT_HOME="$H" CLAUDE_DIR="$WORK/e2e-claude" TZ=UTC "$BIN/learn-extract.sh" >/dev/null 2>"$WORK/e2e.err" || fail "e2e: extractor ran" "$(cat "$WORK/e2e.err")"
 AGENT_HOME="$H" CLAUDE_DIR="$WORK/e2e-claude" TZ=UTC "$BIN/learn-report.sh" --week "$week" >/dev/null 2>>"$WORK/e2e.err" || fail "e2e: report ran" "$(cat "$WORK/e2e.err")"
 rep=$(cat "$H/proposals/report-$week.md" 2>/dev/null)

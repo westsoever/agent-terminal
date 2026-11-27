@@ -256,12 +256,15 @@ public_note() {
     fi
   done
 }
-# patch_applies TARGET_FILE PATCH_FILE: true when the diff applies cleanly (-p1) to a copy of TARGET_FILE
+# patch_applies TARGET_FILE PATCH_FILE: true when the diff applies cleanly (-p1) to a copy of TARGET_FILE. Both GNU and
+# Apple patch accept up to 2 wrong context lines per side by default (fuzz 2). On Linux GNU patch gets -F0, so such a
+# draft is rejected there; macOS keeps the default and still accepts it (decided 2026-11-27: stricter on Linux only).
 patch_applies() {
-  local d="$TMPD/patchcheck"
+  local d="$TMPD/patchcheck" fz=''
+  case "$(patch --version 2>/dev/null || true)" in 'GNU patch'*) fz=-F0 ;; esac
   rm -rf "$d"; mkdir -p "$d"
   [ ! -f "$1" ] || cp "$1" "$d/${1##*/}"
-  patch -p1 -s -t -N --dry-run -d "$d" <"$2" >/dev/null 2>&1
+  patch ${fz:+"$fz"} -p1 -s -t -N --dry-run -d "$d" <"$2" >/dev/null 2>&1
 }
 
 : >"$TMPD/pending"
