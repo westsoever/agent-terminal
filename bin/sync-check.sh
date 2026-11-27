@@ -34,6 +34,7 @@ set -euo pipefail
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SELF_DIR/lib.sh"
+at_userland   # GNU or BSD date and stat, told once for the date helpers below
 
 QUIET=0; NOFETCH=${SYNC_NO_FETCH:-}
 while [ $# -gt 0 ]; do
@@ -374,8 +375,8 @@ else
   fsum="$fsum."
 fi
 {
-  printf 'generated: %s\n' "$(date -u -r "$NOW" +%Y-%m-%dT%H:%M:%SZ)"
-  printf 'Git sync check, %s local time: %s. %s\n\n' "$(date -r "$NOW" '+%Y-%m-%d %H:%M')" "$summary" "$fsum"
+  printf 'generated: %s\n' "$(epoch_date -u "$NOW" +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'Git sync check, %s local time: %s. %s\n\n' "$(epoch_date "$NOW" '+%Y-%m-%d %H:%M')" "$summary" "$fsum"
   sort -t$'\t' -k1,1nr -k2,2n "$TMP/order" | while IFS=$'\t' read -r _ i; do cat "$TMP/sec.$i"; done
   if [ -s "$TMP/clean" ]; then printf 'clean: %s\n' "$(awk '{ s = s (s == "" ? "" : ", ") $0 } END { print s }' "$TMP/clean")"; else printf 'clean: (none)\n'; fi
 } >"$SNAP_TMP"
@@ -394,7 +395,7 @@ done
 banner() {
   local day stamp before after method msg
   [ "$FIND_N" -gt 0 ] && [ "$MAX_BAN" -ge "$BANNER_SECS" ] || return 0
-  day=$(date -r "$NOW" +%Y-%m-%d)
+  day=$(epoch_date "$NOW" +%Y-%m-%d)
   stamp="$AGENT_HOME/sync-banner.day"
   [ "$(cat "$stamp" 2>/dev/null || true)" != "$day" ] || return 0
   nlog=${NOTIFY_LOG:-$AGENT_HOME/notify.log}

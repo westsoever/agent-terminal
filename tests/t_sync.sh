@@ -9,7 +9,7 @@ export AGENT_TERMINAL_INCLUDE_SANDBOX=1   # the fixtures live under /tmp, which 
 export SYNC_NO_FETCH=1           # offline unless a test uses scf (fetch on)
 S="$BIN/sync-check.sh"
 NOW=$(date +%s)
-NOON=$(date -j -f '%Y-%m-%d %H:%M:%S' "$(date +%Y-%m-%d) 12:00:00" +%s)   # inside the banner window (09:00-21:00)
+NOON=$(t_epoch '%Y-%m-%d %H:%M:%S' "$(date +%Y-%m-%d) 12:00:00")   # inside the banner window (09:00-21:00)
 DAY=86400
 SPOKEN="$WORK/spoken.log"; : >"$SPOKEN"
 cat >"$WORK/speak-rec" <<EOF
@@ -114,7 +114,7 @@ assert_eq "no upstream: event counts its commits" "2" "$(evq noup1 '.data.no_ups
 
 # ---------- (c) uncommitted changes ----------
 R=$(mk dirty1); new_ah dirty; repos "$R"
-echo more >>"$R/README.md"; touch -t "$(date -r $((NOW - 3 * DAY)) +%Y%m%d%H%M.%S)" "$R/README.md"
+echo more >>"$R/README.md"; touch -t "$(t_date $((NOW - 3 * DAY)) +%Y%m%d%H%M.%S)" "$R/README.md"
 echo s >"$R/staged.txt"; git -C "$R" add staged.txt
 echo u >"$R/untracked.txt"
 mkdir -p "$R/.agent"; echo x >"$R/.agent/ignored.txt"      # .agent/ is git-excluded by mk_repo: not counted
@@ -351,7 +351,7 @@ state() { # repo -> everything a sync check must leave alone (remote-tracking re
     git -C "$r" config --list
     shasum "$gd/index" | cut -d' ' -f1
     (cd "$r" && find . -path ./.git -prune -o -type f -print | sort | xargs shasum)
-    (cd "$r" && find . -path ./.git -prune -o -type f -print | sort | xargs stat -f '%N %m')
+    (cd "$r" && find . -path ./.git -prune -o -type f -print | sort | xargs perl -e 'printf "%s %d\n", $_, (stat $_)[9] for @ARGV')
     find "$gd" "$cd_" -name '*.lock'
   } | shasum | cut -d' ' -f1
 }
@@ -404,7 +404,7 @@ last=$(tail -1 "$AH/notify.log" 2>/dev/null || true)
 assert_contains "banner: names the repo count" "$last" "1 repo"
 assert_contains "banner: names the oldest age" "$last" "oldest 3d"
 assert_contains "banner: points at the inbox" "$last" "bin/dash.sh --inbox"
-assert_eq "banner: stamped with the local day" "$(date -r "$NOON" +%Y-%m-%d)" "$(cat "$AH/sync-banner.day" 2>/dev/null)"
+assert_eq "banner: stamped with the local day" "$(t_date "$NOON" +%Y-%m-%d)" "$(cat "$AH/sync-banner.day" 2>/dev/null)"
 SYNC_NOW=$((NOON + 3600)) sc --quiet
 rm -rf "$AH/notify"                                   # the notify budget and cooldown files are gone: only our stamp is left
 SYNC_NOW=$((NOON + 7200)) sc --quiet
