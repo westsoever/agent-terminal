@@ -133,6 +133,25 @@ tdeny "Edit tool on settings.json" Edit "$R" "$(jq -n --arg p "$HOME/.claude/set
 tdeny "Write tool into .git/hooks" Write "$R" "$(jq -n --arg p "$RP/.git/hooks/pre-push" '{file_path:$p,content:"exit 0"}')"
 tdeny "Edit tool on guard.sh via symlink path" Edit "$R" "$(jq -n --arg p "$CLAUDE_DIR/agent-terminal/bin/guard.sh" '{file_path:$p,old_string:"a",new_string:"b"}')"
 tallow "Edit tool on a normal file" Edit "$R" "$(jq -n --arg p "$RP/README.md" '{file_path:$p,old_string:"a",new_string:"b"}')"
+# a write target is resolved whatever its name: a relative path in the kit, or an alias of the kit dir
+gdeny "relative write to the guard, cwd = kit" "$KIT" 'echo x >> bin/guard.sh'
+gdeny "attached relative redirect to the guard, cwd = kit" "$KIT" 'echo x >>bin/guard.sh'
+gdeny "relative write to the guard, cwd = kit/bin" "$KIT/bin" 'echo x >> guard.sh'
+gdeny "cp over lib.sh, cwd = kit/bin" "$KIT/bin" 'cp /tmp/x lib.sh'
+gdeny "relative write after cd into the kit" "$R" "cd $KIT && echo x >> bin/guard.sh"
+ln -s "$KIT" "$WORK/zz"; ln -s /tmp "$WORK/tlink"; ln -s "$KIT/bin/guard.sh" "$WORK/gl"
+gdeny "write through an existing file symlink to the guard" "$WORK" 'echo x >> gl'
+gdeny "write through an existing symlink alias of the kit" "$WORK" 'echo x >> zz/bin/guard.sh'
+gdeny "sed -i through an existing symlink alias of the kit" "$WORK" 'sed -i "" s/a/b/ zz/bin/lib.sh'
+gdeny "link the kit dir to a new alias" "$WORK" "ln -s $KIT qq"
+gdeny "link the kit dir and write through the alias in one command" "$WORK" "ln -s $KIT /tmp/zz-at; echo x >> /tmp/zz-at/bin/guard.sh"
+gallow "relative write to bin/guard.sh in a non-kit cwd" "$P" 'mkdir -p bin && echo x >> bin/guard.sh'
+gallow "write through a symlink that points outside the kit" "$WORK" 'echo x >> tlink/at-gaps-probe.txt'
+gallow "kit README write keeps its verdict, cwd = kit" "$KIT" 'echo x >> README.md'
+gallow "cp between /tmp files, cwd = kit/bin" "$KIT/bin" 'cp /tmp/a /tmp/b'
+gallow "redirect to /tmp, cwd = kit/bin" "$KIT/bin" 'echo x > /tmp/out'
+gallow "normal /tmp write" "$R" 'echo x >> /tmp/at-gaps-probe.txt'
+gallow "symlink to another folder" "$WORK" "ln -s $P pl"
 tallow "Write tool on a normal new file" Write "$P" "$(jq -n --arg p "$P/notes.md" '{file_path:$p,content:"x"}')"
 
 # ---------- 4. vercel deploy, gh workflow run ----------

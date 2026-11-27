@@ -1142,13 +1142,67 @@ kit_name_glob() { # sets KIT_GLOB: the kit checkout's folder name as a case-inse
   done
 }
 
+WP_DIR=""; WP_PHYS=""
+write_target_phys() { # path -> WPHYS: absolute and physical like resolve_path (against SIM_CWD), but one resolve per
+  # directory, so a 2000-operand rm stays fast, and a symlink as the last part is followed (>> link-to-guard.sh)
+  local p=$1 part out="" oldifs d
+  # shellcheck disable=SC2088
+  case "$p" in "~") p=$HOME ;; "~/"*) p="$HOME/${p#"~/"}" ;; esac
+  case "$p" in /*) ;; *) p="$SIM_CWD/$p" ;; esac
+  oldifs=$IFS; IFS=/; set -f
+  for part in $p; do
+    case "$part" in ""|".") ;; "..") out=${out%/*} ;; *) out="$out/$part" ;; esac
+  done
+  set +f; IFS=$oldifs
+  if [ -z "$out" ]; then WPHYS=/; return 0; fi
+  if [ -L "$out" ] && [ ! -d "$out" ]; then
+    WPHYS=$(perl -MCwd -e 'my $r = Cwd::abs_path($ARGV[0]); print defined $r ? $r : $ARGV[0]' "$out"); return 0
+  fi
+  if [ -d "$out" ]; then WPHYS=$(resolve_path "$out" /); return 0; fi
+  d=${out%/*}; [ -n "$d" ] || d=/
+  if [ "$d" != "$WP_DIR" ]; then WP_DIR=$d; WP_PHYS=$(resolve_path "$d" /); fi
+  if [ "$WP_PHYS" = / ]; then WPHYS="/${out##*/}"; else WPHYS="$WP_PHYS/${out##*/}"; fi
+}
+may_be_tamper() { # physical path -> 1 when is_tamper_path cannot match it (no forks: it runs on every write target)
+  local r=1
+  shopt -s nocasematch
+  case "$1" in "$SELF_PHYS"|"$SELF_PHYS"/*|*/config|*/.claude/*|*hooks*|*/bin|*/bin/*) r=0 ;; esac
+  shopt -u nocasematch
+  return "$r"
+}
+is_kit_dir() { # physical path -> 0 when it is the kit checkout itself (any case: macOS volumes are case-insensitive)
+  local r=1
+  shopt -s nocasematch
+  case "$1" in "${SELF_PHYS%/*}") r=0 ;; esac
+  shopt -u nocasematch
+  return "$r"
+}
+
 tamper_bash() {
-  local k=0 t abs gabs mabs
+  local k=0 t abs gabs mabs wabs cw=1 isln=0
   kit_name_glob   # the checkout need not be called agent-terminal: a path through its folder name is checked too
+  if cmd_writes; then cw=0; fi   # once per segment: cmd_writes scans every token
+  base_of "${TOKS[$CP_LIMIT]:-}"; [ "$BASE" = ln ] && isln=1
   while [ "$k" -lt "$NT" ]; do
     ceiling
     t=${TOKS[$k]}
     case "$t" in -*) k=$((k + 1)); continue ;; esac
+    # A write target is resolved whatever its name, so a relative path inside the kit (cwd=<kit>: >>bin/guard.sh)
+    # or an existing symlink alias of the kit (/tmp/zz/bin/guard.sh) is checked too. The command word is not a
+    # target (cp in cwd=<kit>/bin is not <kit>/bin/cp), except after a split '>&', where k=0 is the redirect target.
+    if [ "${#t}" -le 4096 ] && { { [ "$cw" -eq 0 ] && ! cmd_pos "$k"; } || redir_target "$k"; }; then
+      wabs=${t#"${t%%[!0-9<>&|]*}"}   # an attached redirect (>>bin/guard.sh): the path starts after the operator
+      if [ -n "$wabs" ]; then
+        write_target_phys "$wabs"; wabs=$WPHYS
+        if may_be_tamper "$wabs" && is_tamper_path "$wabs"; then
+          emit_deny "editing hooks, settings or the guard itself ($t) would disable the guardrails. Ask the user."
+        fi
+        # ln -s <kit> /tmp/zz makes an alias that a later write (/tmp/zz/bin/guard.sh) reaches without naming the kit
+        if [ "$isln" -eq 1 ] && is_kit_dir "$wabs"; then
+          emit_deny "a link to the agent-terminal kit ($t) is a way around the guard's own protection. Ask the user."
+        fi
+      fi
+    fi
     abs=""
     # any case: macOS volumes are case-insensitive, so .claude/Settings.JSON is settings.json
     case "$t" in *[Hh][Oo][Oo][Kk][Ss]*|*[Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss]*|*[Cc][Hh][Ii][Nn][Gg]*|*[Aa][Gg][Ee][Nn][Tt]-[Tt][Ee][Rr][Mm][Ii][Nn][Aa][Ll]*|*.[Ss][Qq][Ll])
